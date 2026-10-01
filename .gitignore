@@ -1,1 +1,10 @@
-
+**/bin/
+**/obj/
+.vs/
+.vscode/
+TestResults/
+*.user
+*.suo
+*.docx
+*.docm
+!tests/fixtures/synthetic/*.docx
