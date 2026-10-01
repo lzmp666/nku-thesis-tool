@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThesisEngine.Core", "src\ThesisEngine.Core\ThesisEngine.Core.csproj", "{140E3D3A-9963-4D88-979B-D48D897D512E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThesisEngine.Cli", "src\ThesisEngine.Cli\ThesisEngine.Cli.csproj", "{D8155977-3173-4746-8772-DF71E4076EEA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ThesisEngine.Tests", "tests\ThesisEngine.Tests\ThesisEngine.Tests.csproj", "{2F327F50-1A29-44A4-9E05-929D36D1C76C}"
+EndProject
+Global
+ GlobalSection(SolutionConfigurationPlatforms) = preSolution
+  Debug|Any CPU = Debug|Any CPU
+  Release|Any CPU = Release|Any CPU
+ EndGlobalSection
+ GlobalSection(ProjectConfigurationPlatforms) = postSolution
+  {140E3D3A-9963-4D88-979B-D48D897D512E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {140E3D3A-9963-4D88-979B-D48D897D512E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {140E3D3A-9963-4D88-979B-D48D897D512E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {140E3D3A-9963-4D88-979B-D48D897D512E}.Release|Any CPU.Build.0 = Release|Any CPU
+  {D8155977-3173-4746-8772-DF71E4076EEA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {D8155977-3173-4746-8772-DF71E4076EEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {D8155977-3173-4746-8772-DF71E4076EEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {D8155977-3173-4746-8772-DF71E4076EEA}.Release|Any CPU.Build.0 = Release|Any CPU
+  {2F327F50-1A29-44A4-9E05-929D36D1C76C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+  {2F327F50-1A29-44A4-9E05-929D36D1C76C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+  {2F327F50-1A29-44A4-9E05-929D36D1C76C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+  {2F327F50-1A29-44A4-9E05-929D36D1C76C}.Release|Any CPU.Build.0 = Release|Any CPU
+ EndGlobalSection
+EndGlobal

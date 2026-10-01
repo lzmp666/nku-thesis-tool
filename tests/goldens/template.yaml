@@ -1,0 +1,12 @@
+sample_id: SYN-001
+rule_set_version: "0.1.0"
+review_status: pending
+reviewed_by: null
+diagnostics: []
+patches: []
+unsupported_scopes: []
+after:
+  diagnostics: []
+  patches: []
+  content_preserved: null
+notes: "由人工核验，不能把空列表当已合规；按场景补充 rule_id/location/expected/actual/fix。"

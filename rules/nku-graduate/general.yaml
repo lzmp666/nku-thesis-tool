@@ -1,0 +1,4 @@
+schema_version: "0.1.0"
+status: draft
+# 不猜测学校标准。核验官方条文、适用年级/学院后，通过 PR 加入规则。
+rules: []

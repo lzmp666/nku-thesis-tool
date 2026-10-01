@@ -1,0 +1,55 @@
+# JSON Schema expressed as YAML; version 0.1.0, draft contract
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Thesis rule set
+type: object
+additionalProperties: false
+required: [schema_version, status, rules]
+properties:
+  schema_version: {const: "0.1.0"}
+  status: {enum: [draft, approved]}
+  rules:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, scope, property, expect, severity, fix, source]
+      properties:
+        id: {type: string, pattern: "^NKU-[A-Z]+-[0-9]{3}$"}
+        scope:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {enum: [body, heading, section]}
+        property: {enum: [font, font_size, line_spacing, page_margins]}
+        expect:
+          type: object
+          additionalProperties: false
+          required: [value, unit]
+          properties:
+            value:
+              oneOf:
+                - {type: string, minLength: 1}
+                - {type: number, exclusiveMinimum: 0}
+                - type: object
+                  additionalProperties: false
+                  required: [top, bottom, left, right]
+                  properties:
+                    top: {type: number, minimum: 0}
+                    bottom: {type: number, minimum: 0}
+                    left: {type: number, minimum: 0}
+                    right: {type: number, minimum: 0}
+            unit: {enum: [name, pt, multiple, cm]}
+        severity: {enum: [blocking, warning, info]}
+        fix: {enum: [auto, suggest, manual]}
+        source:
+          type: object
+          additionalProperties: false
+          required: [title, url, version, locator, quote, verified_on]
+          properties:
+            title: {type: string, minLength: 1}
+            url: {type: string, format: uri}
+            version: {type: string, minLength: 1}
+            locator: {type: string, minLength: 1}
+            quote: {type: string, minLength: 1}
+            verified_on: {type: string, format: date}
+# 跨字段语义见 rule-guide；schema 通过不等于已验证官方出处
