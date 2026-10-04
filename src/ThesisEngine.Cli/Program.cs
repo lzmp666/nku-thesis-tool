@@ -13,7 +13,7 @@ try
     Console.WriteLine($"Parts: {document.PartCount}. 占位模式，尚未检测格式；不能据此判断合规。");
     return 0;
 }
-catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or XmlException or NotSupportedException)
+catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException or XmlException or NotSupportedException)
 {
     Console.Error.WriteLine($"Unable to load document: {ex.Message}");
     return 1;
