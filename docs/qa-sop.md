@@ -73,3 +73,7 @@ try {
 
 ### 前置依赖
 .NET 10 SDK、PowerShell、首次 restore 所需 NuGet 访问，以及当前仓库源码；不依赖 Word 或 VSTO。需要负责人 Review。
+
+## 本次试填验证记录
+
+2026-10-04：按当前 main 的完整 solution、项目、源码及配置重建并执行 Release restore/build/test，原有 5/5 测试通过，0 warning / 0 error；PR #14 仅修改模板和本文，不改变这些执行文件。上述空包异常已复现，真实的 CLI 修复及进程级回归由独立 [PR #15](https://github.com/lzmp666/nku-thesis-tool/pull/15) 交付，新增 9 项，完整 14/14 通过。此记录不表示 PR #15 已合并，也不表示 main 已修复；复现时记录所用 commit。GitHub CI 结果另见各 PR Checks；修复合并后，按同一输入确认可读错误和退出码 1，不得沿用旧异常输出作为新版本基准。
