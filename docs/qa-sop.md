@@ -8,40 +8,68 @@ Bug：用 Bug 模板，写最小复现、命令、版本、实际/期望、脱�
 合并前至少一名非作者 Review；正式规则由负责人审核，未支持项明确记录。
 
 ## Bug 模板使用说明
-所有新提交的 Bug 都必须使用 `.github/ISSUE_TEMPLATE/bug.md` 中的模板。
-请务必严格遵守“目录边界”和“脱敏声明”，使用 synthetic 问题进行复现。
+使用 `.github/ISSUE_TEMPLATE/bug.md`，保留背景、工作内容、目录边界、验收和依赖；记录 commit、命令、实际/预期结果、退出码及必要环境信息。优先提供可自行构造的 synthetic 输入。经授权的真实文档按 real-anonymized/ 流程处理，禁止提交原始敏感材料。
 
-## Synthetic 问题试填示例
+## Synthetic 问题试填示例：缺少必需 OOXML 部件
 
-以下示例用于验证新人能否按照模板成功复现问题，无敏感截图，保留背景/工作/目录/验收/依赖。
+这是模板试填与负向回归演练，不声称当前版本存在 Bug。当前 CLI 应拒绝此输入；只有实际结果偏离下述基准时，才提交缺陷报告。无需字体检测插件或真实论文。
 
 ### 背景
-我在使用 Word 插件检测字体时，发现模板报错。
+验证 CLI 对缺少必需部件的合成 .docx 给出可读错误和非零退出码，不将加载成功等同于格式合规。
 
-### 最小复现步骤
-1. 打开 `synthetic-test.docx`
-2. 点击“字体检测”按钮
-3. 发现系统报错“未知字体”
+### 工作内容
+构造一个空 ZIP，扩展名为 .docx，运行当前 CLI，记录输出与退出码并对照基准。若出现成功加载或未处理异常，将本例补齐实际结果后用于 Bug 报告；不为演练修改引擎制造缺陷。
 
-### 版本信息
-- 软件版本：v0.1.0
-- 操作系统：Windows 11
+### 版本与环境
+- 源码基准：`f22b95ab3940e032f550803fa1132b719bfd4674`（后续复现记录实际 `git rev-parse HEAD`）。
+- SDK：.NET 10；执行 `dotnet --version` 记录具体版本。
+- 操作系统与 PowerShell：执行 `[Environment]::OSVersion.VersionString` 和 `$PSVersionTable.PSVersion`。
+- Word：不适用；本例为加载器负向测试，不验证 Word 桌面兼容性。
+
+### 最小复现步骤与命令
+在仓库根目录，用 PowerShell 执行：
+
+```powershell
+dotnet restore NkuThesisTool.sln
+if ($LASTEXITCODE -ne 0) { throw "restore failed" }
+dotnet build NkuThesisTool.sln --no-restore --configuration Release
+if ($LASTEXITCODE -ne 0) { throw "build failed" }
+dotnet test NkuThesisTool.sln --no-build --configuration Release
+if ($LASTEXITCODE -ne 0) { throw "tests failed" }
+
+$samplePath = Join-Path ([IO.Path]::GetTempPath()) ("qa-empty-" + [Guid]::NewGuid().ToString("N") + ".docx")
+# 自行构造空 ZIP，不读取或复制任何论文；文件不存在时才创建。
+Add-Type -AssemblyName System.IO.Compression
+$sampleStream = [IO.File]::Open($samplePath, [IO.FileMode]::CreateNew)
+$sampleArchive = [IO.Compression.ZipArchive]::new($sampleStream, [IO.Compression.ZipArchiveMode]::Create)
+$sampleArchive.Dispose()
+try {
+    dotnet run --project src/ThesisEngine.Cli --no-build --configuration Release -- $samplePath
+    $sampleExitCode = $LASTEXITCODE
+    Write-Output "ExitCode=$sampleExitCode"
+} finally {
+    # 仅删除本次生成的随机临时文件。
+    Remove-Item -LiteralPath $samplePath
+}
+```
+
+### 实际结果与期望结果 / Golden
+基准：stderr 为 `Unable to load document: Missing or duplicate OOXML part: [Content_Types].xml`，`ExitCode=1`，stdout 不出现 `Document loaded successfully`，无未处理异常，不生成修复输出。空 ZIP 没有任何正文、字体或规则，不得报告论文合规。
+实际结果：执行者粘贴本次输出与退出码，并填写版本信息；未执行前写“待执行”，不得把基准冒充实测记录。
 
 ### 脱敏声明
-我确认已使用 synthetic 数据，不含真实论文内容，截图已打码。
-
-### Golden（预期输出/基准）
-预期应该识别出字体为“宋体”，并提示合规，而不是报错。
+输入完全由上述代码生成，不含真实论文、个人信息或涉密数据；本例未附截图。日志分享前检查本机路径并脱敏。
 
 ### 风险与回滚
-风险：无法检测合成数据。回滚：重新替换该文件即可。
+错误接受无效包会让用户误以为文档可继续检测。演练只读加载器，不修改输入、引擎或契约；临时样本在 finally 中删除。未来修复如引入回归，用独立提交 revert，并重新运行回归；不要覆盖原始论文。
 
 ### 目录边界
-- 允许修改目录：tests/fixtures/synthetic/
-- 不允许修改目录：src/
+本 Issue #9 仅允许 `.github/ISSUE_TEMPLATE/bug.md`、`docs/qa-sop.md`；生成文件位于系统临时目录，不提交 Git。禁止修改 `contracts/`、`src/ThesisEngine.Core/`、其他 `src/` 及无关目录。发现加载器缺陷另开 Issue 明确范围，由负责人审核；契约表达不足先提 RFC。
 
-### 验收提示
-新人按照上述步骤操作，能够 100% 复现此问题即视为验收通过。
+### 验收标准
+- 模板试填验收：另一位成员按命令自行生成输入、运行 CLI，并能记录和对照明确基准；环境未满足或未执行不能写验收通过。
+- 缺陷复现成功：实际结果偏离基准，可在相同 commit/环境重复得到；正常拒绝是回归通过，不是 Bug。
+- 若后续需要修复：相同负向输入满足基准，既有合法输入仍可加载，restore/build/test 通过；错误不得变成成功或合规声明。
 
 ### 前置依赖
-无。
+.NET 10 SDK、PowerShell、首次 restore 所需 NuGet 访问，以及当前仓库源码；不依赖 Word 或 VSTO。需要负责人 Review。
