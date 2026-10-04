@@ -12,7 +12,7 @@ Bug：用 Bug 模板，写最小复现、命令、版本、实际/期望、脱�
 
 ## Synthetic 问题试填示例：缺少必需 OOXML 部件
 
-这是模板试填与负向回归演练，不声称当前版本存在 Bug。当前 CLI 应拒绝此输入；只有实际结果偏离下述基准时，才提交缺陷报告。无需字体检测插件或真实论文。
+这是当前 CLI 的 synthetic Bug 试填：源码基准版本对空 OOXML 包产生未处理异常，偏离 README 约定的可读错误和退出码 1。无需字体检测插件或真实论文。本 PR 仅完善报告与流程，不修复 Core。
 
 ### 背景
 验证 CLI 对缺少必需部件的合成 .docx 给出可读错误和非零退出码，不将加载成功等同于格式合规。
@@ -55,7 +55,7 @@ try {
 
 ### 实际结果与期望结果 / Golden
 基准：stderr 为 `Unable to load document: Missing or duplicate OOXML part: [Content_Types].xml`，`ExitCode=1`，stdout 不出现 `Document loaded successfully`，无未处理异常，不生成修复输出。空 ZIP 没有任何正文、字体或规则，不得报告论文合规。
-实际结果：执行者粘贴本次输出与退出码，并填写版本信息；未执行前写“待执行”，不得把基准冒充实测记录。
+实际结果（2026-10-04 实测）：从上述 commit 提取原样 Core/CLI 源码与项目文件，在 Windows NT 10.0.26200.0、PowerShell 7.6.5、.NET SDK 10.0.203 下 Release 构建成功（0 warning / 0 error），用相同空 ZIP 输入直接运行构建的 CLI DLL。stderr 为 `Unhandled exception. System.IO.InvalidDataException: Missing or duplicate OOXML part: [Content_Types].xml`，调用链为 DocumentLoader.ReadPart → DocumentLoader.Load → Program，退出码 `-532462766`；未出现加载成功。这是缺陷复现成功，不是修复验收通过。完整 solution 回归以本 PR 的 CI 为准；其他操作系统的异常退出码可能不同，但不得出现未处理异常。重新执行上述完整命令时记录实际 commit、环境、输出和退出码。
 
 ### 脱敏声明
 输入完全由上述代码生成，不含真实论文、个人信息或涉密数据；本例未附截图。日志分享前检查本机路径并脱敏。
