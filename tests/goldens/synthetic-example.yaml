@@ -1,0 +1,99 @@
+{
+  "golden_version": "0.2.0",
+  "sample_id": "SYN-FONT-SIZE-001",
+  "rule_set_version": "synthetic-size-v1",
+  "review_status": "pending",
+  "reviewed_by": null,
+  "reviewed_on": null,
+  "execution": {
+    "status": "not_executed",
+    "commit": null,
+    "environment": null
+  },
+  "scope": "only explicitly covered synthetic assertions",
+  "input": {
+    "kind": "synthetic",
+    "construction": "Build a minimal OOXML package with this body; no real thesis, styles or theme. ASCII text ABC, direct w:sz=22.",
+    "part": "word/document.xml",
+    "xml": "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:rPr><w:sz w:val=\"22\"/></w:rPr><w:t>ABC</w:t></w:r></w:p></w:body></w:document>"
+  },
+  "test_rule": {
+    "id": "SYNTHETIC-ONLY",
+    "runtime_rule_binding": "pending",
+    "property": "font_size",
+    "expected": {
+      "value": 12,
+      "unit": "pt"
+    },
+    "source_status": "synthetic_assumption_not_school_rule"
+  },
+  "coverage": {
+    "checked": [
+      "direct non-complex-script font_size at the specified run"
+    ],
+    "unsupported": [
+      "inherited/theme/complex-script size resolution"
+    ],
+    "not_checked": [
+      "font names",
+      "line spacing",
+      "margins",
+      "all other document nodes"
+    ]
+  },
+  "diagnostics": [
+    {
+      "ruleId": "SYNTHETIC-SIZE-001",
+      "severity": "warning",
+      "location": {
+        "part": "word/document.xml",
+        "xpath": "/w:document/w:body/w:p[1]/w:r[1]"
+      },
+      "expected": {
+        "value": 12,
+        "unit": "pt"
+      },
+      "actual": {
+        "value": 11,
+        "unit": "pt",
+        "ooxml_half_points": 22
+      },
+      "fixLevel": "suggest",
+      "message": "Synthetic target is 12pt; direct size is 11pt."
+    }
+  ],
+  "patches": [],
+  "after": {
+    "execution_status": "not_executed",
+    "diagnostics": [],
+    "patches": [],
+    "unresolved_diagnostics": [],
+    "content_preserved": null,
+    "relationships_preserved": null,
+    "styles_preserved": null,
+    "sections_preserved": null
+  },
+  "notes": "This records manually derived expectations (22 half-points=11pt), not engine output. Before acceptance patches=[] and the diagnostic remains. Expected after acceptance: size=12pt, zero diagnostics only for this checked assertion, zero second plan. Unsupported/not_checked scopes remain. Do not approve without execution and independent review.",
+  "accepted_suggestion": {
+    "user_acceptance_required": true,
+    "execution_status": "not_executed",
+    "expected_plan": [
+      {
+        "ruleId": "SYNTHETIC-SIZE-001",
+        "location": {
+          "part": "word/document.xml",
+          "xpath": "/w:document/w:body/w:p[1]/w:r[1]"
+        },
+        "expectedBefore": {
+          "attribute": "w:sz/@w:val",
+          "value": "22"
+        },
+        "desiredAfter": {
+          "attribute": "w:sz/@w:val",
+          "value": "24"
+        },
+        "reason": "Only after explicit user acceptance; refuse stale precondition."
+      }
+    ]
+  }
+}
