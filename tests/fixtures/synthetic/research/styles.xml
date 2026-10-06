@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="TestFontA"/><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="Parent"><w:name w:val="Parent"/><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Child"><w:name w:val="Child"/><w:basedOn w:val="Parent"/></w:style>
+  <w:style w:type="paragraph" w:styleId="Para"><w:name w:val="Para"/><w:rPr><w:sz w:val="24"/></w:rPr></w:style>
+  <w:style w:type="character" w:styleId="Char"><w:name w:val="Char"/><w:rPr><w:sz w:val="21"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="ParaTheme"><w:name w:val="ParaTheme"/><w:rPr><w:rFonts w:asciiTheme="minorHAnsi"/></w:rPr></w:style>
+</w:styles>
