@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:rFonts w:ascii="Arial" w:eastAsia="SimSun"/>
+          <w:sz w:val="21"/> <!-- 10.5pt -->
+        </w:rPr>
+        <w:t>这是一个包含直接格式覆盖的示例。</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>
