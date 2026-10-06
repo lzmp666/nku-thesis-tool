@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:rPr><w:rFonts w:ascii="TestFontB"/></w:rPr><w:t>ABC</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Child"/></w:pPr><w:r><w:t>ABC</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Para"/></w:pPr><w:r><w:rPr><w:rStyle w:val="Char"/></w:rPr><w:t>ABC</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Para"/></w:pPr><w:r><w:rPr><w:rStyle w:val="Char"/><w:sz w:val="22"/></w:rPr><w:t>ABC</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="ParaTheme"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="TestFontB"/></w:rPr><w:t>ABC</w:t></w:r></w:p>
+  </w:body>
+</w:document>
