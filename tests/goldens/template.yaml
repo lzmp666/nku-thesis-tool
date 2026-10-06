@@ -1,12 +1,50 @@
-sample_id: SYN-001
-rule_set_version: "0.1.0"
-review_status: pending
-reviewed_by: null
-diagnostics: []
-patches: []
-unsupported_scopes: []
-after:
-  diagnostics: []
-  patches: []
-  content_preserved: null
-notes: "由人工核验，不能把空列表当已合规；按场景补充 rule_id/location/expected/actual/fix。"
+{
+  "golden_version": "0.2.0",
+  "sample_id": "TEMPLATE",
+  "rule_set_version": "pending",
+  "review_status": "pending",
+  "reviewed_by": null,
+  "reviewed_on": null,
+  "execution": {
+    "status": "not_executed",
+    "commit": null,
+    "environment": null
+  },
+  "scope": "only explicitly covered synthetic assertions",
+  "input": {
+    "kind": "synthetic",
+    "construction": null,
+    "part": "word/document.xml",
+    "xml": null
+  },
+  "test_rule": {
+    "id": "SYNTHETIC-ONLY",
+    "runtime_rule_binding": "pending",
+    "property": "font_size",
+    "expected": {
+      "value": 12,
+      "unit": "pt"
+    },
+    "source_status": "synthetic_assumption_not_school_rule"
+  },
+  "coverage": {
+    "checked": [],
+    "unsupported": [],
+    "not_checked": [
+      "fill explicitly"
+    ]
+  },
+  "diagnostics": [],
+  "patches": [],
+  "after": {
+    "execution_status": "not_executed",
+    "diagnostics": [],
+    "patches": [],
+    "unresolved_diagnostics": [],
+    "content_preserved": null,
+    "relationships_preserved": null,
+    "styles_preserved": null,
+    "sections_preserved": null
+  },
+  "notes": "Expected values only until execution is recorded. Pending review or empty lists never establish compliance. This golden is not a rule-schema document."
+}
