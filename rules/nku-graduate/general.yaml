@@ -1,4 +1,320 @@
-schema_version: "0.1.0"
-status: draft
-# 不猜测学校标准。核验官方条文、适用年级/学院后，通过 PR 加入规则。
-rules: []
+# =====================================================================
+# 南开大学研究生学位论文 - 通用格式规则（draft）
+# 对应 issue: #1  |  规则核验文档: docs/rule-notes/nku-graduate-general.md
+#
+# 状态: draft —— 所有数值均逐字引自《南开大学研究生学位论文写作规范
+# (2025版)》(来源 S1, 见下) 第4章，无猜测值；未猜测的空白不填 null 以外
+# 的值。负责人审核通过后方可改为 approved。
+# 注意: 2026版已发布(S2)但原文未获取，版本差异核验前本文件以2025版为准。
+# =====================================================================
+
+meta:
+  profile: nku-graduate
+  file: general
+  title: 研究生学位论文通用格式规则（页面设置/字体/字号/行距/部件范围）
+  status: draft            # draft | approved  （approved 须负责人审核）
+  based_on_spec: 南开大学研究生学位论文写作规范（2025版）
+  based_on_spec_version: "2025"
+  newer_spec_pending:      # 2026版已存在但未核验差异（T1）
+    version: "2026"
+    note: 2026版原文附件带验证码未能获取，差异核验前以2025版条文为准
+  verified_date: "2026-10-07"
+  approver: null           # 审核通过后填写负责人 GitHub 用户名
+  approved_date: null
+
+sources:
+  - id: S1
+    title: 南开大学研究生学位论文写作规范（2025版）（外国语学院转载全文）
+    publisher: 南开大学外国语学院（文首载明"南开大学研究生院 编"）
+    url: https://sfs.nankai.edu.cn/2025/0402/c7262a566018/page.htm
+    publish_date: "2025-04-02"
+    role: 条文唯一依据（第4章原文逐字摘录）
+    verified_date: "2026-10-07"
+  - id: S2
+    title: 关于2026届冬季硕、博研究生提交学位论文、答辩前重复率检测通知
+    publisher: 南开大学人工智能学院
+    url: https://ai.nankai.edu.cn/info/1025/6685.htm
+    publish_date: "2026"
+    role: 证明2026版存在（附件原文下载需验证码，未获取）
+    verified_date: "2026-10-07"
+  - id: S3
+    title: 研究生院"论文写作规范"官方入口（挂2020修订版）
+    publisher: 南开大学研究生院
+    url: https://graduate.nankai.edu.cn/2017/0222/c3325a56863/page.htm
+    role: 官方入口参考（未更新至2025/2026版，T2）
+    verified_date: "2026-10-07"
+  - id: S4
+    title: 南开大学毕业生学位论文提交流程及排版技巧（PDF）
+    publisher: 南开大学图书馆
+    url: https://lib.nankai.edu.cn/_upload/article/files/eb/c8/8e84193a4b7295653b0909402dd5/4f06ab3d-da4b-494a-8075-1b4ead5ea65c.pdf
+    role: 交叉印证（培训材料，不作条文依据）
+    verified_date: "2026-10-07"
+
+# ---------------------------------------------------------------------
+# 磅值与 OOXML: w:sz 单位为半磅(half-point)，12pt -> w:sz=24。
+# 行距: 固定值 = w:spacing w:lineRule="exact"，20pt = 400 twips。
+# 字体脚本映射（RFC-1，待确认）: 中文字体 -> w:eastAsia；
+#                                西文/英文字体 -> w:ascii + w:hAnsi。
+# ---------------------------------------------------------------------
+
+rules:
+  page_setup:                        # R1 | 4.1 表4.1
+    scope: 全文档所有节
+    source: {src: S1, clause: "4.1 表4.1"}
+    original: "纸张 A4（210×297，90g规格），幅面白色；页面设置 上、下3.8cm，左、右3.2cm，页眉、页脚3.0cm，装订线0cm"
+    paper_size: A4
+    margins_cm: {top: 3.8, bottom: 3.8, left: 3.2, right: 3.2}
+    header_footer_cm: {header: 3.0, footer: 3.0}
+    gutter_cm: 0.0
+    note: "页眉/页脚3.0cm 与 Word UI 对应关系待确认（T5）"
+
+  header:                            # R2 | 4.1 表4.1 + 3.4
+    scope: 篇眉（从中文摘要开始的页眉）
+    source: {src: S1, clause: "4.1 表4.1；3.4"}
+    original: "篇眉 宋体10.5磅（或五号）居中；Abstract部分用Times New Roman字体10.5磅（或五号）"
+    font_cn: 宋体
+    font_western: Times New Roman    # 仅 Abstract 部分
+    size_pt: 10.5
+    size_name_cn: 五号
+    alignment: center
+    spacing_rule_original: "篇眉从中文摘要开始，内容与该部分的标题相同；论文页眉奇偶页相同，各部分首页也要有页眉"
+
+  page_number:                       # R3 | 4.1 表4.1 + 3.4
+    scope: 页码
+    source: {src: S1, clause: "4.1 表4.1；3.4"}
+    original: "页码 宋体10.5磅（或五号）居中；页码从第一章（引言）开始按阿拉伯数字连续编排，之前的部分用大写罗马数字单独编排"
+    font_cn: 宋体
+    size_pt: 10.5
+    size_name_cn: 五号
+    alignment: center
+    numbering: {front_matter: upper_roman, body: arabic, body_starts_at: 第一章（引言）}
+
+  abstract_cn:                       # R4 | 4.5 表4.4
+    scope: 中文摘要
+    source: {src: S1, clause: "4.5 表4.4"}
+    title:
+      original: "摘要：黑体18磅（或小二）加粗居中，单倍行距，段前24磅，段后18磅"
+      font_cn: 黑体
+      size_pt: 18
+      size_name_cn: 小二
+      bold: true
+      alignment: center
+      line_spacing: {rule: single}   # 单倍行距 = w:lineRule auto, w:line=240
+      spacing: {before_pt: 24, after_pt: 18}
+    body:
+      original: "段落文字 宋体12磅（或小四），固定值行距20磅，段前段后0磅，'关键词'三字加粗"
+      font_cn: 宋体
+      size_pt: 12
+      size_name_cn: 小四
+      line_spacing: {rule: exact, value_pt: 20}
+      spacing: {before_pt: 0, after_pt: 0}
+      keyword_label_bold: true       # “关键词”三字加粗
+
+  abstract_en:                       # R5 | 4.5 表4.4
+    scope: 英文摘要（Abstract）
+    source: {src: S1, clause: "4.5 表4.4"}
+    title:
+      original: "Abstract：Arial字体18磅（或小二）加粗居中，单倍行距，段前24磅，段后18磅"
+      font_western: Arial            # 注意：此处为 Arial，非 Times New Roman
+      size_pt: 18
+      size_name_cn: 小二
+      bold: true
+      alignment: center
+      line_spacing: {rule: single}
+      spacing: {before_pt: 24, after_pt: 18}
+    body:
+      original: "段落文字 Times New Roman字体12磅（或小四），固定值行距20磅，段前段后0磅，'Key Words'两词加粗"
+      font_western: Times New Roman
+      size_pt: 12
+      size_name_cn: 小四
+      line_spacing: {rule: exact, value_pt: 20}
+      spacing: {before_pt: 0, after_pt: 0}
+      keyword_label_bold: true
+
+  toc:                               # R6 | 4.6 表4.5
+    scope: 目录
+    source: {src: S1, clause: "4.6 表4.5"}
+    title:
+      original: "标题（目录）黑体16磅（或三号）加粗居中，单倍行距，段前24磅，段后18磅"
+      font_cn: 黑体
+      size_pt: 16
+      size_name_cn: 三号
+      bold: true
+      alignment: center
+      line_spacing: {rule: single}
+      spacing: {before_pt: 24, after_pt: 18}
+    entries:
+      - level: chapter               # 各章目录
+        original: "宋体14磅（或四号），单倍行距，段前6磅，段后0磅，两端对齐，页码右对齐"
+        font_cn: 宋体
+        size_pt: 14
+        size_name_cn: 四号
+        line_spacing: {rule: single}
+        spacing: {before_pt: 6, after_pt: 0}
+        alignment: justify
+        indent_chars: 0
+      - level: level1                # 一级标题目录
+        original: "宋体12磅（或小四），单倍行距，段前6磅，段后0磅，两端对齐，页码右对齐，左缩进1个汉字符"
+        font_cn: 宋体
+        size_pt: 12
+        size_name_cn: 小四
+        line_spacing: {rule: single}
+        spacing: {before_pt: 6, after_pt: 0}
+        alignment: justify
+        indent_chars: 1
+      - level: level2                # 二级标题目录
+        original: "宋体10.5磅（或五号），单倍行距，段前6磅，段后0磅，两端对齐，页码右对齐，左缩进2个汉字符"
+        font_cn: 宋体
+        size_pt: 10.5
+        size_name_cn: 五号
+        line_spacing: {rule: single}
+        spacing: {before_pt: 6, after_pt: 0}
+        alignment: justify
+        indent_chars: 2
+    open_question: T6                # TOC 域样式 vs 渲染结果的检测对象待定
+
+  headings:                          # R7-R10 | 4.7 表4.6（层级/编号模式详见 docs/rule-notes/headings.md）
+    scope: 正文各级标题
+    source: {src: S1, clause: "4.7 表4.6"}
+    chapter:                         # R7 章标题
+      original: "黑体16磅（或三号）加粗居左，单倍行距，段前24磅，段后18磅，章序号与章题目间空一个汉字符。模式二加粗居中。"
+      font_cn: 黑体
+      size_pt: 16
+      size_name_cn: 三号
+      bold: true
+      alignment: {mode1: left, mode2: center}   # 取决于编号模式（A2，待 RFC）
+      line_spacing: {rule: single}
+      spacing: {before_pt: 24, after_pt: 18}
+    level1:                          # R8 一级标题
+      original: "黑体14磅（或四号）加粗居左，单倍行距，段前24磅，段后6磅，序号与题名间空一个汉字符。模式二加粗居中。"
+      font_cn: 黑体
+      size_pt: 14
+      size_name_cn: 四号
+      bold: true
+      alignment: {mode1: left, mode2: center}
+      line_spacing: {rule: single}
+      spacing: {before_pt: 24, after_pt: 6}
+    level2:                          # R9 二级标题（13磅无对应中文字号名）
+      original: "黑体13磅居左，单倍行距，段前12磅，段后6磅，序号与题名间空一个汉字符。模式二左缩进2个汉字"
+      font_cn: 黑体
+      size_pt: 13
+      size_name_cn: null             # 13磅无中文字号名（介于四号14pt与小四12pt之间）
+      bold: false                    # 原文未写加粗，不得默认为加粗
+      alignment: left
+      line_spacing: {rule: single}
+      spacing: {before_pt: 12, after_pt: 6}
+      indent_chars_mode2: 2
+    level3:                          # R10 三级标题
+      original: "黑体12磅（或小四）居左，单倍行距，段前12磅，段后6磅，序号与题名间空一个汉字符。模式二左缩进2个汉字"
+      font_cn: 黑体
+      size_pt: 12
+      size_name_cn: 小四
+      bold: false                    # 原文未写加粗
+      alignment: left
+      line_spacing: {rule: single}
+      spacing: {before_pt: 12, after_pt: 6}
+      indent_chars_mode2: 2
+
+  body_text:                         # R11 | 4.7 表4.6 —— v1 核心规则
+    scope: 正文段落文字
+    source: {src: S1, clause: "4.7 表4.6"}
+    original: "宋体12磅（或小四），英文用Times New Roman字体12磅（或小四），两端对齐书写，段落首行左缩进2个汉字符。固定值行距20磅（段落中有数学表达式时，可根据表达需要设置该段的行距），段前0磅，段后0磅。"
+    font:
+      cn: 宋体                       # 映射 w:eastAsia（RFC-1 待确认）
+      western: Times New Roman       # 映射 w:ascii/w:hAnsi（RFC-1 待确认）；条文表述为"英文用"
+    size_pt: 12
+    size_name_cn: 小四
+    alignment: justify
+    first_line_indent_chars: 2
+    line_spacing:
+      rule: exact                    # 固定值
+      value_pt: 20                   # = w:line 400 (twips), lineRule="exact"
+      exemption: "段落中有数学表达式时，可根据表达需要设置该段的行距"   # A1/RFC-4 豁免待定
+    spacing: {before_pt: 0, after_pt: 0}
+
+  figures_and_tables:                # R12 | 4.7 表4.6
+    scope: 图序图题、表序表题
+    source: {src: S1, clause: "4.7 表4.6"}
+    caption:
+      original_figure: "图序、图题 置于图的下方，宋体10.5磅（或五号）居中，单倍行距，段前6磅，段后12磅，图序与图题文字之间空一个汉字符宽度"
+      original_table: "表序、表题 置于表的上方，宋体10.5磅（或五号）居中，单倍行距，段前6磅，段后6磅，表序与表题文字之间空一个汉字符宽度"
+      font_cn: 宋体
+      size_pt: 10.5
+      size_name_cn: 五号
+      alignment: center
+      line_spacing: {rule: single}
+      spacing: {figure: {before_pt: 6, after_pt: 12}, table: {before_pt: 6, after_pt: 6}}
+    equation:                        # R13 表达式
+      original: "序号加圆括号，Times New Roman10.5磅（或五号），右对齐"
+      font_western: Times New Roman
+      size_pt: 10.5
+      size_name_cn: 五号
+      alignment: right
+    v1_check: false                  # 依赖图表识别，建议 v1 后再检
+
+  references:                        # R14 | 4.8 表4.7
+    scope: 参考文献
+    source: {src: S1, clause: "4.8 表4.7"}
+    original: "标题要求同各章标题。文字部分：宋体10.5磅（或五号），英文用Times New Roman字体10.5磅（或五号），固定值行距16磅，段前段后0磅"
+    font: {cn: 宋体, western: Times New Roman}
+    size_pt: 10.5
+    size_name_cn: 五号
+    line_spacing: {rule: exact, value_pt: 16}
+    spacing: {before_pt: 0, after_pt: 0}
+    heading: same_as_chapter         # 标题要求同各章标题（R7）
+
+  appendix:                          # R15 | 4.8 表4.7
+    scope: 附录
+    source: {src: S1, clause: "4.8 表4.7"}
+    original: "文字部分：宋体12磅（或小四），英文用Times New Roman字体12磅（或小四），两端对齐书写，段落首行左缩进2个汉字符。固定值行距20磅（段落中有数学表达式时，可根据表达需要设置该段的行距），段前0磅，段后0磅"
+    font: {cn: 宋体, western: Times New Roman}
+    size_pt: 12
+    size_name_cn: 小四
+    alignment: justify
+    first_line_indent_chars: 2
+    line_spacing: {rule: exact, value_pt: 20, exemption: same_as_body}
+    spacing: {before_pt: 0, after_pt: 0}
+    heading: same_as_chapter
+
+  symbol_table_and_cv:               # R16 | 4.8 表4.7
+    scope: 符号/标志/缩略语注释表；个人简历、在学期间发表的学术论文与研究成果
+    source: {src: S1, clause: "4.8 表4.7"}
+    original: "文字部分：宋体10.5磅（或五号），英文用Times New Roman字体10.5磅（或五号），固定值行距16磅，段前段后0磅"
+    font: {cn: 宋体, western: Times New Roman}
+    size_pt: 10.5
+    size_name_cn: 五号
+    line_spacing: {rule: exact, value_pt: 16}
+    spacing: {before_pt: 0, after_pt: 0}
+    heading: same_as_chapter
+
+  acknowledgement:                   # R17 | 4.8 表4.7
+    scope: 勘误页、致谢
+    source: {src: S1, clause: "4.8 表4.7"}
+    original: "文字部分仿宋12磅（或小四），固定值行距16磅，段前段后0磅"
+    font_cn: 仿宋                    # 注意：仿宋，非宋体（A5，全局断言会误报）
+    size_pt: 12
+    size_name_cn: 小四
+    line_spacing: {rule: exact, value_pt: 16}
+    spacing: {before_pt: 0, after_pt: 0}
+    heading: same_as_chapter
+
+  cover:                             # R18 | 4.2/4.4 —— 仅记录，建议 v1 跳过
+    v1_check: false                  # 封面已有固定版式，只须提供有关内容（RFC-6）
+    source: {src: S1, clause: "4.2 表4.2；4.4 表4.3"}
+    chinese_cover:
+      thesis_title: {font_cn: 宋体, size_pt: 22, size_name_cn: 二号, bold: true}
+      info_fields: {font_cn: 宋体, size_pt: 16, size_name_cn: 三号, bold: true}
+      secret_level: {font_cn: 宋体, size_pt: 10.5, size_name_cn: 五号, bold: true}
+      student_id: {font_western: Times New Roman, size_pt: 10.5, size_name_cn: 五号, bold: true}
+    title_page:
+      thesis_title: {font_cn: 宋体, font_western: Times New Roman, size_pt: 22, size_name_cn: 二号}
+      info_fields: {font_cn: 宋体, size_pt: 12, size_name_cn: 小四}
+      graduate_school_line: {font_cn: 宋体, size_pt: 14, size_name_cn: 四号, alignment: center}
+
+# ---------------------------------------------------------------------
+# 待确认项（T）与 RFC 候选：见 docs/rule-notes/nku-graduate-general.md §6/§7
+#   T1 2026版差异比对（最高优先）
+#   T3 表格内文字/脚注字号规范未规定 -> 本文件不设值（不猜测）
+#   RFC-1 字体脚本映射 | RFC-2 部件范围识别 | RFC-3 字体名等价表
+#   RFC-4 行距豁免 | RFC-5 数值断言口径 | RFC-6 封面豁免 | RFC-7 目录检测对象
+# ---------------------------------------------------------------------
