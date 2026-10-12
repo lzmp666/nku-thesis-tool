@@ -1,0 +1,46 @@
+{
+  "sample_set": "demo/draft",
+  "purpose": "命令行读取与可定位诊断演示",
+  "formal_compliance": false,
+  "status": "synthetic-demo-only",
+  "generator": "generate_samples.py",
+  "generation_command": "python3 generate_samples.py",
+  "source_note": "全部内容为人工构造，不含真实论文、个人信息或敏感材料。",
+  "disclaimer": "仅供演示/测试，不代表合规结论",
+  "samples": [
+    {
+      "file": "clean_sample.docx",
+      "description": "无格式问题的合成样本，预期诊断数为 0。仅供演示/测试，不代表合规结论",
+      "expected_diagnosis_count": 0,
+      "expected_diagnoses": []
+    },
+    {
+      "file": "known_issues_sample.docx",
+      "description": "含三项已知格式问题的合成样本，仅供演示/测试，不代表合规结论",
+      "expected_diagnosis_count": 3,
+      "expected_diagnoses": [
+        {
+          "ruleId": "demo/east-asian-font",
+          "location": "paragraph[0]/run[0]",
+          "expected": "宋体",
+          "actual": "黑体",
+          "note": "demo 规则，非正式校规"
+        },
+        {
+          "ruleId": "demo/western-font",
+          "location": "paragraph[1]/run[0]",
+          "expected": "Times New Roman",
+          "actual": "Arial",
+          "note": "demo 规则，非正式校规"
+        },
+        {
+          "ruleId": "demo/font-size",
+          "location": "paragraph[2]/run[0]",
+          "expected": "12pt",
+          "actual": "10.5pt",
+          "note": "demo 规则，非正式校规"
+        }
+      ]
+    }
+  ]
+}

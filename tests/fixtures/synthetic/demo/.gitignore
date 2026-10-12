@@ -1,0 +1,2 @@
+# The repository ignores *.docx globally; these two fixtures are intentional.
+!*.docx
