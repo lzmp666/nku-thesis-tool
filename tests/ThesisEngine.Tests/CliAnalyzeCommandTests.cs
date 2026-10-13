@@ -28,7 +28,7 @@ public sealed class CliAnalyzeCommandTests
             Assert.NotNull(ServiceProxy.LastProfile);
             var profileType = ServiceProxy.LastProfile!.GetType();
             Assert.True((bool)profileType.GetProperty("IsDraft")!.GetValue(ServiceProxy.LastProfile)!);
-            Assert.Equal("draft/demo", profileType.GetProperty("DraftMarker")!.GetValue(ServiceProxy.LastProfile));
+            Assert.Equal("demo-0.1.0", profileType.GetProperty("RuleVersion")!.GetValue(ServiceProxy.LastProfile));
             Assert.Contains("Diagnostics: 0", output.ToString());
             Assert.Contains("DRAFT/DEMO", output.ToString());
             Assert.DoesNotContain("全文合规", output.ToString(), StringComparison.Ordinal);
@@ -142,7 +142,7 @@ public sealed class CliAnalyzeCommandTests
     private static object NewCommand(Assembly assembly, TextWriter output, TextWriter error)
     {
         var commandType = assembly.GetType("ThesisEngine.Cli.AnalyzeCommand")!;
-        var serviceType = assembly.GetType("ThesisEngine.Core.IDemoAnalysisService")!;
+        var serviceType = CoreType(assembly, "IDemoAnalysisService");
         var proxy = typeof(DispatchProxy)
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .Single(method => method.Name == "Create" &&
@@ -171,31 +171,31 @@ public sealed class CliAnalyzeCommandTests
         string coverage,
         params string[] unsupported)
     {
-        var resultType = assembly.GetType("ThesisEngine.Core.AnalysisResult")!;
-        var result = Activator.CreateInstance(resultType)!;
-        var diagnosticType = assembly.GetType("ThesisEngine.Core.Diagnostic")!;
+        var resultType = CoreType(assembly, "AnalysisResult");
+        var diagnosticType = CoreType(assembly, "Diagnostic");
         var diagnosticArray = Array.CreateInstance(diagnosticType, diagnostics.Length);
         for (var index = 0; index < diagnostics.Length; index++)
             diagnosticArray.SetValue(diagnostics[index], index);
-        resultType.GetProperty("Diagnostics")!.SetValue(result, diagnosticArray);
-        resultType.GetProperty("RuleVersion")!.SetValue(result, "demo-0.1");
-        resultType.GetProperty("Coverage")!.SetValue(result, coverage);
-        resultType.GetProperty("UnsupportedScopes")!.SetValue(result, unsupported);
-        return result;
+        return Activator.CreateInstance(
+            resultType,
+            diagnosticArray,
+            "demo-0.1.0",
+            coverage,
+            unsupported)!;
     }
 
     private static object NewDiagnostic(Assembly assembly, string severity = "warning")
     {
-        var diagnosticType = assembly.GetType("ThesisEngine.Core.Diagnostic")!;
-        var diagnostic = Activator.CreateInstance(diagnosticType)!;
-        diagnosticType.GetProperty("RuleId")!.SetValue(diagnostic, "demo/font-size");
-        diagnosticType.GetProperty("Severity")!.SetValue(diagnostic, severity);
-        diagnosticType.GetProperty("Location")!.SetValue(diagnostic, "paragraph[0]/run[0]");
-        diagnosticType.GetProperty("Expected")!.SetValue(diagnostic, "12pt");
-        diagnosticType.GetProperty("Actual")!.SetValue(diagnostic, "10.5pt");
-        diagnosticType.GetProperty("FixLevel")!.SetValue(diagnostic, "manual");
-        diagnosticType.GetProperty("Message")!.SetValue(diagnostic, "Font size differs from the demo target.");
-        return diagnostic;
+        var diagnosticType = CoreType(assembly, "Diagnostic");
+        return Activator.CreateInstance(
+            diagnosticType,
+            "demo/font-size",
+            severity,
+            "paragraph[0]/run[0]",
+            "12pt",
+            "10.5pt",
+            "manual",
+            "Font size differs from the demo target.")!;
     }
 
     private static string CreateInputFile()
@@ -217,6 +217,10 @@ public sealed class CliAnalyzeCommandTests
         Assert.True(File.Exists(path), $"CLI was not built: {path}");
         return Assembly.LoadFrom(path);
     }
+
+    private static Type CoreType(Assembly cliAssembly, string typeName) =>
+        cliAssembly.GetType($"ThesisEngine.Core.{typeName}") ??
+        Assembly.Load("ThesisEngine.Core").GetType($"ThesisEngine.Core.{typeName}")!;
 
     public class ServiceProxy : DispatchProxy
     {
