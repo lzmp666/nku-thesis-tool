@@ -1,0 +1,176 @@
+using ThesisEngine.Core;
+using Xunit;
+
+namespace ThesisEngine.Tests;
+
+public sealed class FontSizeAnalyzerTests
+{
+    private static readonly DemoRuleSet DefaultProfile = DemoRuleSet.NkuDraftSample;
+
+    [Fact]
+    public void AllCorrectProducesNoDiagnostics()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Times New Roman", 12.0, "正确字体字号的文本"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(DefaultProfile.RuleVersion, result.RuleVersion);
+        Assert.Contains("1 runs", result.Coverage);
+    }
+
+    [Fact]
+    public void WrongEastAsianFontProducesDiagnostic()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "黑体", "Times New Roman", 12.0, "黑体文本"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        var diag = Assert.Single(result.Diagnostics);
+        Assert.Equal(FontSizeAnalyzer.RuleIdEastAsiaFont, diag.RuleId);
+        Assert.Equal("warning", diag.Severity);
+        Assert.Equal("word/document.xml#paragraph[0]/run[0]", diag.Location);
+        Assert.Equal("宋体", diag.Expected);
+        Assert.Equal("黑体", diag.Actual);
+        Assert.Equal("auto", diag.FixLevel);
+    }
+
+    [Fact]
+    public void WrongAsciiFontProducesDiagnostic()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Arial", 12.0, "Arial文本"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        var diag = Assert.Single(result.Diagnostics);
+        Assert.Equal(FontSizeAnalyzer.RuleIdAsciiFont, diag.RuleId);
+        Assert.Equal("Arial", diag.Actual);
+    }
+
+    [Fact]
+    public void WrongFontSizeProducesDiagnostic()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Times New Roman", 14.0, "14pt文本"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        var diag = Assert.Single(result.Diagnostics);
+        Assert.Equal(FontSizeAnalyzer.RuleIdFontSize, diag.RuleId);
+        Assert.Equal("12pt", diag.Expected);
+        Assert.Equal("14pt", diag.Actual);
+    }
+
+    [Fact]
+    public void UnknownFontProducesUnknownDiagnostic()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, null, null, null, "未知格式文本"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        Assert.Equal(3, result.Diagnostics.Count);
+        Assert.All(result.Diagnostics, d => Assert.Equal("(unknown)", d.Actual));
+    }
+
+    [Fact]
+    public void MultipleRunsProduceMultipleDiagnostics()
+    {
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Times New Roman", 12.0, "正确"),
+                    new(1, "黑体", "Arial", 14.0, "全错"),
+                }),
+                new(1, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Times New Roman", 12.0, "正确"),
+                }),
+            },
+            UnsupportedScopes: Array.Empty<string>());
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        // 第一个段落第二个run三项全错 = 3个diagnostic
+        Assert.Equal(3, result.Diagnostics.Count);
+        Assert.All(result.Diagnostics, d => Assert.Contains("paragraph[0]/run[1]", d.Location));
+    }
+
+    [Fact]
+    public void UnsupportedScopesArePassedThrough()
+    {
+        var unsupported = new[] { "headers/footers", "textboxes", "tables" };
+        var snapshot = new DocumentSnapshot(
+            PartName: "word/document.xml",
+            Paragraphs: new List<ParagraphSnapshot>(),
+            UnsupportedScopes: unsupported);
+
+        var analyzer = new FontSizeAnalyzer();
+        var result = analyzer.Analyze(snapshot, DefaultProfile);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Equal(unsupported, result.UnsupportedScopes);
+    }
+
+    [Fact]
+    public void NullArgumentsThrow()
+    {
+        var analyzer = new FontSizeAnalyzer();
+        var snapshot = new DocumentSnapshot("word/document.xml", Array.Empty<ParagraphSnapshot>(), Array.Empty<string>());
+
+        Assert.Throws<ArgumentNullException>(() => analyzer.Analyze(null!, DefaultProfile));
+        Assert.Throws<ArgumentNullException>(() => analyzer.Analyze(snapshot, null!));
+    }
+}
