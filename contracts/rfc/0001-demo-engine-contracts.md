@@ -1,6 +1,6 @@
 # RFC 0001 — Demo 引擎契约（draft/demo 阶段）
 
-- 状态：proposed
+- 状态：accepted
 - 负责人：@lzmp666
 - 对应 Issue：#33
 - 对应 PR：#36
@@ -64,6 +64,6 @@
 
 ## 7. 审批
 
-- [ ] @lzmp666 review 通过并标记 accepted
+- [x] @lzmp666 review 通过并标记 accepted（2026-10-13）
 - [ ] PR #36 合并入 main
 - [ ] #35 rebase 到最新 main，确认 diff 只剩 `FontSizeAnalyzer.cs` + `FontSizeAnalyzerTests.cs`
