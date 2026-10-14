@@ -118,5 +118,7 @@ public static class CliReportFormatter
             : ValueOrUnknown(scope);
 
     private static string ValueOrUnknown(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "（未知）" : value;
+        string.IsNullOrWhiteSpace(value) || string.Equals(value, "(unknown)", StringComparison.OrdinalIgnoreCase)
+            ? "（未知）"
+            : value;
 }
