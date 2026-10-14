@@ -144,6 +144,6 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
     private static string ComputeCoverage(DocumentSnapshot snapshot)
     {
         var totalRuns = snapshot.Paragraphs.Sum(p => p.Runs.Count);
-        return $"covered: {totalRuns} runs in {snapshot.Paragraphs.Count} paragraphs";
+        return $"已检查 {totalRuns} 个文本片段，涉及 {snapshot.Paragraphs.Count} 个段落";
     }
 }
