@@ -126,7 +126,7 @@ public sealed class CliAnalyzeCommandTests
     public void ReportMarksDraftDemoAndNeverClaimsFullCompliance()
     {
         var assembly = LoadCliAssembly();
-        var result = NewResult(assembly, new[] { NewDiagnostic(assembly) }, "body formatting", "tables");
+        var result = NewResult(assembly, new[] { NewDiagnostic(assembly) }, "正文格式", "tables");
         var formatter = assembly.GetType("ThesisEngine.Cli.CliReportFormatter")!;
         var format = formatter.GetMethod("Format", new[] { result.GetType(), typeof(string) })!;
 
@@ -134,6 +134,7 @@ public sealed class CliAnalyzeCommandTests
 
         Assert.Contains("=== 论文格式检查报告 ===", report);
         Assert.Contains("模式：草稿/演示", report);
+        Assert.Contains("警告 demo/font-size", report);
         Assert.Contains("问题详情：", report);
         Assert.Contains("位置：paragraph[0]/run[0]", report);
         Assert.Contains("期望：12pt", report);
@@ -141,8 +142,7 @@ public sealed class CliAnalyzeCommandTests
         Assert.Contains("修复级别：手动", report);
         Assert.Contains("说明：字号与演示要求不一致。", report);
         Assert.Contains("未覆盖范围：", report);
-        Assert.Contains("tables", report);
-        Assert.DoesNotContain("全文合规", report, StringComparison.Ordinal);
+        Assert.Contains("表格", report);
         Assert.DoesNotContain("全文合规", report, StringComparison.Ordinal);
     }
 
@@ -169,7 +169,7 @@ public sealed class CliAnalyzeCommandTests
 
     private static object NewResult(Assembly assembly, params object[] diagnostics)
     {
-        return NewResult(assembly, diagnostics, "fonts and sizes", "body", "tables");
+        return NewResult(assembly, diagnostics, "字体和字号", "正文", "tables");
     }
 
     private static object NewResult(
