@@ -1,5 +1,13 @@
 using System.Xml;
+using ThesisEngine.Cli;
 using ThesisEngine.Core;
+
+if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new AnalyzeCommand(
+        new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer()));
+    return command.Execute(args);
+}
 
 if (args.Length != 1)
 {
