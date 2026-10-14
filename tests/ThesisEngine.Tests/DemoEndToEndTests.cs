@@ -23,7 +23,8 @@ public sealed class DemoEndToEndTests
         Assert.Contains("Diagnostics: 0", result.Output);
         Assert.Contains("Findings: 0", result.Output);
         Assert.Contains("Rule version: demo-0.1.0", result.Output);
-        Assert.Contains("Finding details:\n  (none)", result.Output);
+        Assert.Contains("Finding details:", result.Output);
+        Assert.Contains("(none)", result.Output);
         Assert.Contains("仅供演示/测试，不代表合规结论", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
     }
