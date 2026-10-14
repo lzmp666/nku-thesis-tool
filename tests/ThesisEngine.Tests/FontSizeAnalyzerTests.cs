@@ -26,7 +26,7 @@ public sealed class FontSizeAnalyzerTests
 
         Assert.Empty(result.Diagnostics);
         Assert.Equal(DefaultProfile.RuleVersion, result.RuleVersion);
-        Assert.Contains("1 runs", result.Coverage);
+        Assert.Contains("1 个文本片段", result.Coverage);
     }
 
     [Fact]
