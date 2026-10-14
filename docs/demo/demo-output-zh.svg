@@ -34,7 +34,7 @@
   <text x="88" y="351" class="mono muted" font-size="16">输入文件：tests/fixtures/synthetic/demo/known_issues_sample.docx</text>
   <text x="88" y="382" class="ui white" font-size="18">状态：分析完成　　诊断数量：3　　发现问题：3</text>
   <text x="88" y="413" class="mono white" font-size="16">规则版本：demo-0.1.0　　已检查范围：已检查 3 个文本片段，涉及 3 个段落</text>
-  <text x="88" y="444" class="ui muted" font-size="16">未覆盖范围：此演示仅检查正文文本片段；表格、页眉/页脚等范围可能不在覆盖内。</text>
+  <text x="88" y="444" class="ui muted" font-size="16">未覆盖范围：（分析服务未报告；本演示仍只覆盖部分规则）</text>
 
   <rect x="80" y="472" width="1280" height="146" rx="12" fill="#141f30" stroke="#293a51"/>
   <text x="105" y="507" class="ui yellow" font-size="18" font-weight="700">[1] 警告</text>
@@ -46,7 +46,7 @@
   <text x="105" y="671" class="ui yellow" font-size="18" font-weight="700">[2] 警告</text>
   <text x="205" y="671" class="mono blue" font-size="16">demo/western-font</text>
   <text x="105" y="704" class="mono muted" font-size="15">位置：word/document.xml#paragraph[1]/run[0]</text>
-  <text x="105" y="735" class="ui white" font-size="17">期望：Times New Roman　　实际：Arial　　说明：西文字体与演示要求不一致。</text>
+  <text x="105" y="735" class="ui white" font-size="17">期望：Times New Roman　　实际：Arial　　说明：ASCII/HAnsi 字体应为「Times New Roman」，实际为「Arial」。</text>
 
   <rect x="80" y="800" width="1280" height="146" rx="12" fill="#141f30" stroke="#293a51"/>
   <text x="105" y="835" class="ui yellow" font-size="18" font-weight="700">[3] 警告</text>
