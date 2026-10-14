@@ -56,4 +56,4 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 演示图片
 
-[查看合成样例的 CLI 输出图片](demo-output.png)。该图片是端到端测试验证过的输出节选的静态呈现，不是实时屏幕截图；中间报告内容有所省略。完整报告请运行上面的命令。图片只包含合成样例路径和演示结果。
+[查看中文 CLI 输出示例](demo-output-zh.svg)。这是根据端到端测试验证的演示结果制作的静态呈现，不是实时屏幕截图，部分中间字段有所省略。完整报告请运行上面的命令。图片只包含合成样例路径和演示结果。
