@@ -18,14 +18,14 @@ public sealed class DemoEndToEndTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(result.Error);
-        Assert.Contains("=== Thesis format analysis ===", result.Output);
-        Assert.Contains("Mode: DRAFT/DEMO", result.Output);
-        Assert.Contains("Diagnostics: 0", result.Output);
-        Assert.Contains("Findings: 0", result.Output);
-        Assert.Contains("Rule version: demo-0.1.0", result.Output);
-        Assert.Contains("Finding details:", result.Output);
-        Assert.Contains("(none)", result.Output);
-        Assert.Contains("仅供演示/测试，不代表合规结论", result.Output);
+        Assert.Contains("=== 论文格式检查报告 ===", result.Output);
+        Assert.Contains("模式：草稿/演示", result.Output);
+        Assert.Contains("诊断数量：0", result.Output);
+        Assert.Contains("发现问题：0", result.Output);
+        Assert.Contains("规则版本：demo-0.1.0", result.Output);
+        Assert.Contains("问题详情：", result.Output);
+        Assert.Contains("（无）", result.Output);
+        Assert.Contains("不代表规范合规结论", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
     }
 
@@ -39,23 +39,23 @@ public sealed class DemoEndToEndTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(result.Error);
-        Assert.Contains("Mode: DRAFT/DEMO", result.Output);
-        Assert.Contains("Diagnostics: 3", result.Output);
-        Assert.Contains("Findings: 3", result.Output);
-        Assert.Contains("Rule version: demo-0.1.0", result.Output);
+        Assert.Contains("模式：草稿/演示", result.Output);
+        Assert.Contains("诊断数量：3", result.Output);
+        Assert.Contains("发现问题：3", result.Output);
+        Assert.Contains("规则版本：demo-0.1.0", result.Output);
         Assert.Contains("demo/east-asian-font", result.Output);
         Assert.Contains("word/document.xml#paragraph[0]/run[0]", result.Output);
-        Assert.Contains("Expected: 宋体", result.Output);
-        Assert.Contains("Actual: 黑体", result.Output);
+        Assert.Contains("期望：宋体", result.Output);
+        Assert.Contains("实际：黑体", result.Output);
         Assert.Contains("demo/western-font", result.Output);
         Assert.Contains("word/document.xml#paragraph[1]/run[0]", result.Output);
-        Assert.Contains("Expected: Times New Roman", result.Output);
-        Assert.Contains("Actual: Arial", result.Output);
+        Assert.Contains("期望：Times New Roman", result.Output);
+        Assert.Contains("实际：Arial", result.Output);
         Assert.Contains("demo/font-size", result.Output);
         Assert.Contains("word/document.xml#paragraph[2]/run[0]", result.Output);
-        Assert.Contains("Expected: 12pt", result.Output);
-        Assert.Contains("Actual: 10.5pt", result.Output);
-        Assert.Contains("仅供演示/测试，不代表合规结论", result.Output);
+        Assert.Contains("期望：12pt", result.Output);
+        Assert.Contains("实际：10.5pt", result.Output);
+        Assert.Contains("不代表规范合规结论", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
     }
 
