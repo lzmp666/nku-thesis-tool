@@ -1,6 +1,7 @@
-namespace ThesisEngine.Cli
-{
 using ThesisEngine.Core;
+using System.Xml;
+
+namespace ThesisEngine.Cli;
 
 public sealed class AnalyzeCommand
 {
@@ -24,10 +25,7 @@ public sealed class AnalyzeCommand
         return Execute(arguments.ToArray(), _output, _error);
     }
 
-    public int Execute(
-        IEnumerable<string> arguments,
-        TextWriter output,
-        TextWriter error)
+    public int Execute(IEnumerable<string> arguments, TextWriter output, TextWriter error)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         return Execute(arguments.ToArray(), output, error);
@@ -51,55 +49,85 @@ public sealed class AnalyzeCommand
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        if (!TryParse(arguments, out var path))
+        if (!TryParse(arguments, out var inputPath, out var annotatedOutputPath))
         {
             WriteUsage(error);
             return 2;
         }
 
-        string extension;
         try
         {
-            extension = System.IO.Path.GetExtension(path);
-        }
-        catch (Exception)
-        {
-            error.WriteLine("输入路径无效，请检查路径格式。");
-            return 1;
-        }
+            var fullInputPath = Path.GetFullPath(inputPath);
+            if (!string.Equals(Path.GetExtension(fullInputPath), ".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                error.WriteLine($"输入格式不受支持：仅支持 .docx 文件。文件：{inputPath}");
+                return 1;
+            }
 
-        if (!string.Equals(extension, ".docx", StringComparison.OrdinalIgnoreCase))
-        {
-            error.WriteLine($"输入格式不受支持：仅支持 .docx 文件。文件：{path}");
-            return 1;
-        }
+            if (!File.Exists(fullInputPath))
+            {
+                error.WriteLine($"找不到输入文件：{inputPath}");
+                return 1;
+            }
 
-        if (!File.Exists(path))
-        {
-            error.WriteLine($"找不到输入文件：{path}");
-            return 1;
-        }
+            string? fullOutputPath = null;
+            if (annotatedOutputPath is not null)
+            {
+                fullOutputPath = Path.GetFullPath(annotatedOutputPath);
+                if (!string.Equals(Path.GetExtension(fullOutputPath), ".docx", StringComparison.OrdinalIgnoreCase))
+                {
+                    error.WriteLine($"输出格式不受支持：标注副本必须使用 .docx 文件。文件：{annotatedOutputPath}");
+                    return 1;
+                }
 
-        try
-        {
-            var result = _analysisService.Analyze(path, CreateDemoProfile());
+                var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                if (string.Equals(fullInputPath, fullOutputPath, comparison))
+                {
+                    error.WriteLine("输出路径不能与输入路径相同；为保护原文件，未执行写入。");
+                    return 1;
+                }
+
+                if (File.Exists(fullOutputPath) || Directory.Exists(fullOutputPath))
+                {
+                    error.WriteLine($"标注输出目标已存在，为避免覆盖，未写入：{annotatedOutputPath}");
+                    return 1;
+                }
+
+                var outputDirectory = Path.GetDirectoryName(fullOutputPath);
+                if (outputDirectory is null || !Directory.Exists(outputDirectory))
+                {
+                    error.WriteLine($"标注输出目录不存在，请先创建目录：{outputDirectory ?? annotatedOutputPath}");
+                    return 1;
+                }
+            }
+
+            var result = _analysisService.Analyze(fullInputPath, DemoRuleSet.NkuDraftSample);
             if (result is null)
             {
                 error.WriteLine("分析失败：分析服务未返回结果。");
                 return 1;
             }
 
-            CliReportFormatter.Write(result, output, path);
+            var writtenOutputPath = fullOutputPath is null
+                ? null
+                : WordAnnotationWriter.WriteAnnotatedCopy(fullInputPath, fullOutputPath, result.Diagnostics);
+
+            CliReportFormatter.Write(result, output, fullInputPath, writtenOutputPath);
             return 0;
         }
         catch (UnauthorizedAccessException)
         {
-            error.WriteLine("无法读取输入文件，请检查访问权限。");
+            error.WriteLine("分析失败：无法访问输入或输出文件，请检查文件权限。");
             return 1;
         }
         catch (IOException)
         {
-            error.WriteLine("无法读取文档，请检查文件是否损坏或格式是否正确。");
+            error.WriteLine("无法读取文档或写入标注副本，请检查文件是否损坏、路径是否有效或目标是否已存在。");
+            return 1;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or NotSupportedException or XmlException)
+        {
+            error.WriteLine($"分析失败：文档、路径或输出操作无效。{exception.Message}");
             return 1;
         }
         catch (Exception)
@@ -109,10 +137,11 @@ public sealed class AnalyzeCommand
         }
     }
 
-    private static bool TryParse(IReadOnlyList<string> arguments, out string path)
+    private static bool TryParse(IReadOnlyList<string> arguments, out string inputPath, out string? annotatedOutputPath)
     {
-        path = "";
-        if (arguments.Count != 3 ||
+        inputPath = string.Empty;
+        annotatedOutputPath = null;
+        if (arguments.Count < 3 ||
             !string.Equals(arguments[0], "analyze", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(arguments[1], "--demo", StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(arguments[2]))
@@ -120,15 +149,19 @@ public sealed class AnalyzeCommand
             return false;
         }
 
-        path = arguments[2];
+        inputPath = arguments[2];
+        if (arguments.Count == 3) return true;
+        if (arguments.Count != 5 ||
+            !string.Equals(arguments[3], "--annotated-output", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(arguments[4]))
+        {
+            return false;
+        }
+
+        annotatedOutputPath = arguments[4];
         return true;
     }
 
-    private static DemoRuleSet CreateDemoProfile() => DemoRuleSet.NkuDraftSample;
-
-    private static void WriteUsage(TextWriter error)
-    {
-        error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx>");
-    }
-}
+    private static void WriteUsage(TextWriter error) =>
+        error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx> [--annotated-output <标注副本.docx>]");
 }
