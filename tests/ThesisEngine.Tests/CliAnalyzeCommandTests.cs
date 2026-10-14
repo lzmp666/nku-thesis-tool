@@ -29,8 +29,8 @@ public sealed class CliAnalyzeCommandTests
             var profileType = ServiceProxy.LastProfile!.GetType();
             Assert.True((bool)profileType.GetProperty("IsDraft")!.GetValue(ServiceProxy.LastProfile)!);
             Assert.Equal("demo-0.1.0", profileType.GetProperty("RuleVersion")!.GetValue(ServiceProxy.LastProfile));
-            Assert.Contains("Diagnostics: 0", output.ToString());
-            Assert.Contains("DRAFT/DEMO", output.ToString());
+            Assert.Contains("诊断数量：0", output.ToString());
+            Assert.Contains("草稿/演示", output.ToString());
             Assert.DoesNotContain("全文合规", output.ToString(), StringComparison.Ordinal);
         }
         finally
@@ -54,8 +54,8 @@ public sealed class CliAnalyzeCommandTests
             var exitCode = InvokeCommand(NewCommand(assembly, output, error), path, output, error);
 
             Assert.Equal(0, exitCode);
-            Assert.Contains("Diagnostics: 1", output.ToString());
-            Assert.Contains("Error-severity findings:", output.ToString());
+            Assert.Contains("诊断数量：1", output.ToString());
+            Assert.Contains("错误级别的问题：", output.ToString());
         }
         finally
         {
@@ -77,7 +77,7 @@ public sealed class CliAnalyzeCommandTests
         var exitCode = InvokeCommand(NewCommand(assembly, output, error), path, output, error);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("file not found", error.ToString());
+        Assert.Contains("找不到输入文件", error.ToString());
         Assert.Null(ServiceProxy.LastPath);
     }
 
@@ -94,7 +94,7 @@ public sealed class CliAnalyzeCommandTests
             var exitCode = InvokeCommand(NewCommand(assembly, output, error), path, output, error);
 
             Assert.Equal(1, exitCode);
-            Assert.Contains("cannot read document", error.ToString());
+            Assert.Contains("无法读取文档", error.ToString());
         }
         finally
         {
@@ -119,23 +119,30 @@ public sealed class CliAnalyzeCommandTests
 
         Assert.Equal(2, missingPathExitCode);
         Assert.Equal(2, misspelledCommandExitCode);
-        Assert.Contains("Usage: ThesisEngine.Cli analyze --demo <file.docx>", error.ToString());
+        Assert.Contains("用法：ThesisEngine.Cli analyze --demo <file.docx>", error.ToString());
     }
 
     [Fact]
     public void ReportMarksDraftDemoAndNeverClaimsFullCompliance()
     {
         var assembly = LoadCliAssembly();
-        var result = NewResult(assembly, new[] { NewDiagnostic(assembly) }, "body formatting", "tables");
+        var result = NewResult(assembly, new[] { NewDiagnostic(assembly) }, "正文格式", "tables");
         var formatter = assembly.GetType("ThesisEngine.Cli.CliReportFormatter")!;
         var format = formatter.GetMethod("Format", new[] { result.GetType(), typeof(string) })!;
 
         var report = (string)format.Invoke(null, new object[] { result, "sample.docx" })!;
 
-        Assert.Contains("DRAFT/DEMO", report);
-        Assert.Contains("Unsupported scopes", report);
-        Assert.Contains("tables", report);
-        Assert.DoesNotContain("full compliance", report, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("=== 论文格式检查报告 ===", report);
+        Assert.Contains("模式：草稿/演示", report);
+        Assert.Contains("警告 demo/font-size", report);
+        Assert.Contains("问题详情：", report);
+        Assert.Contains("位置：paragraph[0]/run[0]", report);
+        Assert.Contains("期望：12pt", report);
+        Assert.Contains("实际：10.5pt", report);
+        Assert.Contains("修复级别：手动", report);
+        Assert.Contains("说明：字号与演示要求不一致。", report);
+        Assert.Contains("未覆盖范围：", report);
+        Assert.Contains("表格", report);
         Assert.DoesNotContain("全文合规", report, StringComparison.Ordinal);
     }
 
@@ -162,7 +169,7 @@ public sealed class CliAnalyzeCommandTests
 
     private static object NewResult(Assembly assembly, params object[] diagnostics)
     {
-        return NewResult(assembly, diagnostics, "fonts and sizes", "body", "tables");
+        return NewResult(assembly, diagnostics, "字体和字号", "正文", "tables");
     }
 
     private static object NewResult(
@@ -195,7 +202,7 @@ public sealed class CliAnalyzeCommandTests
             "12pt",
             "10.5pt",
             "manual",
-            "Font size differs from the demo target.")!;
+            "字号与演示要求不一致。")!;
     }
 
     private static string CreateInputFile()

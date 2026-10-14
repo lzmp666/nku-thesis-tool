@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080" role="img" aria-labelledby="title desc">
+  <title id="title">论文格式检查演示：中文命令行输出</title>
+  <desc id="desc">使用合成 Word 样例展示三项字体和字号诊断的静态演示画面。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101b2e"/>
+    </linearGradient>
+    <style>
+      .ui { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .mono { font-family: "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace; }
+      .muted { fill: #9caec5; }
+      .white { fill: #e8eef7; }
+      .green { fill: #7ee787; }
+      .yellow { fill: #ffd866; }
+      .blue { fill: #8ab4f8; }
+    </style>
+  </defs>
+  <rect width="1440" height="1080" fill="url(#bg)"/>
+  <rect x="52" y="42" width="1336" height="996" rx="22" fill="#0d1422" stroke="#263448" stroke-width="2"/>
+  <path d="M74 42h1292a22 22 0 0 1 22 22v50H52V64a22 22 0 0 1 22-22z" fill="#182337"/>
+  <circle cx="88" cy="81" r="8" fill="#ff6b6b"/>
+  <circle cx="116" cy="81" r="8" fill="#ffd166"/>
+  <circle cx="144" cy="81" r="8" fill="#58d68d"/>
+  <text x="720" y="88" text-anchor="middle" class="ui muted" font-size="20">论文格式检查演示 · 中文输出</text>
+
+  <text x="88" y="153" class="ui blue" font-size="21">演示命令（合成样例）</text>
+  <text x="88" y="190" class="mono green" font-size="17">$ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release</text>
+  <text x="110" y="220" class="mono green" font-size="17">--no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx</text>
+
+  <line x1="88" y1="244" x2="1352" y2="244" stroke="#263448" stroke-width="1"/>
+  <text x="88" y="282" class="ui white" font-weight="700" font-size="24">=== 论文格式检查报告 ===</text>
+  <text x="88" y="320" class="ui white" font-size="18">模式：草稿/演示（规则覆盖范围有限）</text>
+  <text x="88" y="351" class="mono muted" font-size="16">输入文件：tests/fixtures/synthetic/demo/known_issues_sample.docx</text>
+  <text x="88" y="382" class="ui white" font-size="18">状态：分析完成　　诊断数量：3　　发现问题：3</text>
+  <text x="88" y="413" class="mono white" font-size="16">规则版本：demo-0.1.0　　已检查范围：已检查 3 个文本片段，涉及 3 个段落</text>
+  <text x="88" y="444" class="ui muted" font-size="16">未覆盖范围：（分析服务未报告；本演示仍只覆盖部分规则）</text>
+
+  <rect x="80" y="472" width="1280" height="146" rx="12" fill="#141f30" stroke="#293a51"/>
+  <text x="105" y="507" class="ui yellow" font-size="18" font-weight="700">[1] 警告</text>
+  <text x="205" y="507" class="mono blue" font-size="16">demo/east-asian-font</text>
+  <text x="105" y="540" class="mono muted" font-size="15">位置：word/document.xml#paragraph[0]/run[0]</text>
+  <text x="105" y="571" class="ui white" font-size="17">期望：宋体　　实际：黑体　　说明：东亚字体应为「宋体」，实际为「黑体」。</text>
+
+  <rect x="80" y="636" width="1280" height="146" rx="12" fill="#141f30" stroke="#293a51"/>
+  <text x="105" y="671" class="ui yellow" font-size="18" font-weight="700">[2] 警告</text>
+  <text x="205" y="671" class="mono blue" font-size="16">demo/western-font</text>
+  <text x="105" y="704" class="mono muted" font-size="15">位置：word/document.xml#paragraph[1]/run[0]</text>
+  <text x="105" y="735" class="ui white" font-size="17">期望：Times New Roman　　实际：Arial　　说明：ASCII/HAnsi 字体应为「Times New Roman」，实际为「Arial」。</text>
+
+  <rect x="80" y="800" width="1280" height="146" rx="12" fill="#141f30" stroke="#293a51"/>
+  <text x="105" y="835" class="ui yellow" font-size="18" font-weight="700">[3] 警告</text>
+  <text x="205" y="835" class="mono blue" font-size="16">demo/font-size</text>
+  <text x="105" y="868" class="mono muted" font-size="15">位置：word/document.xml#paragraph[2]/run[0]</text>
+  <text x="105" y="899" class="ui white" font-size="17">期望：12pt　　实际：10.5pt　　说明：字号应为 12pt，实际为 10.5pt。</text>
+
+  <text x="88" y="986" class="ui muted" font-size="15">提示：仅供演示和测试，不代表规范合规结论；工具只读取文件，不会修改原文档。</text>
+</svg>

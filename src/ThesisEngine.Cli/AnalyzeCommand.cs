@@ -62,21 +62,21 @@ public sealed class AnalyzeCommand
         {
             extension = System.IO.Path.GetExtension(path);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            error.WriteLine($"Input error: {exception.Message}");
+            error.WriteLine("输入路径无效，请检查路径格式。");
             return 1;
         }
 
         if (!string.Equals(extension, ".docx", StringComparison.OrdinalIgnoreCase))
         {
-            error.WriteLine($"Input error: only .docx files are supported: {path}");
+            error.WriteLine($"输入格式不受支持：仅支持 .docx 文件。文件：{path}");
             return 1;
         }
 
         if (!File.Exists(path))
         {
-            error.WriteLine($"Input error: file not found: {path}");
+            error.WriteLine($"找不到输入文件：{path}");
             return 1;
         }
 
@@ -85,16 +85,26 @@ public sealed class AnalyzeCommand
             var result = _analysisService.Analyze(path, CreateDemoProfile());
             if (result is null)
             {
-                error.WriteLine("Analysis error: the analysis service returned no result.");
+                error.WriteLine("分析失败：分析服务未返回结果。");
                 return 1;
             }
 
             CliReportFormatter.Write(result, output, path);
             return 0;
         }
-        catch (Exception exception)
+        catch (UnauthorizedAccessException)
         {
-            error.WriteLine($"Analysis error: {exception.Message}");
+            error.WriteLine("无法读取输入文件，请检查访问权限。");
+            return 1;
+        }
+        catch (IOException)
+        {
+            error.WriteLine("无法读取文档，请检查文件是否损坏或格式是否正确。");
+            return 1;
+        }
+        catch (Exception)
+        {
+            error.WriteLine("分析失败，请检查文档格式或稍后重试。");
             return 1;
         }
     }
@@ -118,7 +128,7 @@ public sealed class AnalyzeCommand
 
     private static void WriteUsage(TextWriter error)
     {
-        error.WriteLine("Usage: ThesisEngine.Cli analyze --demo <file.docx>");
+        error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx>");
     }
 }
 }
