@@ -1,15 +1,15 @@
-# Thesis format demo runbook
+# 论文格式检查 Demo 运行说明
 
-> **DRAFT/DEMO only.** The rules and samples below are synthetic and are not an official NKU policy check or a compliance conclusion. Do not use real theses or personal data for this demo.
+> **仅供草稿/演示。** 本演示使用合成规则和合成样例，不是南开大学现行规范检查，也不构成合规结论。请勿使用真实论文或个人信息运行演示。
 
-## Requirements
+## 环境要求
 
 - .NET 10 SDK
-- A checkout of this repository
+- 已检出本仓库代码
 
-Run the following commands from the repository root. The CLI reads the input and does not modify it.
+以下命令请在仓库根目录运行。CLI 只读取输入文件，不会修改原文档。
 
-## Build and test
+## 构建和测试
 
 ```sh
 dotnet restore NkuThesisTool.sln
@@ -17,43 +17,43 @@ dotnet build NkuThesisTool.sln --configuration Release --no-restore
 dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```
 
-## Run the demo
+## 运行演示
 
-The clean synthetic sample should produce **0 findings**:
+正确的合成样例应输出 **0 条问题**：
 
 ```sh
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_sample.docx
 ```
 
-The known-issues sample should produce **exactly 3 findings**:
+已知问题样例应输出 **恰好 3 条诊断**：
 
 ```sh
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx
 ```
 
-Both reports identify the mode as `DRAFT/DEMO` and show the rule version, coverage, unsupported scopes, and a disclaimer. The three expected findings are:
+报告会标明“草稿/演示”模式，并显示规则版本、检查覆盖范围、未覆盖范围和免责声明。预期的三项问题如下：
 
-| Rule | Location | Expected | Actual |
+| 规则编号 | 位置 | 期望值 | 实际值 |
 | --- | --- | --- | --- |
 | `demo/east-asian-font` | `word/document.xml#paragraph[0]/run[0]` | 宋体 | 黑体 |
 | `demo/western-font` | `word/document.xml#paragraph[1]/run[0]` | Times New Roman | Arial |
 | `demo/font-size` | `word/document.xml#paragraph[2]/run[0]` | 12pt | 10.5pt |
 
-The expected values and sample contents are recorded in [the synthetic fixture manifest](../../tests/fixtures/synthetic/demo/manifest.json). All fixture text is manually constructed; no thesis or personal information is included.
+期望值和样例内容记录在[合成样例清单](../../tests/fixtures/synthetic/demo/manifest.json)中。所有样例文字均为人工构造，不含真实论文或个人信息。
 
-## What this demo checks
+## 当前检查范围
 
-The current reader examines ordinary paragraphs and runs in the main document part. It resolves the direct run formatting, paragraph and character styles with their `basedOn` chains, and document defaults for the East Asian font, ASCII/HAnsi font, and point size. Locations identify the OOXML part and paragraph/run indexes; they are not page numbers.
+读取器检查 Word 正文中的普通段落和文本片段。它会解析直接格式、段落和字符样式的 `basedOn` 继承链，以及文档默认设置中的东亚字体、ASCII/HAnsi 字体和字号。位置使用 OOXML 文档部件、段落序号和文本片段序号表示，**不是页码**。
 
-This is a deliberately small demo. It does not establish compliance with any current university rule set, and it does not automatically repair documents. The report lists unsupported scopes where the reader detected content outside its coverage, including tables, headers/footers, footnotes/endnotes, hyperlinks, tracked changes, content controls, and unresolved theme fonts. Even a clean report means only that these three demo rules did not find a mismatch in the covered runs.
+这是一个范围很小的演示。它不代表符合任何现行高校规范，也不会自动修复文档。对于表格、页眉/页脚、脚注/尾注、超链接、修订内容、内容控件和无法解析的主题字体等未覆盖内容，报告会给出提示。即使报告没有发现问题，也只表示这三项演示规则在已检查文本片段中没有发现不匹配。
 
-## Troubleshooting
+## 常见问题
 
-- If the sample path is not found, change to the repository root and retry the command.
-- If the CLI project is missing from the build output, run the Release build command above before using `--no-build`.
-- If restore fails because the SDK is missing, install the .NET 10 SDK and rerun restore.
-- If the findings differ from the three listed above, regenerate the synthetic fixtures using the steps in [the fixture README](../../tests/fixtures/synthetic/demo/README.md), then rerun the tests.
+- 如果提示找不到样例文件，请先切换到仓库根目录再运行命令。
+- 如果构建输出中没有 CLI 项目，请先执行上面的 Release 构建命令，再使用 `--no-build` 运行演示。
+- 如果还没有安装 SDK，请安装 .NET 10 SDK 后重新执行还原命令。
+- 如果检查结果与表格中的三项不一致，请按[样例说明](../../tests/fixtures/synthetic/demo/README.md)重新生成合成样例，再运行测试。
 
-## Demonstration image
+## 演示图片
 
-[Open the synthetic CLI output PNG](demo-output.png). It is a static visual rendering of excerpts verified by the process-level end-to-end tests, not a live screen capture. Intermediate report sections are omitted; run the commands above for full reports. The image contains only the synthetic sample paths and demo output.
+[查看合成样例的 CLI 输出图片](demo-output.png)。该图片是端到端测试验证过的输出节选的静态呈现，不是实时屏幕截图；中间报告内容有所省略。完整报告请运行上面的命令。图片只包含合成样例路径和演示结果。
