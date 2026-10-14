@@ -56,4 +56,4 @@ This is a deliberately small demo. It does not establish compliance with any cur
 
 ## Demonstration image
 
-[Open the synthetic CLI demo output screenshot](demo-output.png). It shows only the two synthetic sample names and their terminal output.
+[Open the synthetic CLI output PNG](demo-output.png). It renders excerpts verified by the process-level end-to-end tests; intermediate report sections are omitted from the image. It contains only the synthetic sample paths and demo output.
