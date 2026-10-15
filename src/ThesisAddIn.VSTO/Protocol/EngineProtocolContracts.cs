@@ -302,7 +302,7 @@ public sealed class EngineProtocolClient
             TryTerminate(process);
             return Failure(request.RequestId, EngineProtocol.Cancelled, "调用已取消。", request);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             TryTerminate(process);
             return Failure(request.RequestId, EngineProtocol.EngineExit, $"引擎进程启动或通信失败：{exception.Message}", request);
