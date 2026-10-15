@@ -4,14 +4,9 @@ using ThesisEngine.Core;
 
 if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.OrdinalIgnoreCase))
 {
-    var service = new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer());
-    return new AnalyzeCommand(service).Execute(args);
-}
-
-if (args.Length > 0 && string.Equals(args[0], "repair", StringComparison.OrdinalIgnoreCase))
-{
-    var service = new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer());
-    return new RepairCommand(service).Execute(args);
+    var command = new AnalyzeCommand(
+        new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer()));
+    return command.Execute(args);
 }
 
 if (args.Length != 1)

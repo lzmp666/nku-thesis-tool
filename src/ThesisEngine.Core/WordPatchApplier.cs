@@ -190,7 +190,9 @@ public static class WordPatchApplier
             if (fonts is null)
             {
                 fonts = new XElement(W + "rFonts");
-                properties.AddFirst(fonts);
+                var style = properties.Element(W + "rStyle");
+                if (style is null) properties.AddFirst(fonts);
+                else style.AddAfterSelf(fonts);
             }
             fonts.SetAttributeValue(W + "eastAsia", target.Patch.DesiredAfter);
             fonts.Attribute(W + "eastAsiaTheme")?.Remove();
@@ -199,16 +201,23 @@ public static class WordPatchApplier
         {
             if (!PatchPlanner.TryParsePoints(target.Patch.DesiredAfter, out var points) || !TryHalfPoints(points, out var halfPoints))
                 throw new PatchFailureException(target.Patch, $"Invalid desired font size: {target.Patch.DesiredAfter}");
-            properties.SetElementValue(W + "sz", null);
             var size = properties.Element(W + "sz");
             if (size is null)
             {
                 size = new XElement(W + "sz");
-                properties.Add(size);
+                var followingProperty = properties.Elements().FirstOrDefault(element => IsAfterFontSize(element.Name));
+                if (followingProperty is null) properties.Add(size);
+                else followingProperty.AddBeforeSelf(size);
             }
             size.SetAttributeValue(W + "val", halfPoints.ToString(CultureInfo.InvariantCulture));
         }
     }
+
+    private static bool IsAfterFontSize(XName name) =>
+        name == W + "szCs" || name == W + "highlight" || name == W + "u" || name == W + "effect" ||
+        name == W + "bdr" || name == W + "shd" || name == W + "fitText" || name == W + "vertAlign" ||
+        name == W + "rtl" || name == W + "cs" || name == W + "em" || name == W + "lang" ||
+        name == W + "eastAsianLayout" || name == W + "specVanish" || name == W + "oMath" || name == W + "rPrChange";
 
     private static bool TryHalfPoints(double points, out int halfPoints)
     {

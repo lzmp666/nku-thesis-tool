@@ -25,10 +25,10 @@ public static class CliReportFormatter
             ["theme fonts"] = "主题字体尚未解析"
         };
 
-    public static string Format(AnalysisResult result, string? inputPath) =>
+    public static string Format(AnalysisResult result, string? inputPath = null) =>
         Format(result, inputPath, null);
 
-    public static string Format(AnalysisResult result, string? inputPath = null, string? annotatedOutputPath = null)
+    public static string Format(AnalysisResult result, string? inputPath, string? annotatedOutputPath)
     {
         ArgumentNullException.ThrowIfNull(result);
         using var writer = new StringWriter(CultureInfo.InvariantCulture);
@@ -36,26 +36,28 @@ public static class CliReportFormatter
         return writer.ToString();
     }
 
-    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath = null, string? annotatedOutputPath = null)
+    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath = null) =>
+        Write(result, writer, inputPath, null);
+
+    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath, string? annotatedOutputPath)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(writer);
 
         var diagnostics = result.Diagnostics ?? Array.Empty<Diagnostic>();
         var unsupported = result.UnsupportedScopes ?? Array.Empty<string>();
-        var count = diagnostics.Count.ToString(CultureInfo.InvariantCulture);
 
         writer.WriteLine("=== 论文格式检查报告 ===");
-        writer.WriteLine("=== 论文格式分析（演示）===");
         writer.WriteLine("模式：草稿/演示（规则覆盖范围有限）");
-        writer.WriteLine("Mode: DRAFT/DEMO (draft/demo; partial rule coverage)");
         if (!string.IsNullOrWhiteSpace(inputPath))
             writer.WriteLine($"输入文件：{inputPath}");
         writer.WriteLine("状态：分析完成");
-        writer.WriteLine($"诊断数量：{count}（诊断数：{count}，发现问题：{count}）");
+        writer.WriteLine($"诊断数量：{diagnostics.Count.ToString(CultureInfo.InvariantCulture)}");
+        writer.WriteLine($"发现问题：{diagnostics.Count.ToString(CultureInfo.InvariantCulture)}");
         writer.WriteLine($"规则版本：{ValueOrUnknown(result.RuleVersion)}");
-        var coverage = ValueOrUnknown(result.Coverage);
-        writer.WriteLine($"已检查范围：{coverage}（覆盖范围：{coverage}）");
+        writer.WriteLine($"已检查范围：{ValueOrUnknown(result.Coverage)}");
+        if (!string.IsNullOrWhiteSpace(annotatedOutputPath))
+            writer.WriteLine($"标注副本：{annotatedOutputPath}");
 
         writer.WriteLine("未覆盖范围：");
         if (unsupported.Count == 0)
@@ -78,7 +80,7 @@ public static class CliReportFormatter
                 writer.WriteLine($"  - {ValueOrUnknown(finding.RuleId)}，位置：{ValueOrUnknown(finding.Location)}；说明：{ValueOrUnknown(finding.Message)}");
         }
 
-        writer.WriteLine("问题详情：（诊断详情）");
+        writer.WriteLine("问题详情：");
         if (diagnostics.Count == 0)
         {
             writer.WriteLine("  （无）");
@@ -97,10 +99,9 @@ public static class CliReportFormatter
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(annotatedOutputPath))
-            writer.WriteLine($"标注文件：{annotatedOutputPath}");
-        writer.WriteLine("提示：草稿 / 演示结果仅供演示和测试，不代表合规结论（不代表规范合规结论）。");
-        writer.WriteLine("Notice: DRAFT/DEMO only; 仅供演示/测试，不代表合规结论。");
+        writer.WriteLine(string.IsNullOrWhiteSpace(annotatedOutputPath)
+            ? "提示：本演示仅供测试，不代表规范合规结论；本次仅分析原文件。"
+            : "提示：本演示仅供测试，不代表规范合规结论；结果另存为标注副本，原文件不变。");
     }
 
     private static string DisplaySeverity(string? severity) =>
@@ -116,7 +117,6 @@ public static class CliReportFormatter
         fixLevel?.ToLowerInvariant() switch
         {
             "auto" => "自动",
-            "suggest" => "建议",
             "manual" => "手动",
             "none" => "无需修复",
             _ => ValueOrUnknown(fixLevel)

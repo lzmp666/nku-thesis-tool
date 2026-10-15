@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Xml.Linq;
 using Xunit;
 
 namespace ThesisEngine.Tests;
@@ -69,92 +70,140 @@ public sealed class CliTests
     }
 
     [Fact]
-    public async Task AnalyzeDemoWritesAnnotatedCopyAndChineseReport()
+    public async Task AnalyzeWithAnnotatedOutputWritesCommentsAndPreservesInput()
     {
-        var root = FindRepositoryRoot();
-        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
-        var outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.annotated.docx");
-        var originalBytes = File.ReadAllBytes(inputPath);
+        var input = GetDemoFixture("known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".annotated.docx");
+        var before = File.ReadAllBytes(input);
         try
         {
-            var result = await RunCli("analyze", "--demo", inputPath, "--annotated-output", outputPath);
+            var result = await RunCli("analyze", "--demo", input, "--annotated-output", output);
 
             Assert.Equal(0, result.ExitCode);
             Assert.Empty(result.Error);
-            Assert.Contains("诊断数：3", result.Output);
+            Assert.Contains("诊断数量：3", result.Output);
             Assert.Contains("规则版本：demo-0.1.0", result.Output);
-            Assert.Contains("覆盖范围：", result.Output);
-            Assert.Contains("标注文件：", result.Output);
-            Assert.Contains("不代表合规结论", result.Output);
-            Assert.True(File.Exists(outputPath));
-            Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
+            Assert.Contains("已检查范围：", result.Output);
+            Assert.Contains("未覆盖范围：", result.Output);
+            Assert.Contains($"标注副本：{output}", result.Output);
+            Assert.Contains("原文件不变", result.Output);
+            Assert.Equal(before, File.ReadAllBytes(input));
+            Assert.True(File.Exists(output));
 
-            using var archive = ZipFile.OpenRead(outputPath);
-            var commentsEntry = archive.GetEntry("word/comments.xml");
-            Assert.NotNull(commentsEntry);
-            using var reader = new StreamReader(commentsEntry!.Open());
-            var comments = await reader.ReadToEndAsync();
-            Assert.Contains("期望值：宋体；实际值：黑体", comments);
-            Assert.Contains("期望值：Times New Roman；实际值：Arial", comments);
-            Assert.Contains("期望值：12pt；实际值：10.5pt", comments);
+            using var archive = ZipFile.OpenRead(output);
+            var comments = ReadXml(archive, "word/comments.xml");
+            var document = ReadXml(archive, "word/document.xml");
+            XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            Assert.Equal(3, comments.Root!.Elements(word + "comment").Count());
+            Assert.Equal(3, document.Descendants(word + "highlight").Count());
+            var commentText = string.Concat(comments.Descendants(word + "t").Select(element => element.Value));
+            Assert.Contains("宋体", commentText);
+            Assert.Contains("Times New Roman", commentText);
+            Assert.Contains("12pt", commentText);
         }
         finally
         {
-            if (File.Exists(outputPath)) File.Delete(outputPath);
+            File.Delete(output);
         }
     }
 
     [Fact]
-    public async Task AnalyzeDemoCleanSampleWritesCopyWithoutComments()
+    public async Task AnalyzeCleanSampleCreatesUnannotatedCopyAndReportsCoverage()
     {
-        var root = FindRepositoryRoot();
-        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "clean_sample.docx");
-        var outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.clean.annotated.docx");
+        var input = GetDemoFixture("clean_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".clean.docx");
+        var before = File.ReadAllBytes(input);
         try
         {
-            var result = await RunCli("analyze", "--demo", inputPath, "--annotated-output", outputPath);
+            var result = await RunCli("analyze", "--demo", input, "--annotated-output", output);
 
             Assert.Equal(0, result.ExitCode);
             Assert.Empty(result.Error);
-            Assert.Contains("诊断数：0", result.Output);
+            Assert.Contains("诊断数量：0", result.Output);
+            Assert.Contains("规则版本：demo-0.1.0", result.Output);
+            Assert.Contains("已检查范围：", result.Output);
             Assert.Contains("未覆盖范围：", result.Output);
-            Assert.Contains("标注文件：", result.Output);
-            Assert.True(File.Exists(outputPath));
-
-            using var archive = ZipFile.OpenRead(outputPath);
+            Assert.Contains($"标注副本：{output}", result.Output);
+            Assert.Equal(before, File.ReadAllBytes(input));
+            Assert.True(File.Exists(output));
+            using var archive = ZipFile.OpenRead(output);
             Assert.Null(archive.GetEntry("word/comments.xml"));
         }
         finally
         {
-            if (File.Exists(outputPath)) File.Delete(outputPath);
+            File.Delete(output);
         }
     }
 
     [Fact]
-    public async Task AnalyzeDemoRefusesToOverwriteInputOrExistingOutput()
+    public async Task AnalyzeRejectsSameInputAndOutputPathWithoutChangingInput()
     {
-        var root = FindRepositoryRoot();
-        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
-        var originalBytes = File.ReadAllBytes(inputPath);
-        var existingOutputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.existing.docx");
-        const string sentinel = "keep this existing file";
+        var input = GetDemoFixture("known_issues_sample.docx");
+        var before = File.ReadAllBytes(input);
+
+        var result = await RunCli("analyze", "--demo", input, "--annotated-output", input);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("输出路径不能与输入路径相同", result.Error);
+        Assert.Empty(result.Output);
+        Assert.Equal(before, File.ReadAllBytes(input));
+    }
+
+    [Fact]
+    public async Task AnalyzeDoesNotOverwriteExistingOutput()
+    {
+        var input = GetDemoFixture("known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".existing.docx");
+        var sentinel = new byte[] { 1, 3, 3, 7 };
+        File.WriteAllBytes(output, sentinel);
         try
         {
-            var samePathResult = await RunCli("analyze", "--demo", inputPath, "--annotated-output", inputPath);
-            Assert.Equal(1, samePathResult.ExitCode);
-            Assert.Contains("输出路径不能与输入路径相同", samePathResult.Error);
-            Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
+            var result = await RunCli("analyze", "--demo", input, "--annotated-output", output);
 
-            await File.WriteAllTextAsync(existingOutputPath, sentinel);
-            var existingOutputResult = await RunCli("analyze", "--demo", inputPath, "--annotated-output", existingOutputPath);
-            Assert.Equal(1, existingOutputResult.ExitCode);
-            Assert.Contains("目标文件已存在", existingOutputResult.Error);
-            Assert.Equal(sentinel, await File.ReadAllTextAsync(existingOutputPath));
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("目标已存在", result.Error);
+            Assert.Empty(result.Output);
+            Assert.Equal(sentinel, File.ReadAllBytes(output));
         }
         finally
         {
-            if (File.Exists(existingOutputPath)) File.Delete(existingOutputPath);
+            File.Delete(output);
         }
+    }
+
+    [Fact]
+    public async Task AnalyzeRejectsInvalidOutputExtensionAndMissingDirectory()
+    {
+        var input = GetDemoFixture("known_issues_sample.docx");
+        var invalidExtension = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".txt");
+        var missingDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "result.docx");
+
+        var extensionResult = await RunCli("analyze", "--demo", input, "--annotated-output", invalidExtension);
+        var directoryResult = await RunCli("analyze", "--demo", input, "--annotated-output", missingDirectory);
+
+        Assert.Equal(1, extensionResult.ExitCode);
+        Assert.Contains("标注副本必须使用 .docx", extensionResult.Error);
+        Assert.Empty(extensionResult.Output);
+        Assert.Equal(1, directoryResult.ExitCode);
+        Assert.Contains("标注输出目录不存在", directoryResult.Error);
+        Assert.Empty(directoryResult.Output);
+        Assert.False(File.Exists(invalidExtension));
+        Assert.False(File.Exists(missingDirectory));
+    }
+
+    [Fact]
+    public async Task AnalyzeReportsInvalidArgumentsAndMissingDocumentsInChinese()
+    {
+        var malformed = await RunCli("analyze", "--demo", "document.docx", "--annotated-output");
+        Assert.Equal(2, malformed.ExitCode);
+        Assert.Contains("用法：", malformed.Error);
+        Assert.Empty(malformed.Output);
+
+        var missingPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var missing = await RunCli("analyze", "--demo", missingPath);
+        Assert.Equal(1, missing.ExitCode);
+        Assert.Contains("找不到输入文件", missing.Error);
+        Assert.Empty(missing.Output);
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunCli(params string[] args)
@@ -163,8 +212,10 @@ public sealed class CliTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "NkuThesisTool.sln")))
             root = root.Parent;
         Assert.NotNull(root);
-        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
-        var cli = Path.Combine(root.FullName, "src", "ThesisEngine.Cli", "bin", configuration, "net10.0", "ThesisEngine.Cli.dll");
+        var testOutput = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = testOutput.Parent!.Name;
+        var targetFramework = testOutput.Name;
+        var cli = Path.Combine(root.FullName, "src", "ThesisEngine.Cli", "bin", configuration, targetFramework, "ThesisEngine.Cli.dll");
         Assert.True(File.Exists(cli), $"CLI was not built: {cli}");
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
         {
@@ -188,12 +239,21 @@ public sealed class CliTests
         return (process.ExitCode, await output, await error);
     }
 
-    private static DirectoryInfo FindRepositoryRoot()
+    private static string GetDemoFixture(string fileName)
     {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NkuThesisTool.sln")))
-            directory = directory.Parent;
-        return directory ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "NkuThesisTool.sln")))
+            root = root.Parent;
+        Assert.NotNull(root);
+        return Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", fileName);
+    }
+
+    private static XDocument ReadXml(ZipArchive archive, string partName)
+    {
+        var entry = archive.GetEntry(partName);
+        Assert.NotNull(entry);
+        using var stream = entry.Open();
+        return XDocument.Load(stream);
     }
 
     private static void CreatePackage(string path, string scenario)
