@@ -45,7 +45,7 @@ public sealed class EngineProtocolTests
     public async Task ProtocolHostAnalyzesSyntheticDocumentThroughJsonLines()
     {
         var root = FindRepositoryRoot();
-        var host = Path.Combine(root, "src", "ThesisAddIn.VSTO", "ProtocolHost", "bin", "Debug", "net10.0", "ThesisEngine.ProtocolHost.dll");
+        var host = FindProtocolHost(root);
         Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
         var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
 
@@ -65,7 +65,7 @@ public sealed class EngineProtocolTests
     public async Task ClientInvokesProtocolHostAndReturnsStructuredAnalysis()
     {
         var root = FindRepositoryRoot();
-        var host = Path.Combine(root, "src", "ThesisAddIn.VSTO", "ProtocolHost", "bin", "Debug", "net10.0", "ThesisEngine.ProtocolHost.dll");
+        var host = FindProtocolHost(root);
         Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
         var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "clean_sample.docx");
 
@@ -81,7 +81,7 @@ public sealed class EngineProtocolTests
     public async Task ProtocolHostRejectsAnUnknownProtocolVersion()
     {
         var root = FindRepositoryRoot();
-        var host = Path.Combine(root, "src", "ThesisAddIn.VSTO", "ProtocolHost", "bin", "Debug", "net10.0", "ThesisEngine.ProtocolHost.dll");
+        var host = FindProtocolHost(root);
         Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
 
         var response = await RunHost(host, new EngineRequest
@@ -160,6 +160,21 @@ public sealed class EngineProtocolTests
             directory = directory.Parent;
         Assert.NotNull(directory);
         return directory!.FullName;
+    }
+
+    private static string FindProtocolHost(string root)
+    {
+        var projectOutput = Path.Combine(root, "src", "ThesisAddIn.VSTO", "ProtocolHost", "bin");
+        var configuration = AppContext.BaseDirectory.Contains(
+            Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase)
+            ? "Release"
+            : "Debug";
+        var configuredPath = Path.Combine(projectOutput, configuration, "net10.0", "ThesisEngine.ProtocolHost.dll");
+        if (File.Exists(configuredPath)) return configuredPath;
+
+        var fallback = Path.Combine(projectOutput, configuration == "Release" ? "Debug" : "Release", "net10.0", "ThesisEngine.ProtocolHost.dll");
+        return File.Exists(fallback) ? fallback : configuredPath;
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
