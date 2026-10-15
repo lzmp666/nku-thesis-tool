@@ -14,6 +14,8 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
 
     private const string SeverityWarning = "warning";
     private const string FixLevelAuto = "auto";
+    private const string FixLevelSuggest = "suggest";
+    private const string FixLevelManual = "manual";
 
     public AnalysisResult Analyze(DocumentSnapshot snapshot, DemoRuleSet profile)
     {
@@ -59,7 +61,7 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
                 Location: location,
                 Expected: profile.EastAsiaFontExpected,
                 Actual: "(unknown)",
-                FixLevel: FixLevelAuto,
+                FixLevel: FixLevelManual,
                 Message: "东亚字体未设置或无法解析，无法判定是否符合要求。"));
             return;
         }
@@ -91,7 +93,7 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
                 Location: location,
                 Expected: profile.AsciiFontExpected,
                 Actual: "(unknown)",
-                FixLevel: FixLevelAuto,
+                FixLevel: FixLevelManual,
                 Message: "ASCII/HAnsi 字体未设置或无法解析，无法判定是否符合要求。"));
             return;
         }
@@ -104,7 +106,7 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
                 Location: location,
                 Expected: profile.AsciiFontExpected,
                 Actual: run.AsciiFont,
-                FixLevel: FixLevelAuto,
+                FixLevel: FixLevelSuggest,
                 Message: $"ASCII/HAnsi 字体应为「{profile.AsciiFontExpected}」，实际为「{run.AsciiFont}」。"));
         }
     }
@@ -123,7 +125,7 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
                 Location: location,
                 Expected: $"{profile.FontSizeExpectedPt}pt",
                 Actual: "(unknown)",
-                FixLevel: FixLevelAuto,
+                FixLevel: FixLevelManual,
                 Message: "字号未设置或无法解析，无法判定是否符合要求。"));
             return;
         }

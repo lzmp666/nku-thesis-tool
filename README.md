@@ -22,6 +22,23 @@ dotnet run --project src/ThesisEngine.Cli -- "C:\path\thesis.docx"
 成功输出 Document loaded successfully，随后显示“占位模式，尚未检测格式”。缺少参数返回 2，文件或 OOXML 包无效返回 1。
 首次 restore 需要连接 NuGet。单元测试自动生成临时 synthetic 包，不使用真实论文。
 
+演示规则分析和标注副本：
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli -- analyze --demo "C:\path\known_issues_sample.docx" --annotated-output "C:\path\known_issues_sample.annotated.docx"
+```
+
+命令只读取输入文件，将诊断结果输出到终端；传入 `--annotated-output` 时另存带黄色高亮和中文 Word 批注的副本，不覆盖输入文件。该模式使用 `demo-0.1.0` 草稿规则，仅供演示和测试，不代表合规结论。
+
+执行 Demo 自动修复（编号从 1 开始，或使用 `--all` 批量执行）：
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli -- repair --demo "C:\path\known_issues_sample.docx" --output "C:\path\known_issues_sample.fixed.docx" --all
+dotnet run --project src/ThesisEngine.Cli -- repair --demo "C:\path\known_issues_sample.docx" --output "C:\path\known_issues_sample.fixed.docx" --patch 1
+```
+
+修复始终另存新文件；批量模式只执行 `auto` 补丁，`suggest`/`manual` 诊断会在修复后报告中保留。
+
 ## 目录与贡献
 contracts/ 契约；rules/ 学校规则；src/ 引擎与入口；tests/ 样本、golden、测试；docs/ 协作说明。
 只有 main 是长期分支。领取 Issue → 建分支 → 自测 → PR → Review → Merge。禁止直接推 main。

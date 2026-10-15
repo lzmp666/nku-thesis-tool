@@ -68,6 +68,95 @@ public sealed class CliTests
         Assert.Empty(result.Output);
     }
 
+    [Fact]
+    public async Task AnalyzeDemoWritesAnnotatedCopyAndChineseReport()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.annotated.docx");
+        var originalBytes = File.ReadAllBytes(inputPath);
+        try
+        {
+            var result = await RunCli("analyze", "--demo", inputPath, "--annotated-output", outputPath);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Empty(result.Error);
+            Assert.Contains("诊断数：3", result.Output);
+            Assert.Contains("规则版本：demo-0.1.0", result.Output);
+            Assert.Contains("覆盖范围：", result.Output);
+            Assert.Contains("标注文件：", result.Output);
+            Assert.Contains("不代表合规结论", result.Output);
+            Assert.True(File.Exists(outputPath));
+            Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var commentsEntry = archive.GetEntry("word/comments.xml");
+            Assert.NotNull(commentsEntry);
+            using var reader = new StreamReader(commentsEntry!.Open());
+            var comments = await reader.ReadToEndAsync();
+            Assert.Contains("期望值：宋体；实际值：黑体", comments);
+            Assert.Contains("期望值：Times New Roman；实际值：Arial", comments);
+            Assert.Contains("期望值：12pt；实际值：10.5pt", comments);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public async Task AnalyzeDemoCleanSampleWritesCopyWithoutComments()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "clean_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.clean.annotated.docx");
+        try
+        {
+            var result = await RunCli("analyze", "--demo", inputPath, "--annotated-output", outputPath);
+
+            Assert.Equal(0, result.ExitCode);
+            Assert.Empty(result.Error);
+            Assert.Contains("诊断数：0", result.Output);
+            Assert.Contains("未覆盖范围：", result.Output);
+            Assert.Contains("标注文件：", result.Output);
+            Assert.True(File.Exists(outputPath));
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            Assert.Null(archive.GetEntry("word/comments.xml"));
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public async Task AnalyzeDemoRefusesToOverwriteInputOrExistingOutput()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var originalBytes = File.ReadAllBytes(inputPath);
+        var existingOutputPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.existing.docx");
+        const string sentinel = "keep this existing file";
+        try
+        {
+            var samePathResult = await RunCli("analyze", "--demo", inputPath, "--annotated-output", inputPath);
+            Assert.Equal(1, samePathResult.ExitCode);
+            Assert.Contains("输出路径不能与输入路径相同", samePathResult.Error);
+            Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
+
+            await File.WriteAllTextAsync(existingOutputPath, sentinel);
+            var existingOutputResult = await RunCli("analyze", "--demo", inputPath, "--annotated-output", existingOutputPath);
+            Assert.Equal(1, existingOutputResult.ExitCode);
+            Assert.Contains("目标文件已存在", existingOutputResult.Error);
+            Assert.Equal(sentinel, await File.ReadAllTextAsync(existingOutputPath));
+        }
+        finally
+        {
+            if (File.Exists(existingOutputPath)) File.Delete(existingOutputPath);
+        }
+    }
+
     private static async Task<(int ExitCode, string Output, string Error)> RunCli(params string[] args)
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
@@ -97,6 +186,14 @@ public sealed class CliTests
             throw;
         }
         return (process.ExitCode, await output, await error);
+    }
+
+    private static DirectoryInfo FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NkuThesisTool.sln")))
+            directory = directory.Parent;
+        return directory ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
     }
 
     private static void CreatePackage(string path, string scenario)
