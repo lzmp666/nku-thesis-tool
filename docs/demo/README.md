@@ -68,3 +68,54 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 ## 演示图片
 
 [查看中文 CLI 输出示例](demo-output-zh.svg)。这是根据端到端测试验证的演示结果制作的静态呈现，不是实时屏幕截图，部分中间字段有所省略。完整报告请运行上面的命令。图片只包含合成样例路径和演示结果。
+
+## Word 打开验证记录（Issue #46）
+
+验证日期：2026-10-15　验证人：@piggy515
+
+### 验证环境
+
+| 项目 | 版本 / 说明 |
+| --- | --- |
+| 操作系统 | Windows 11 25H2，内部版本 26200.9457（注册表产品名仍显示 Windows 10，为本机已知显示现象） |
+| Microsoft Word | 16.0.20430.20146（桌面版，64 位） |
+| .NET SDK | 10.0.401（构建与测试所用版本） |
+| 授权状态 | 本机 Windows / Office 未激活，Word 标题栏显示“未经授权产品”并提示“重启以获得 Office”。该提示来自 Office 授权状态，与本文档无关，未影响打开与解析。 |
+
+### 运行命令与输出路径
+
+在仓库根目录执行：
+
+```sh
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --annotated-output artifacts/known_issues.annotated.docx
+```
+
+输出路径：`artifacts/known_issues.annotated.docx`。`artifacts/` 与 `*.docx` 均被 `.gitignore` 忽略，标注副本不随仓库提交，可用上述命令随时重新生成。运行前需先创建 `artifacts` 目录。
+
+### 验收结果
+
+1. **可打开**：标注副本在 Microsoft Word 中正常打开，未出现“发现无法读取的内容 / 是否修复”一类提示，未触发修复流程。
+2. **定位与高亮**：3 处诊断均落在对应段落上，并以黄色高亮显示。
+
+| 序号 | 规则编号 | 位置 | 期望值 | 实际值 |
+| --- | --- | --- | --- | --- |
+| 1 | `demo/east-asian-font` | `word/document.xml#paragraph[0]/run[0]` | 宋体 | 黑体 |
+| 2 | `demo/western-font` | `word/document.xml#paragraph[1]/run[0]` | Times New Roman | Arial |
+| 3 | `demo/font-size` | `word/document.xml#paragraph[2]/run[0]` | 12pt | 10.5pt |
+
+3. **中文批注**：文档内含 3 条批注，作者均为 `NKU Thesis Tool`，内容为中文提示（依据：2026 版第 4.7 节表 4.6），逐条如下：
+
+   - `demo/east-asian-font`：期望值 宋体；实际值 黑体。
+   - `demo/western-font`：期望值 Times New Roman；实际值 Arial。
+   - `demo/font-size`：期望值 12pt；实际值 10.5pt。
+
+   每条批注同时给出修改建议与检测提示，与命令报告中的诊断一一对应。
+4. **正确样例**：`clean_sample.docx` 生成的副本不含高亮与批注，与“0 条诊断”一致。
+5. **输入不变**：运行前后逐一比对输入文件字节，内容未发生变化。
+6. **构建与测试**：Release 构建 0 警告 0 错误；解决方案全部测试通过（49 项）。
+
+### 说明与限制
+
+- 本机 Word 处于未激活的精简功能模式，界面上未直接显示批注窗格。批注是否存在改为通过 Word 自动化接口逐条读取确认：共 3 条，作者、规则编号与内容均与预期一致。因此“批注在界面上肉眼可见”一项在本环境未能直接确认，其余各项均为实测通过。
+- Word 以“兼容模式”打开该标注副本。本次不影响验收结论；是否需要为生成的文档补充兼容性设置，建议作为后续项单独评估。
+- 本记录只覆盖演示范围内的三项规则（中文字体、西文字体、字号）。表格、页眉页脚、脚注尾注、超链接、修订、内容控件及无法解析的主题字体等仍未覆盖，详见上文“当前检查范围”。未覆盖项不因本次没有诊断或诊断已标注而被视为合规。
