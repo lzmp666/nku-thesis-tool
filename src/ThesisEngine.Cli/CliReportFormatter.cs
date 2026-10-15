@@ -25,15 +25,21 @@ public static class CliReportFormatter
             ["theme fonts"] = "主题字体尚未解析"
         };
 
-    public static string Format(AnalysisResult result, string? inputPath = null)
+    public static string Format(AnalysisResult result, string? inputPath = null) =>
+        Format(result, inputPath, null);
+
+    public static string Format(AnalysisResult result, string? inputPath, string? annotatedOutputPath)
     {
         ArgumentNullException.ThrowIfNull(result);
         using var writer = new StringWriter(CultureInfo.InvariantCulture);
-        Write(result, writer, inputPath);
+        Write(result, writer, inputPath, annotatedOutputPath);
         return writer.ToString();
     }
 
-    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath = null)
+    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath = null) =>
+        Write(result, writer, inputPath, null);
+
+    public static void Write(AnalysisResult result, TextWriter writer, string? inputPath, string? annotatedOutputPath)
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(writer);
@@ -50,6 +56,8 @@ public static class CliReportFormatter
         writer.WriteLine($"发现问题：{diagnostics.Count.ToString(CultureInfo.InvariantCulture)}");
         writer.WriteLine($"规则版本：{ValueOrUnknown(result.RuleVersion)}");
         writer.WriteLine($"已检查范围：{ValueOrUnknown(result.Coverage)}");
+        if (!string.IsNullOrWhiteSpace(annotatedOutputPath))
+            writer.WriteLine($"标注副本：{annotatedOutputPath}");
 
         writer.WriteLine("未覆盖范围：");
         if (unsupported.Count == 0)
@@ -91,7 +99,9 @@ public static class CliReportFormatter
             }
         }
 
-        writer.WriteLine("提示：本演示仅供测试，不代表规范合规结论；工具只读取文件，不会修改原文档。");
+        writer.WriteLine(string.IsNullOrWhiteSpace(annotatedOutputPath)
+            ? "提示：本演示仅供测试，不代表规范合规结论；本次仅分析原文件。"
+            : "提示：本演示仅供测试，不代表规范合规结论；结果另存为标注副本，原文件不变。");
     }
 
     private static string DisplaySeverity(string? severity) =>

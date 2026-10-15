@@ -7,7 +7,7 @@
 - .NET 10 SDK
 - 已检出本仓库代码
 
-以下命令请在仓库根目录运行。CLI 只读取输入文件，不会修改原文档。
+以下命令请在仓库根目录运行。
 
 ## 构建和测试
 
@@ -40,6 +40,17 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 | `demo/font-size` | `word/document.xml#paragraph[2]/run[0]` | 12pt | 10.5pt |
 
 期望值和样例内容记录在[合成样例清单](../../tests/fixtures/synthetic/demo/manifest.json)中。所有样例文字均为人工构造，不含真实论文或个人信息。
+
+## 输出标注副本
+
+在命令末尾添加 `--annotated-output <标注副本.docx>`，会将诊断写入新的 Word 副本，包含批注和黄色高亮；输入文件保持不变，已有目标不会被覆盖。输出目录必须事先创建。
+
+```sh
+mkdir -p artifacts
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --annotated-output artifacts/known_issues.annotated.docx
+```
+
+命令报告会额外列出标注副本路径。无问题样例仍会生成副本，但不会添加批注或高亮。
 
 ## 当前检查范围
 
