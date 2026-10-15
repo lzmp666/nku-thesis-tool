@@ -130,6 +130,27 @@ public sealed class EngineProtocolTests
         Assert.Equal(EngineProtocol.InvalidRequest, response.Error!.Code);
     }
 
+    [Fact]
+    public async Task ClientReportsMissingExecutableAsEngineExit()
+    {
+        var root = FindRepositoryRoot();
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "clean_sample.docx");
+        Assert.True(File.Exists(input), $"Synthetic input not found: {input}");
+
+        var missingExecutable = Path.Combine(
+            Path.GetTempPath(),
+            $"nku-thesis-missing-engine-{Guid.NewGuid():N}.exe");
+        Assert.False(File.Exists(missingExecutable));
+
+        var client = new EngineProtocolClient(
+            new EngineProcessOptions(missingExecutable, string.Empty, TimeSpan.FromSeconds(1)));
+        var response = await client.AnalyzeAsync(input);
+
+        Assert.False(response.Ok);
+        Assert.Equal(EngineProtocol.EngineExit, response.Error!.Code);
+        Assert.Contains("引擎进程启动或通信失败", response.Error.Message);
+    }
+
     private static async Task<EngineResponse> RunHost(string host, EngineRequest request)
     {
         using var process = new Process
