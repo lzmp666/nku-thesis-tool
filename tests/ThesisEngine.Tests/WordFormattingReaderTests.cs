@@ -49,6 +49,45 @@ public sealed class WordFormattingReaderTests
     }
 
     [Fact]
+    public void ParagraphMarkFormattingDoesNotOverrideTextRunFormatting()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:eastAsia="正文默认字体"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults>
+            </w:styles>
+            """;
+        var path = CreatePackage(Document(
+            "<w:p><w:pPr><w:rPr><w:rFonts w:eastAsia=\"段落标记字体\"/><w:sz w:val=\"48\"/></w:rPr></w:pPr><w:r><w:t>正文</w:t></w:r></w:p>"),
+            styles);
+        try
+        {
+            var run = Assert.Single(Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Runs);
+            Assert.Equal("正文默认字体", run.EastAsiaFont);
+            Assert.Equal(12, run.FontSizePt);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void MarksWrappedAndNestedBodyContentAsUnsupported()
+    {
+        var path = CreatePackage(Document(
+            "<w:p><w:r><w:t>正文</w:t></w:r><w:hyperlink><w:r><w:t>链接</w:t></w:r></w:hyperlink><w:ins><w:r><w:t>修订</w:t></w:r></w:ins></w:p>" +
+            "<w:sdt><w:sdtContent><w:p><w:r><w:t>内容控件</w:t></w:r></w:p></w:sdtContent></w:sdt>"));
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+            Assert.Single(snapshot.Paragraphs);
+            Assert.Single(snapshot.Paragraphs[0].Runs);
+            Assert.Contains("hyperlinks", snapshot.UnsupportedScopes);
+            Assert.Contains("tracked changes", snapshot.UnsupportedScopes);
+            Assert.Contains("content controls", snapshot.UnsupportedScopes);
+            Assert.Contains("nested body paragraphs", snapshot.UnsupportedScopes);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void KeepsRunsIndependentAndMarksUnsupportedScopes()
     {
         var path = CreatePackage(Document(

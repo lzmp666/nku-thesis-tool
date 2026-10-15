@@ -39,6 +39,16 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             unsupported.Add("endnotes");
         if (body.Descendants(W + "tbl").Any()) unsupported.Add("tables");
         if (document.Descendants(W + "txbxContent").Any()) unsupported.Add("textboxes");
+        if (body.Descendants(W + "sdt").Any()) unsupported.Add("content controls");
+        if (body.Descendants(W + "customXml").Any()) unsupported.Add("custom XML content");
+        if (body.Descendants(W + "altChunk").Any()) unsupported.Add("altChunk content");
+        if (body.Descendants(W + "hyperlink").Any()) unsupported.Add("hyperlinks");
+        if (body.Descendants(W + "smartTag").Any()) unsupported.Add("smart tags");
+        if (body.Descendants(W + "fldSimple").Any()) unsupported.Add("simple fields");
+        if (new[] { "ins", "del", "moveFrom", "moveTo" }.Any(name => body.Descendants(W + name).Any()))
+            unsupported.Add("tracked changes");
+        if (body.Descendants(W + "p").Any(p => p.Parent != body && !p.Ancestors(W + "tbl").Any()))
+            unsupported.Add("nested body paragraphs");
 
         var paragraphs = new List<ParagraphSnapshot>();
         var paragraphIndex = 0;
@@ -47,7 +57,8 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             var paragraphProperties = paragraph.Element(W + "pPr");
             var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
             var inherited = Merge(defaults, ResolveStyle(paragraphStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "paragraph"));
-            inherited = Merge(inherited, ReadRunProperties(paragraphProperties?.Element(W + "rPr"), theme, inherited.EastAsiaLanguage));
+            // w:pPr/w:rPr formats the paragraph mark, not the text runs.
+
             var runs = new List<TextRunSnapshot>();
             var runIndex = 0;
             foreach (var run in paragraph.Elements(W + "r"))

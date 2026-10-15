@@ -3,17 +3,6 @@ using System.Xml;
 
 namespace ThesisEngine.Cli;
 
-internal sealed class DemoAnalysisService(IDemoDocumentReader reader, IDemoAnalyzer analyzer) : IDemoAnalysisService
-{
-    public AnalysisResult Analyze(string path, DemoRuleSet profile)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        ArgumentNullException.ThrowIfNull(profile);
-        var snapshot = reader.Read(path);
-        return analyzer.Analyze(snapshot, profile);
-    }
-}
-
 public sealed class AnalyzeCommand(IDemoAnalysisService analysisService, TextWriter? output = null, TextWriter? error = null)
 {
     public int Execute(IEnumerable<string> arguments)
@@ -40,7 +29,7 @@ public sealed class AnalyzeCommand(IDemoAnalysisService analysisService, TextWri
 
         if (!TryParse(arguments, out var inputPath, out var annotatedOutputPath))
         {
-            error.WriteLine("用法：ThesisEngine.Cli analyze --demo <输入.docx> [--annotated-output <标注副本.docx>]");
+            error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx> [--annotated-output <annotated.docx>]");
             return 2;
         }
 
@@ -52,7 +41,7 @@ public sealed class AnalyzeCommand(IDemoAnalysisService analysisService, TextWri
 
         if (!File.Exists(inputPath))
         {
-            error.WriteLine($"输入错误：找不到文件：{inputPath}");
+            error.WriteLine($"输入错误：找不到输入文件：{inputPath}");
             return 1;
         }
 
@@ -90,7 +79,17 @@ public sealed class AnalyzeCommand(IDemoAnalysisService analysisService, TextWri
             CliReportFormatter.Write(result, output, inputPath, writtenOutputPath);
             return 0;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or NotSupportedException or XmlException)
+        catch (UnauthorizedAccessException)
+        {
+            error.WriteLine("无法读取输入文件，请检查访问权限。");
+            return 1;
+        }
+        catch (IOException)
+        {
+            error.WriteLine("无法读取文档，请检查文件是否损坏或格式是否正确。");
+            return 1;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or NotSupportedException or XmlException)
         {
             error.WriteLine($"分析失败：{exception.Message}");
             return 1;

@@ -1,11 +1,13 @@
 # =====================================================================
 # 南开大学研究生学位论文 - 通用格式规则（draft）
-# 对应 issue: #1  |  规则核验文档: docs/rule-notes/nku-graduate-general.md
+# 对应 issue: #1, #43  |  规则核验文档: docs/rule-notes/nku-graduate-general.md
 #
-# 状态: draft —— 所有数值均逐字引自《南开大学研究生学位论文写作规范
-# (2025版)》(来源 S1, 见下) 第4章，无猜测值；未猜测的空白不填 null 以外
-# 的值。负责人审核通过后方可改为 approved。
-# 注意: 2026版已发布(S2)但原文未获取，版本差异核验前本文件以2025版为准。
+# 状态: draft —— Demo 部分（正文段落字体/字号）已按《南开大学研究生学位论文
+#   写作规范（2026版）》第4.7节表4.6核对；其余章节仍待2026版全文逐条核验。
+#   负责人审核通过后方可改为 approved。
+# Demo 覆盖（#43）：仅中文正文宋体12pt、英文正文Times New Roman 12pt、
+#   正文字号12pt；两端对齐、首行缩进、行距、段前段后及其他章节在 Demo
+#   中列为未检查，不得误报为已符合。
 # =====================================================================
 
 meta:
@@ -13,29 +15,31 @@ meta:
   file: general
   title: 研究生学位论文通用格式规则（页面设置/字体/字号/行距/部件范围）
   status: draft            # draft | approved  （approved 须负责人审核）
-  based_on_spec: 南开大学研究生学位论文写作规范（2025版）
-  based_on_spec_version: "2025"
-  newer_spec_pending:      # 2026版已存在但未核验差异（T1）
-    version: "2026"
-    note: 2026版原文附件带验证码未能获取，差异核验前以2025版条文为准
-  verified_date: "2026-10-07"
+  based_on_spec: 南开大学研究生学位论文写作规范（2026版）
+  based_on_spec_version: "2026"
+  demo_body_text_verified:   # #43: 正文段落字体/字号已按2026版4.7表4.6核对
+    clause: "4.7 表4.6"
+    values:
+      east_asian_font: 宋体
+      ascii_font: Times New Roman
+      size_pt: 12
+    note: "两端对齐/首行缩进2字符/固定值行距20pt/段前段后0pt 在 Demo 中列为未检查"
+  verified_date: "2026-10-14"
   approver: null           # 审核通过后填写负责人 GitHub 用户名
   approved_date: null
 
 sources:
+  - id: S2026
+    title: 南开大学研究生学位论文写作规范（2026版）
+    publisher: 南开大学研究生院（项目负责人提供）
+    role: Demo 正文段落字体/字号（4.7 表4.6）核对依据
+    verified_date: "2026-10-14"
   - id: S1
     title: 南开大学研究生学位论文写作规范（2025版）（外国语学院转载全文）
     publisher: 南开大学外国语学院（文首载明"南开大学研究生院 编"）
     url: https://sfs.nankai.edu.cn/2025/0402/c7262a566018/page.htm
     publish_date: "2025-04-02"
-    role: 条文唯一依据（第4章原文逐字摘录）
-    verified_date: "2026-10-07"
-  - id: S2
-    title: 关于2026届冬季硕、博研究生提交学位论文、答辩前重复率检测通知
-    publisher: 南开大学人工智能学院
-    url: https://ai.nankai.edu.cn/info/1025/6685.htm
-    publish_date: "2026"
-    role: 证明2026版存在（附件原文下载需验证码，未获取）
+    role: 其余章节（页面设置/标题/摘要/目录/参考文献等）条文依据，待2026版全文核验
     verified_date: "2026-10-07"
   - id: S3
     title: 研究生院"论文写作规范"官方入口（挂2020修订版）
@@ -215,9 +219,10 @@ rules:
       spacing: {before_pt: 12, after_pt: 6}
       indent_chars_mode2: 2
 
-  body_text:                         # R11 | 4.7 表4.6 —— v1 核心规则
+  body_text:                         # R11 | 4.7 表4.6 —— v1 核心（#43 已按2026版核对）
     scope: 正文段落文字
-    source: {src: S1, clause: "4.7 表4.6"}
+    source: {src: S2026, clause: "4.7 表4.6"}
+    demo_coverage: "Demo 仅检字体/字号；两端对齐/首行缩进/行距/段前段后列为未检查"
     original: "宋体12磅（或小四），英文用Times New Roman字体12磅（或小四），两端对齐书写，段落首行左缩进2个汉字符。固定值行距20磅（段落中有数学表达式时，可根据表达需要设置该段的行距），段前0磅，段后0磅。"
     font:
       cn: 宋体                       # 映射 w:eastAsia（RFC-1 待确认）
@@ -313,7 +318,7 @@ rules:
 
 # ---------------------------------------------------------------------
 # 待确认项（T）与 RFC 候选：见 docs/rule-notes/nku-graduate-general.md §6/§7
-#   T1 2026版差异比对（最高优先）
+#   T1 2026版全文差异比对（#43 已核对4.7表4.6正文；其余章节待核验）
 #   T3 表格内文字/脚注字号规范未规定 -> 本文件不设值（不猜测）
 #   RFC-1 字体脚本映射 | RFC-2 部件范围识别 | RFC-3 字体名等价表
 #   RFC-4 行距豁免 | RFC-5 数值断言口径 | RFC-6 封面豁免 | RFC-7 目录检测对象

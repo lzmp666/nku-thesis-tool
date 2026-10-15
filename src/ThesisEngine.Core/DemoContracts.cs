@@ -2,6 +2,7 @@ namespace ThesisEngine.Core;
 
 /// <summary>
 /// Demo-only 规则集。显式标记为 draft/demo，不能用于正式 NKU 合规检查。
+/// 正文段落字体/字号已按 2026 版规范第 4.7 节表 4.6 核对（#43）。
 /// </summary>
 public sealed record DemoRuleSet(
     string RuleVersion,
@@ -13,9 +14,9 @@ public sealed record DemoRuleSet(
     public static DemoRuleSet NkuDraftSample => new(
         RuleVersion: "demo-0.1.0",
         IsDraft: true,
-        EastAsiaFontExpected: "宋体",
-        AsciiFontExpected: "Times New Roman",
-        FontSizeExpectedPt: 12.0);
+        EastAsiaFontExpected: "宋体",           // 2026版 4.7表4.6: 中文正文宋体12pt
+        AsciiFontExpected: "Times New Roman",  // 2026版 4.7表4.6: 英文正文TNR 12pt
+        FontSizeExpectedPt: 12.0);             // 2026版 4.7表4.6: 正文字号12pt
 }
 
 /// <summary>
