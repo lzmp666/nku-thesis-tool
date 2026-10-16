@@ -160,26 +160,43 @@ namespace ThesisAddIn.VSTO.Ui
             SetStatus(message);
         }
 
-        /// <summary>按规则编号选中对应的问题（用于批注锚点联动）。</summary>
-        public bool SelectByRuleId(string ruleId)
+        /// <summary>
+        /// 按批注中的规则、期望值和实际值选中唯一的问题。
+        /// 多条诊断无法唯一对应时不激活卡片，避免跳到错误问题。
+        /// </summary>
+        public bool SelectByComment(string ruleId, string expected, string actual)
         {
             if (string.IsNullOrWhiteSpace(ruleId))
             {
                 return false;
             }
 
+            int matchIndex = -1;
             for (int i = 0; i < _diagnostics.Count; i++)
             {
-                if (string.Equals(_diagnostics[i].RuleId, ruleId, StringComparison.OrdinalIgnoreCase))
+                EngineDiagnostic diagnostic = _diagnostics[i];
+                if (string.Equals(diagnostic.RuleId, ruleId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(diagnostic.Expected ?? string.Empty, expected ?? string.Empty, StringComparison.Ordinal)
+                    && string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal))
                 {
-                    _list.Items[i].Selected = true;
-                    _list.Items[i].EnsureVisible();
-                    _list.Focus();
-                    return true;
+                    if (matchIndex >= 0)
+                    {
+                        return false;
+                    }
+
+                    matchIndex = i;
                 }
             }
 
-            return false;
+            if (matchIndex < 0)
+            {
+                return false;
+            }
+
+            _list.Items[matchIndex].Selected = true;
+            _list.Items[matchIndex].EnsureVisible();
+            _list.Focus();
+            return true;
         }
 
         private bool HasAutoDiagnostics
