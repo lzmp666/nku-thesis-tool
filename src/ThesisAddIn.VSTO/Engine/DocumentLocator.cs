@@ -71,6 +71,20 @@ namespace ThesisAddIn.VSTO.Engine
                 return false;
             }
 
+            if (!string.Equals(location.Part, "word/document.xml", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "当前仅支持正文中的段落定位，无法安全定位到“" + location.Part + "”。";
+                return false;
+            }
+
+            // 引擎按 document.xml 的正文段落计数；Word 的 Paragraphs 还包括表格单元格段落。
+            // 只靠序号无法在有表格的文档中保证对应关系，因此宁可停止定位，也不选错原文。
+            if (document.Tables.Count > 0)
+            {
+                error = "当前文档含有表格，段落序号可能无法准确对应；为避免定位到错误内容，已停止本次定位。";
+                return false;
+            }
+
             int wordIndex = location.ParagraphIndex + 1; // Word 集合从 1 开始
             int paragraphCount = document.Paragraphs.Count;
             if (wordIndex < 1 || wordIndex > paragraphCount)
