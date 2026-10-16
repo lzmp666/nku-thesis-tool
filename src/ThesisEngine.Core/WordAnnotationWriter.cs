@@ -182,8 +182,7 @@ public static class WordAnnotationWriter
 
     private static XElement CreateComment(int id, string timestamp, Diagnostic diagnostic)
     {
-        var detail = string.IsNullOrWhiteSpace(diagnostic.Message) ? string.Empty : $" 检测提示：{diagnostic.Message.Trim()}";
-        var text = $"格式要求提示（依据：2026版第4.7节表4.6）。规则：{diagnostic.RuleId}。期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。修改建议：请按期望值「{diagnostic.Expected}」调整此处格式。{detail}";
+        var text = $"要求参考来源：2026版第4.7节表4.6；规则：{diagnostic.RuleId}；期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。";
         return new XElement(W + "comment",
             new XAttribute(W + "id", id),
             new XAttribute(W + "author", "NKU Thesis Tool"),
