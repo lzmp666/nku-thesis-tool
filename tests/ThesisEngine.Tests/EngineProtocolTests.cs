@@ -151,6 +151,108 @@ public sealed class EngineProtocolTests
         Assert.Contains("引擎进程启动或通信失败", response.Error.Message);
     }
 
+    [Fact]
+    public async Task ProtocolHostPlansAutoPatchesAndKeepsDeferredDiagnostics()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+
+        var response = await RunHost(host, new EngineRequest
+        {
+            RequestId = "plan-1",
+            Operation = EngineProtocol.PlanOperation,
+            InputPath = input
+        });
+
+        Assert.True(response.Ok, response.Error?.Message);
+        Assert.Equal("plan-1", response.RequestId);
+        Assert.Null(response.Result);
+        Assert.NotNull(response.Plan);
+        Assert.Equal(2, response.Plan!.Patches.Count);
+        Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/east-asian-font");
+        Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/font-size");
+        var deferred = Assert.Single(response.Plan.Deferred);
+        Assert.Equal("demo/western-font", deferred.RuleId);
+    }
+
+    [Fact]
+    public async Task ProtocolHostAppliesPatchesToNewFileAndReportsRecheck()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-fixed.docx");
+        var before = File.ReadAllBytes(input);
+        try
+        {
+            var apply = await RunHost(host, new EngineRequest
+            {
+                RequestId = "apply-1",
+                Operation = EngineProtocol.ApplyOperation,
+                InputPath = input,
+                OutputPath = output
+            });
+
+            Assert.True(apply.Ok, apply.Error?.Message);
+            Assert.NotNull(apply.Apply);
+            Assert.Equal(2, apply.Apply!.Applied.Count);
+            Assert.Empty(apply.Apply.Failures);
+            Assert.Equal(Path.GetFullPath(output), apply.Apply.OutputPath);
+            Assert.True(File.Exists(output));
+            Assert.Equal(before, File.ReadAllBytes(input));
+
+            var recheck = await RunHost(host, new EngineRequest { RequestId = "recheck-1", InputPath = output });
+            Assert.True(recheck.Ok, recheck.Error?.Message);
+            var remaining = Assert.Single(recheck.Result!.Diagnostics);
+            Assert.Equal("demo/western-font", remaining.RuleId);
+
+            var replan = await RunHost(host, new EngineRequest
+            {
+                RequestId = "replan-1",
+                Operation = EngineProtocol.PlanOperation,
+                InputPath = output
+            });
+            Assert.True(replan.Ok, replan.Error?.Message);
+            Assert.Empty(replan.Plan!.Patches);
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public async Task ProtocolHostRefusesToOverwriteExistingOutput()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-existing.docx");
+        File.WriteAllText(output, "existing");
+        try
+        {
+            var response = await RunHost(host, new EngineRequest
+            {
+                RequestId = "overwrite-1",
+                Operation = EngineProtocol.ApplyOperation,
+                InputPath = input,
+                OutputPath = output
+            });
+
+            Assert.False(response.Ok);
+            Assert.Equal(EngineProtocol.PatchConflict, response.Error!.Code);
+            Assert.Equal("existing", File.ReadAllText(output));
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
     private static async Task<EngineResponse> RunHost(string host, EngineRequest request)
     {
         using var process = new Process

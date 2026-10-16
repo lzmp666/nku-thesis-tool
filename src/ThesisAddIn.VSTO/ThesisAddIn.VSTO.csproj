@@ -1,29 +1,234 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Word VSTO 加载项工程（经典格式）。
+
+  为什么不用 SDK 风格工程：VSTO 的构建任务运行在 .NET Framework 版 MSBuild 上，
+  只能由 Visual Studio 自带的 MSBuild 执行；而仓库根目录的 global.json 要求
+  .NET SDK 10，SDK 风格工程需要 MSBuild 18 及以上，两者互斥。本工程因此采用
+  Visual Studio 生成 VSTO 项目时的经典格式，不参与 SDK 解析。
+
+  契约程序集 ThesisAddIn.Protocol 仍是 netstandard2.0，由下面的 BuildProtocolContracts
+  目标通过 dotnet CLI 构建；插件只引用它的输出，不引用 ThesisEngine.Core。
+-->
+<Project ToolsVersion="17.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <ProjectTypeGuids>{BAA0C2D2-18E2-41B9-852F-F413020CAA33};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{3F0B6C21-9E4A-4E3D-9C2B-7A5D1E8F4C60}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <NoStandardLibraries>false</NoStandardLibraries>
     <RootNamespace>ThesisAddIn.VSTO</RootNamespace>
     <AssemblyName>ThesisAddIn.VSTO</AssemblyName>
-    <ProjectTypeGuids>{BAA0C2D2-18E2-41B9-852F-F413020CAA33};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <LoadBehavior>3</LoadBehavior>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
+    <SignManifests>true</SignManifests>
+    <ManifestCertificateThumbprint>0A5930114E51736D3FD4EA4A958FBBB8E5FAC447</ManifestCertificateThumbprint>
+    <BootstrapperEnabled>true</BootstrapperEnabled>
+    <BootstrapperComponentsLocation>HomeSite</BootstrapperComponentsLocation>
+    <ResolveComReferenceSilent>true</ResolveComReferenceSilent>
     <OfficeApplication>Word</OfficeApplication>
-    <PlatformTarget>AnyCPU</PlatformTarget>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <ProtocolOutputDir>$(MSBuildProjectDirectory)\Protocol\bin\Release\netstandard2.0</ProtocolOutputDir>
+    <!-- 根目录的 Directory.Build.props 启用了可空引用类型，需要 C# 8 及以上的语言版本。 -->
+    <LangVersion>latest</LangVersion>
+    <!-- 本工程大量使用 COM 互操作（Word 对象模型返回的值多数可为空），
+         逐处标注可空性收益很低；这里关闭该分析，代码内仍做显式空检查。 -->
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+    <DefineConstants>$(DefineConstants);DEBUG;TRACE</DefineConstants>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+    <DefineConstants>$(DefineConstants);TRACE</DefineConstants>
+    <WarningLevel>4</WarningLevel>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- These references are supplied by the Office/SharePoint workload on the
-         Windows build machine. The project is intentionally not in the
-         cross-platform Core/CLI solution. -->
-    <Reference Include="Microsoft.Office.Tools.Common" />
-    <Reference Include="Microsoft.Office.Tools.Word" />
-    <Reference Include="Microsoft.Office.Interop.Word" />
-    <Reference Include="Office" />
+    <Reference Include="Accessibility" />
     <Reference Include="System" />
-    <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
-    <ProjectReference Include="Protocol\ThesisAddIn.Protocol.csproj" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="Microsoft.Office.Tools.v4.0.Framework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.VisualStudio.Tools.Applications.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.Office.Tools, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.Office.Tools.Common, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.Office.Tools.Word, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.Office.Tools.Common.v4.0.Utilities, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Office, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
+      <Private>False</Private>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="Microsoft.Office.Interop.Word, Version=15.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c">
+      <Private>False</Private>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="stdole, Version=7.0.3300.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 进程协议契约程序集的输出，由 BuildProtocolContracts 目标先行构建。 -->
+  <ItemGroup>
+    <Reference Include="ThesisAddIn.Protocol">
+      <HintPath>$(ProtocolOutputDir)\ThesisAddIn.Protocol.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Text.Json">
+      <HintPath>$(ProtocolOutputDir)\System.Text.Json.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Text.Encodings.Web">
+      <HintPath>$(ProtocolOutputDir)\System.Text.Encodings.Web.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>$(ProtocolOutputDir)\System.Memory.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Buffers">
+      <HintPath>$(ProtocolOutputDir)\System.Buffers.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>$(ProtocolOutputDir)\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Threading.Tasks.Extensions">
+      <HintPath>$(ProtocolOutputDir)\System.Threading.Tasks.Extensions.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>$(ProtocolOutputDir)\System.Numerics.Vectors.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Microsoft.Bcl.AsyncInterfaces">
+      <HintPath>$(ProtocolOutputDir)\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <EmbeddedResource Include="Properties\Resources.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <Compile Include="Properties\Resources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resources.resx</DependentUpon>
+    </Compile>
+    <None Include="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+    <Compile Include="Properties\Settings.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+    <Compile Include="ThisAddIn.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <None Include="ThisAddIn.Designer.xml">
+      <DependentUpon>ThisAddIn.cs</DependentUpon>
+    </None>
+    <Compile Include="ThisAddIn.Designer.cs">
+      <DependentUpon>ThisAddIn.Designer.xml</DependentUpon>
+    </Compile>
+    <Compile Include="Engine\DocumentLocator.cs" />
+    <Compile Include="Engine\EngineGateway.cs" />
+    <Compile Include="Ui\DiagnosticsPane.cs" />
+    <Compile Include="Ui\FixPreviewDialog.cs" />
+    <AppDesigner Include="Properties\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="ThesisAddIn.VSTO_TemporaryKey.pfx" />
+    <None Include="README.md" />
+  </ItemGroup>
+
+  <!-- 契约程序集是 netstandard2.0 的 SDK 风格工程，用 dotnet CLI 构建：它自带
+       MSBuild 18，不受本机 Visual Studio MSBuild 版本的限制。 -->
+  <Target Name="BuildProtocolContracts" BeforeTargets="ResolveAssemblyReferences">
+    <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)\Protocol\ThesisAddIn.Protocol.csproj&quot; -c Release --nologo -v minimal /p:CopyLocalLockFileAssemblies=true"
+          WorkingDirectory="$(MSBuildProjectDirectory)\Protocol" />
+  </Target>
+
+  <PropertyGroup>
+    <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
+    <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
+  </PropertyGroup>
+
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\OfficeTools\Microsoft.VisualStudio.Tools.Applications.targets"
-          Condition="Exists('$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\OfficeTools\Microsoft.VisualStudio.Tools.Applications.targets')" />
+  <Import Project="$(VSToolsPath)\OfficeTools\Microsoft.VisualStudio.Tools.Office.targets" Condition="'$(VSToolsPath)' != ''" />
+
+  <ProjectExtensions>
+    <VisualStudio>
+      <FlavorProperties GUID="{BAA0C2D2-18E2-41B9-852F-F413020CAA33}">
+        <ProjectProperties HostName="Word"
+          HostPackage="{29A7B9D7-A7F1-4328-8EF0-6B2D1A56B2C1}"
+          ProjectCreationSetting="1"
+          OfficeVersion="15.0"
+          VstxVersion="4.0"
+          ApplicationType="Word"
+          Language="cs"
+          TemplatesPath=""
+          AddItemTemplatesGuid="{51063C3A-E220-4D12-8922-BDA915ACD783}"
+          DebugInfoExeName="#Software\Microsoft\Office\15.0\Word\InstallRoot\Path#WINWORD.EXE"
+          DebugInfoCommandLine="/x"
+          DebugInfoWorkingDir=""
+          IconImageList="" />
+        <Host Name="Word" GeneratedCodeNamespace="ThesisAddIn.VSTO" IconIndex="0">
+          <HostItem Name="ThisAddIn"
+            Code="ThisAddIn.cs"
+            CanonicalName="ThisAddIn"
+            Blueprint="ThisAddIn.Designer.xml"
+            GeneratedCode="ThisAddIn.Designer.cs"
+            IconIndex="1" />
+        </Host>
+      </FlavorProperties>
+    </VisualStudio>
+  </ProjectExtensions>
 </Project>

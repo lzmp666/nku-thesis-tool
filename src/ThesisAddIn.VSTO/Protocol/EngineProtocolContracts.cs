@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -12,8 +12,10 @@ namespace ThesisAddIn.Protocol;
 
 public static class EngineProtocol
 {
-    public const string Version = "1.0";
+    public const string Version = "1.1";
     public const string AnalyzeOperation = "analyze";
+    public const string PlanOperation = "plan";
+    public const string ApplyOperation = "apply";
 
     public const string InvalidRequest = "invalid_request";
     public const string ProtocolVersionMismatch = "protocol_version_mismatch";
@@ -22,6 +24,7 @@ public static class EngineProtocol
     public const string EngineExit = "engine_exit";
     public const string Timeout = "timeout";
     public const string Cancelled = "cancelled";
+    public const string PatchConflict = "patch_conflict";
 }
 
 public sealed class EngineRequest
@@ -37,6 +40,21 @@ public sealed class EngineRequest
 
     [JsonPropertyName("inputPath")]
     public string InputPath { get; set; } = string.Empty;
+
+    /// <summary>apply 操作的目标路径；必须与 inputPath 不同，且不得已存在。</summary>
+    [JsonPropertyName("outputPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OutputPath { get; set; }
+
+    /// <summary>可选的规则编号过滤，用于“只处理当前这一项”。</summary>
+    [JsonPropertyName("ruleId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleId { get; set; }
+
+    /// <summary>可选的位置过滤，与 ruleId 一起确定唯一的一条诊断。</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; set; }
 }
 
 public sealed class EngineResponse
@@ -54,9 +72,83 @@ public sealed class EngineResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineAnalysisResult? Result { get; set; }
 
+    /// <summary>plan 操作的返回：将要修改的内容与保留给用户的诊断。</summary>
+    [JsonPropertyName("plan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EnginePatchPlan? Plan { get; set; }
+
+    /// <summary>apply 操作的返回：已应用、失败和未处理的补丁。</summary>
+    [JsonPropertyName("apply")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineApplyResult? Apply { get; set; }
+
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineError? Error { get; set; }
+}
+
+/// <summary>一条待执行的修复：位置、改前值、目标值和依据。</summary>
+public sealed class EnginePatch
+{
+    [JsonPropertyName("ruleId")]
+    public string RuleId { get; set; } = string.Empty;
+
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("expectedBefore")]
+    public string ExpectedBefore { get; set; } = string.Empty;
+
+    [JsonPropertyName("desiredAfter")]
+    public string DesiredAfter { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class EnginePatchFailure
+{
+    [JsonPropertyName("patch")]
+    public EnginePatch Patch { get; set; } = new();
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 修复计划：Patches 只包含处理分类为 auto 的项目；Deferred 是保留给用户处理的诊断。
+/// </summary>
+public sealed class EnginePatchPlan
+{
+    [JsonPropertyName("patches")]
+    public List<EnginePatch> Patches { get; set; } = new();
+
+    [JsonPropertyName("deferred")]
+    public List<EngineDiagnostic> Deferred { get; set; } = new();
+
+    [JsonPropertyName("ruleVersion")]
+    public string RuleVersion { get; set; } = string.Empty;
+
+    [JsonPropertyName("coverage")]
+    public string Coverage { get; set; } = string.Empty;
+
+    [JsonPropertyName("unsupportedScopes")]
+    public List<string> UnsupportedScopes { get; set; } = new();
+}
+
+public sealed class EngineApplyResult
+{
+    [JsonPropertyName("outputPath")]
+    public string OutputPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("applied")]
+    public List<EnginePatch> Applied { get; set; } = new();
+
+    [JsonPropertyName("failures")]
+    public List<EnginePatchFailure> Failures { get; set; } = new();
+
+    [JsonPropertyName("unresolved")]
+    public List<EnginePatch> Unresolved { get; set; } = new();
 }
 
 public sealed class EngineError
@@ -212,19 +304,37 @@ public sealed class EngineProtocolClient
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public EngineResponse Analyze(string inputPath) => AnalyzeAsync(inputPath).GetAwaiter().GetResult();
+    public EngineResponse Analyze(string inputPath) =>
+        Send(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null));
 
-    public async Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default)
+    public EngineResponse Plan(string inputPath, string? ruleId, string? location) =>
+        Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location));
+
+    public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location) =>
+        Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location));
+
+    public Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null), cancellationToken);
+
+    public EngineResponse Send(EngineRequest request) => SendAsync(request).GetAwaiter().GetResult();
+
+    private static EngineRequest CreateRequest(string operation, string inputPath, string? outputPath, string? ruleId, string? location) => new()
     {
-        var request = new EngineRequest
-        {
-            RequestId = Guid.NewGuid().ToString("N"),
-            Operation = EngineProtocol.AnalyzeOperation,
-            InputPath = inputPath ?? string.Empty
-        };
+        RequestId = Guid.NewGuid().ToString("N"),
+        Operation = operation,
+        InputPath = inputPath ?? string.Empty,
+        OutputPath = outputPath,
+        RuleId = ruleId,
+        Location = location
+    };
 
-        if (string.IsNullOrWhiteSpace(inputPath) ||
-            !string.Equals(Path.GetExtension(inputPath), ".docx", StringComparison.OrdinalIgnoreCase))
+    public async Task<EngineResponse> SendAsync(EngineRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        request.RequestId = string.IsNullOrWhiteSpace(request.RequestId) ? Guid.NewGuid().ToString("N") : request.RequestId;
+
+        if (string.IsNullOrWhiteSpace(request.InputPath) ||
+            !string.Equals(Path.GetExtension(request.InputPath), ".docx", StringComparison.OrdinalIgnoreCase))
             return Failure(request.RequestId, EngineProtocol.InvalidRequest, "输入文件必须是 .docx。", request);
 
         using var process = new Process
