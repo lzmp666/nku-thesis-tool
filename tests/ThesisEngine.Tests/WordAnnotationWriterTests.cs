@@ -43,15 +43,34 @@ public sealed class WordAnnotationWriterTests
                 Assert.Single(paragraph.Elements(W + "commentRangeEnd"));
                 Assert.Single(paragraph.Descendants(W + "commentReference"));
                 var targetRun = paragraph.Elements(W + "r").Single(run => run.Descendants(W + "t").Any());
+                var paragraphElements = paragraph.Elements().ToArray();
+                var runPosition = Array.IndexOf(paragraphElements, targetRun);
+                Assert.True(runPosition > 0 && runPosition + 2 < paragraphElements.Length);
+                var rangeStart = paragraphElements[runPosition - 1];
+                var rangeEnd = paragraphElements[runPosition + 1];
+                var commentReference = paragraphElements[runPosition + 2];
+                Assert.Equal(W + "commentRangeStart", rangeStart.Name);
+                Assert.Equal(W + "commentRangeEnd", rangeEnd.Name);
+                Assert.Equal((string?)rangeStart.Attribute(W + "id"), (string?)rangeEnd.Attribute(W + "id"));
+                Assert.Equal((string?)rangeStart.Attribute(W + "id"),
+                    (string?)commentReference.Element(W + "commentReference")?.Attribute(W + "id"));
                 Assert.Equal("yellow", (string?)targetRun.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val"));
             });
 
             var comments = ReadXml(archive, "word/comments.xml");
             Assert.Equal(3, comments.Root!.Elements(W + "comment").Count());
-            var commentText = string.Join(" ", comments.Descendants(W + "t").Select(element => element.Value));
-            Assert.Contains("期望值：宋体；实际值：黑体", commentText);
-            Assert.Contains("期望值：Times New Roman；实际值：Arial", commentText);
-            Assert.Contains("期望值：12pt；实际值：10.5pt", commentText);
+            var commentTexts = comments.Root!.Elements(W + "comment")
+                .Select(comment => string.Concat(comment.Descendants(W + "t").Select(element => element.Value)))
+                .ToArray();
+            Assert.Equal(3, commentTexts.Length);
+            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/east-asian-font；期望值：宋体；实际值：黑体。", commentTexts);
+            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/western-font；期望值：Times New Roman；实际值：Arial。", commentTexts);
+            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/font-size；期望值：12pt；实际值：10.5pt。", commentTexts);
+            Assert.All(commentTexts, text =>
+            {
+                Assert.DoesNotContain("修改建议：", text);
+                Assert.DoesNotContain("检测提示：", text);
+            });
 
             var relationships = ReadXml(archive, "word/_rels/document.xml.rels");
             Assert.Contains(relationships.Root!.Elements(Rel + "Relationship"), element =>
@@ -105,7 +124,8 @@ public sealed class WordAnnotationWriterTests
             var commentText = string.Join(" ", comments.Descendants(W + "t").Select(element => element.Value));
             Assert.Contains("2026版第4.7节表4.6", commentText);
             Assert.Contains("期望值：宋体；实际值：黑体", commentText);
-            Assert.Contains("请改为宋体。", commentText);
+            Assert.DoesNotContain("修改建议：", commentText);
+            Assert.DoesNotContain("检测提示：", commentText);
             Assert.Contains("期望值：12pt；实际值：14pt", commentText);
             Assert.Contains("Existing note", commentText);
 
