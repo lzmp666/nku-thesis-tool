@@ -10,7 +10,7 @@
 但 VSTO Build Tools 组件和对应 targets 不存在。通过安装器添加官方 VSTO Build Tools 组件时，
 安装器返回 5007（操作被阻止/计算机不满足安装要求）。因此当前仍无法确认 VSTO 插件工程可编译。
 
-GitHub Actions 的 CI（run 78）在 PR 复核提交上通过；该 workflow 构建协议与引擎宿主测试，未包含
+GitHub Actions CI run 78（前一复核提交）和 run 80（移除共享签名密钥后的最新提交）均通过；该 workflow 构建协议与引擎宿主测试，未包含
 `ThesisAddIn.VSTO.csproj`，不能替代插件本体构建或 Word 交互验收。本次也没有在 Word 中重新跑最新
 侧边栏、批注联动和修复流程。
 
