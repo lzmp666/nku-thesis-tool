@@ -24,8 +24,8 @@ namespace ThesisAddIn.VSTO
 
         /// <summary>批注正文里用于回填规则编号的片段，例如“规则：demo/east-asian-font。”。</summary>
         private static readonly Regex RuleIdPattern = new Regex(@"规则[:：]\s*(?<id>[A-Za-z0-9_\-/]+)", RegexOptions.Compiled);
-        private static readonly Regex ExpectedValuePattern = new Regex(@"期望值[:：]\\s*(?<value>.*?)(?:[；;。\\r\\n]|$)", RegexOptions.Compiled);
-        private static readonly Regex ActualValuePattern = new Regex(@"实际值[:：]\\s*(?<value>.*?)(?:[；;。\\r\\n]|$)", RegexOptions.Compiled);
+        private static readonly Regex ExpectedValuePattern = new Regex(@"期望值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
+        private static readonly Regex ActualValuePattern = new Regex(@"实际值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
 
         private CustomTaskPane _taskPane;
         private DiagnosticsPane _pane;
