@@ -1,9 +1,27 @@
 # Word 插件实测记录（Issue #51）
 
+> **本次复核补记：** 下方交互步骤与结果是此前一次 Word 实测记录，不代表本次 PR 最新改动已在 Word 中复测。当前复核遇到 VSTO 构建工具缺失，因此没有把下方记录当作本次 PR head 的验收证明。
+
+## PR #65 本次构建复核
+
+本机复核时安装的是 Visual Studio Community 2026 18.5.2，MSBuild 18.5.4.18101，.NET SDK 10.0.203。
+尝试构建 `src/ThesisAddIn.VSTO/ThesisAddIn.VSTO.csproj` 时失败：MSBuild 报 `MSB4226`，找不到
+`Microsoft.VisualStudio.Tools.Office.targets`。`vswhere` 显示 Office/SharePoint 开发组件已登记，
+但 VSTO Build Tools 组件和对应 targets 不存在。通过安装器添加官方 VSTO Build Tools 组件时，
+安装器返回 5007（操作被阻止/计算机不满足安装要求）。因此当前仍无法确认 VSTO 插件工程可编译。
+
+GitHub Actions 的 CI（run 78）在 PR 复核提交上通过；该 workflow 构建协议与引擎宿主测试，未包含
+`ThesisAddIn.VSTO.csproj`，不能替代插件本体构建或 Word 交互验收。本次也没有在 Word 中重新跑最新
+侧边栏、批注联动和修复流程。
+
+安全复核发现此前提交的 `ThesisAddIn.VSTO_TemporaryKey.pfx` **确实包含私钥**，原 README 的
+“不包含任何真实密钥”表述错误。当前 PR 补丁已从工作树移除该 PFX，并改为由开发者在本机证书库生成
+不可导出的调试私钥；由于旧 PFX 曾出现在公开分支历史中，请将旧证书视为已泄露，不再信任或复用。
+
 记录在真实桌面 Word 中运行中文问题侧边栏的实测过程与结果。全部样例均为仓库内的
 合成演示文件，不含真实论文或个人信息。
 
-## 实测环境
+## Word 交互实测环境（此前一次记录）
 
 | 项目 | 实测值 |
 | --- | --- |

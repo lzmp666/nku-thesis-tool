@@ -25,8 +25,10 @@
     <LoadBehavior>3</LoadBehavior>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
-    <SignManifests>true</SignManifests>
-    <ManifestCertificateThumbprint>0A5930114E51736D3FD4EA4A958FBBB8E5FAC447</ManifestCertificateThumbprint>
+    <!-- Never commit a signing private key. Sign only when a developer-local certificate is configured. -->
+    <SignManifests Condition="'$(THESIS_VSTO_CERT_THUMBPRINT)' != ''">true</SignManifests>
+    <SignManifests Condition="'$(THESIS_VSTO_CERT_THUMBPRINT)' == ''">false</SignManifests>
+    <ManifestCertificateThumbprint Condition="'$(THESIS_VSTO_CERT_THUMBPRINT)' != ''">$(THESIS_VSTO_CERT_THUMBPRINT)</ManifestCertificateThumbprint>
     <BootstrapperEnabled>true</BootstrapperEnabled>
     <BootstrapperComponentsLocation>HomeSite</BootstrapperComponentsLocation>
     <ResolveComReferenceSilent>true</ResolveComReferenceSilent>
@@ -185,7 +187,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="ThesisAddIn.VSTO_TemporaryKey.pfx" />
     <None Include="README.md" />
   </ItemGroup>
 

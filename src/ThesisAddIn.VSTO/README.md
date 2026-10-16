@@ -24,26 +24,30 @@ SDK 10，SDK 风格工程需要 MSBuild 18 及以上，两者互斥；经典工�
 # 1. 引擎宿主（.NET 10，任意平台可用）
 dotnet build src\ThesisAddIn.VSTO\ProtocolHost\ThesisEngine.ProtocolHost.csproj -c Release
 
-# 2. 插件本体（必须用 Visual Studio 自带的 MSBuild）
+# 2. 插件本体（未配置本地证书时默认以未签名方式构建）
 & "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
   src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj /p:Configuration=Debug
 ```
 
-构建产物包括 `bin\Debug\ThesisAddIn.VSTO.dll` 与签名后的 `ThesisAddIn.VSTO.vsto`。
-工程目录下的 `ThesisAddIn.VSTO_TemporaryKey.pfx` 是 Visual Studio 生成 VSTO 项目时
-同样会创建的临时签名证书，用于清单签名，不包含任何真实密钥。
+公开仓库不保存签名私钥。未配置开发者本机证书时，工程默认关闭清单签名；如需在本机
+运行 Word 插件，请先创建仅存于当前用户证书库的开发证书：
+
+```powershell
+.\scripts\New-VstoDevCertificate.ps1
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
+  src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj /p:Configuration=Debug `
+  "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT" /p:SignManifests=true
+```
+
+该脚本只导出公开证书，并将它加入当前用户的 Root 与 TrustedPublisher 存储，以便本机
+演示；私钥保留在当前用户的个人证书库且不可导出。不要将私钥或 PFX 加入版本控制，
+也不要把本机开发证书用于发布版本。若之前已下载过旧测试 PFX，请将它视为已泄露，
+停止使用并删除对它的信任。
 
 ## 安装到 Word（当前用户）
 
 ```powershell
-# 信任工程自带的临时证书（仅当前用户）
-$pfx = "src\ThesisAddIn.VSTO\ThesisAddIn.VSTO_TemporaryKey.pfx"
-$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfx, "")
-foreach ($name in @("Root","TrustedPublisher")) {
-  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($name,"CurrentUser")
-  $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
-}
-
+# 先按上方步骤创建并信任本机开发证书，再以 SignManifests=true 构建插件。
 # 注册加载项
 $key = "HKCU:\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO"
 New-Item -Path $key -Force | Out-Null
