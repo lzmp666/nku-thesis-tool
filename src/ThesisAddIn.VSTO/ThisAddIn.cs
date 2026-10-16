@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -23,6 +24,8 @@ namespace ThesisAddIn.VSTO
 
         /// <summary>批注正文里用于回填规则编号的片段，例如“规则：demo/east-asian-font。”。</summary>
         private static readonly Regex RuleIdPattern = new Regex(@"规则[:：]\s*(?<id>[A-Za-z0-9_\-/]+)", RegexOptions.Compiled);
+        private static readonly Regex ExpectedValuePattern = new Regex(@"期望值[:：]\\s*(?<value>.*?)(?:[；;。\\r\\n]|$)", RegexOptions.Compiled);
+        private static readonly Regex ActualValuePattern = new Regex(@"实际值[:：]\\s*(?<value>.*?)(?:[；;。\\r\\n]|$)", RegexOptions.Compiled);
 
         private CustomTaskPane _taskPane;
         private DiagnosticsPane _pane;
@@ -236,12 +239,47 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                string applySummary = ReportApplyResult(applyResponse.Apply);
+                EngineApplyResult applied = applyResponse.Apply;
+                if (applied.Failures != null && applied.Failures.Count > 0)
+                {
+                    string failureSummary = ReportApplyResult(applied);
+                    WriteStartupLog(failureSummary);
+                    _pane.ShowFailure(failureSummary + Environment.NewLine + "原始文档未修改，也没有生成部分修复文件。");
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(applied.OutputPath) || !File.Exists(applied.OutputPath))
+                {
+                    const string missingOutput = "修复引擎未生成可复查的输出文件；原始文档保持不变。";
+                    WriteStartupLog(missingOutput);
+                    _pane.ShowFailure(missingOutput);
+                    return;
+                }
+
+                string applySummary = ReportApplyResult(applied);
                 WriteStartupLog(applySummary);
 
-                // 重新分析**当前文档**而不是输出文件：列表必须和用户正在编辑的文档保持一致，
-                // 否则“已修复”之后列表显示的是另一份文件的问题。
-                ShowAnalysisResult(_gateway.Analyze(workCopy), applySummary + Environment.NewLine + "已重新分析当前文档：");
+                // 输出文件是实际修复结果；原文仍保持打开且未修改。复查输出文件，
+                // 同时保留侧边栏与当前打开的原文对应，避免把输出问题定位到原文。
+                EngineResponse outputCheck = _gateway.Analyze(applied.OutputPath);
+                if (outputCheck != null && outputCheck.Ok && outputCheck.Result != null)
+                {
+                    EngineResponse sourceCheck = _gateway.Analyze(workCopy);
+                    if (sourceCheck != null && sourceCheck.Ok && sourceCheck.Result != null)
+                    {
+                        _pane.ShowAnalysis(sourceCheck.Result);
+                    }
+
+                    _pane.SetStatus(applySummary + Environment.NewLine
+                        + "修复结果复查：输出文件剩余 " + outputCheck.Result.Diagnostics.Count + " 条问题。"
+                        + Environment.NewLine + "当前列表仍对应未修改的原始文档；修复结果已另存到上方路径。");
+                }
+                else
+                {
+                    _pane.SetStatus(applySummary + Environment.NewLine
+                        + "输出文件已生成，但复查未完成："
+                        + EngineGateway.DescribeError(outputCheck != null ? outputCheck.Error : null));
+                }
             }
             catch (Exception exception)
             {
@@ -257,7 +295,9 @@ namespace ThesisAddIn.VSTO
         private string ReportApplyResult(EngineApplyResult result)
         {
             var message = new System.Text.StringBuilder();
-            message.Append("修复完成：已应用 ").Append(result.Applied.Count).Append(" 处");
+            message.Append(result.Failures != null && result.Failures.Count > 0
+                ? "修复未完成：已应用 "
+                : "修复完成：已应用 ").Append(result.Applied.Count).Append(" 处");
             if (result.Applied.Count > 0)
             {
                 message.Append("（");
@@ -274,7 +314,14 @@ namespace ThesisAddIn.VSTO
                 message.Append("；失败 ").Append(result.Failures.Count).Append(" 处（未产生任何部分写入）");
             }
 
-            message.Append("。输出文件：").Append(result.OutputPath);
+            if (string.IsNullOrWhiteSpace(result.OutputPath))
+            {
+                message.Append("。未生成输出文件。");
+            }
+            else
+            {
+                message.Append("。输出文件：").Append(result.OutputPath);
+            }
             foreach (EnginePatchFailure failure in result.Failures)
             {
                 message.Append(Environment.NewLine).Append("· 失败：").Append(failure.Patch.RuleId)
@@ -332,46 +379,84 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
-            Word.Range range = selection as Word.Range;
+            // Word raises WindowSelectionChange with a Word.Selection COM object.
+            // It is not a Word.Range, so read its Range explicitly.
+            Word.Selection wordSelection = selection as Word.Selection;
+            Word.Range range = wordSelection != null ? wordSelection.Range : selection as Word.Range;
             if (_pane == null || range == null)
             {
                 return;
             }
 
-            string ruleId = TryReadRuleIdFromComments(range);
-            if (string.IsNullOrEmpty(ruleId))
+            string ruleId;
+            string expected;
+            string actual;
+            if (!TryReadIssueFromComments(range, out ruleId, out expected, out actual))
             {
                 return;
             }
 
-            if (_pane.SelectByRuleId(ruleId))
+            if (_pane.SelectByComment(ruleId, expected, actual))
             {
                 _pane.SetStatus("已按批注锚点激活建议卡片：" + ruleId + "（Word 无悬停事件，此处为点击/选中激活）");
             }
         }
 
-        private static string TryReadRuleIdFromComments(Word.Range selection)
+        /// <summary>
+        /// 只读取与当前选区锚点相交的批注，避免同一段有多条批注时总是激活第一条。
+        /// 若选区覆盖多条批注或无法唯一匹配，则不切换侧边栏。
+        /// </summary>
+        private static bool TryReadIssueFromComments(Word.Range selection, out string ruleId, out string expected, out string actual)
         {
+            ruleId = null;
+            expected = null;
+            actual = null;
             try
             {
-                Word.Range paragraphRange = selection.Paragraphs.Count > 0 ? selection.Paragraphs[1].Range : selection;
-                Word.Comments comments = paragraphRange.Comments;
+                Word.Comments comments = selection.Document.Comments;
+                var matches = new List<string[]>();
                 for (int i = 1; i <= comments.Count; i++)
                 {
-                    string text = comments[i].Range.Text;
-                    Match match = RuleIdPattern.Match(text ?? string.Empty);
-                    if (match.Success)
+                    Word.Comment comment = comments[i];
+                    Word.Range scope = comment.Scope;
+                    bool intersects = selection.Start == selection.End
+                        ? selection.Start >= scope.Start && selection.Start <= scope.End
+                        : selection.Start < scope.End && scope.Start < selection.End;
+                    if (!intersects)
                     {
-                        return match.Groups["id"].Value;
+                        continue;
+                    }
+
+                    string text = comment.Range.Text ?? string.Empty;
+                    Match ruleMatch = RuleIdPattern.Match(text);
+                    Match expectedMatch = ExpectedValuePattern.Match(text);
+                    Match actualMatch = ActualValuePattern.Match(text);
+                    if (ruleMatch.Success && expectedMatch.Success && actualMatch.Success)
+                    {
+                        matches.Add(new[]
+                        {
+                            ruleMatch.Groups["id"].Value.Trim(),
+                            expectedMatch.Groups["value"].Value.Trim(),
+                            actualMatch.Groups["value"].Value.Trim()
+                        });
                     }
                 }
+
+                if (matches.Count != 1)
+                {
+                    return false;
+                }
+
+                ruleId = matches[0][0];
+                expected = matches[0][1];
+                actual = matches[0][2];
+                return true;
             }
             catch (Exception)
             {
-                // 选区可能已被关闭，忽略本次联动。
+                // 选区或批注可能已被关闭，忽略本次联动。
+                return false;
             }
-
-            return null;
         }
 
         /// <summary>
