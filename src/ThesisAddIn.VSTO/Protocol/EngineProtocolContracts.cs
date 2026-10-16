@@ -394,10 +394,11 @@ public sealed class EngineProtocolClient
                 CloseInputAndWait(process);
                 return Failure(request.RequestId, EngineProtocol.ProtocolError, "引擎响应 requestId 不匹配。", request);
             }
-            if (response.Ok && response.Result is null)
+            if (response.Ok && !HasPayloadFor(request.Operation, response))
             {
                 CloseInputAndWait(process);
-                return Failure(request.RequestId, EngineProtocol.ProtocolError, "成功响应缺少 result。", request);
+                return Failure(request.RequestId, EngineProtocol.ProtocolError,
+                    "成功响应缺少与操作匹配的结果（" + request.Operation + "）。", request);
             }
             if (!response.Ok && response.Error is null)
             {
@@ -425,6 +426,17 @@ public sealed class EngineProtocolClient
         RequestId = requestId,
         Ok = false,
         Error = new EngineError { Code = code, Message = message }
+    };
+
+    /// <summary>
+    /// 成功响应必须带上与操作匹配的载荷：analyze 要 result，plan 要 plan，apply 要 apply。
+    /// 早期实现只检查 result，导致 plan/apply 的成功响应被误判为协议异常。
+    /// </summary>
+    private static bool HasPayloadFor(string operation, EngineResponse response) => operation switch
+    {
+        EngineProtocol.PlanOperation => response.Plan is not null,
+        EngineProtocol.ApplyOperation => response.Apply is not null,
+        _ => response.Result is not null
     };
 
     private static void CloseInputAndWait(Process process)

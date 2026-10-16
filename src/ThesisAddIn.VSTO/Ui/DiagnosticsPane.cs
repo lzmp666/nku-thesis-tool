@@ -29,7 +29,15 @@ namespace ThesisAddIn.VSTO.Ui
             Padding = new Padding(8);
             Font = new Font("Microsoft YaHei UI", 9F);
 
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 34, WrapContents = false };
+            // Word 的任务窗格很窄，三个按钮必须允许换行，否则最后一个会被裁掉。
+            var buttons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 68,
+                WrapContents = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoScroll = false
+            };
             ConfigureButton(_analyzeButton, "分析当前文档");
             ConfigureButton(_fixOneButton, "修复此项");
             ConfigureButton(_fixAllButton, "预览并修复全部");

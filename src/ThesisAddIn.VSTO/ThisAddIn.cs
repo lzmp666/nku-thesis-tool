@@ -28,6 +28,7 @@ namespace ThesisAddIn.VSTO
         private DiagnosticsPane _pane;
         private EngineGateway _gateway;
         private string _gatewayError;
+        private string _workingCopySource = "已保存的文件内容";
 
         public bool IsEngineConfigured
         {
@@ -36,6 +37,13 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
+            // 任何未捕获的异常都写进日志：未激活的 Office 环境下部分 Word 调用会抛
+            // 含糊的 COM 错误，只有日志能定位到具体位置。
+            AppDomain.CurrentDomain.UnhandledException += (s, args) =>
+                WriteStartupLog("未处理异常：" + args.ExceptionObject);
+            System.Windows.Forms.Application.ThreadException += (s, args) =>
+                WriteStartupLog("界面线程异常：" + args.Exception);
+
             _gateway = EngineGateway.Create(out _gatewayError);
 
             _pane = new DiagnosticsPane();
@@ -80,23 +88,34 @@ namespace ThesisAddIn.VSTO
 
         private void OnAnalyzeRequested(object sender, EventArgs e)
         {
-            if (!EnsureGateway())
-            {
-                return;
-            }
-
-            string failure;
-            string workCopy = CreateWorkingCopy(out failure);
-            if (workCopy == null)
-            {
-                _pane.ShowFailure(failure);
-                return;
-            }
-
-            _pane.SetBusy(true, "正在分析文档…（基于当前内容的临时副本，不修改原文件）");
+            string workCopy = null;
             try
             {
+                WriteStartupLog("收到“分析当前文档”点击。");
+                if (!EnsureGateway())
+                {
+                    WriteStartupLog("分析中止：引擎未配置。");
+                    return;
+                }
+
+                string failure;
+                workCopy = CreateWorkingCopy(out failure);
+                if (workCopy == null)
+                {
+                    WriteStartupLog("分析中止：临时副本失败 - " + failure);
+                    _pane.ShowFailure(failure);
+                    return;
+                }
+
+                WriteStartupLog("临时副本已生成，开始调用引擎。");
+                _pane.SetBusy(true, "正在分析文档…（基于" + _workingCopySource + "的临时副本，不修改原文件）");
                 ShowAnalysisResult(_gateway.Analyze(workCopy), "分析完成：");
+                WriteStartupLog("分析调用返回。");
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("分析出现异常：" + exception);
+                _pane.ShowFailure("分析出现异常，已停止：" + exception.Message);
             }
             finally
             {
@@ -141,6 +160,7 @@ namespace ThesisAddIn.VSTO
 
         private void OnFixAllRequested(object sender, EventArgs e)
         {
+            WriteStartupLog("收到“预览并修复全部”点击。");
             RunRepair(null, "全部可自动修复项");
         }
 
@@ -150,8 +170,10 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void RunRepair(EngineDiagnostic diagnostic, string scopeLabel)
         {
+            WriteStartupLog("收到修复请求：" + scopeLabel + "。");
             if (!EnsureGateway())
             {
+                WriteStartupLog("修复中止：引擎未配置。");
                 return;
             }
 
@@ -159,6 +181,7 @@ namespace ThesisAddIn.VSTO
             string workCopy = CreateWorkingCopy(out failure);
             if (workCopy == null)
             {
+                WriteStartupLog("修复中止：临时副本失败 - " + failure);
                 _pane.ShowFailure(failure);
                 return;
             }
@@ -180,32 +203,45 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
+                WriteStartupLog("修复计划已生成：待修改 " + plan.Patches.Count + " 处，保留 " + plan.Deferred.Count + " 处。");
                 using (var preview = new FixPreviewDialog(plan, scopeLabel))
                 {
+                    WriteStartupLog("准备显示修复预览窗口。");
                     if (preview.ShowDialog() != DialogResult.OK)
                     {
+                        WriteStartupLog("用户在预览窗口取消。");
                         _pane.SetStatus("已取消修复，文档没有任何改动。");
                         return;
                     }
+
+                    WriteStartupLog("用户确认预览。");
                 }
 
                 string outputPath = AskOutputPath();
                 if (string.IsNullOrEmpty(outputPath))
                 {
+                    WriteStartupLog("用户未选择输出文件。");
                     _pane.SetStatus("未选择输出文件，已取消修复。");
                     return;
                 }
 
+                WriteStartupLog("开始写入：" + outputPath);
                 _pane.SetStatus("正在写入新文件…（原文件保持不变）");
                 EngineResponse applyResponse = _gateway.Apply(workCopy, outputPath, diagnostic);
                 if (applyResponse == null || !applyResponse.Ok || applyResponse.Apply == null)
                 {
-                    _pane.ShowFailure(EngineGateway.DescribeError(applyResponse != null ? applyResponse.Error : null));
+                    string applyError = EngineGateway.DescribeError(applyResponse != null ? applyResponse.Error : null);
+                    WriteStartupLog("写入失败：" + applyError);
+                    _pane.ShowFailure(applyError);
                     return;
                 }
 
-                ReportApplyResult(applyResponse.Apply);
-                ShowAnalysisResult(_gateway.Analyze(applyResponse.Apply.OutputPath), "已按修复结果重新分析：");
+                string applySummary = ReportApplyResult(applyResponse.Apply);
+                WriteStartupLog(applySummary);
+
+                // 重新分析**当前文档**而不是输出文件：列表必须和用户正在编辑的文档保持一致，
+                // 否则“已修复”之后列表显示的是另一份文件的问题。
+                ShowAnalysisResult(_gateway.Analyze(workCopy), applySummary + Environment.NewLine + "已重新分析当前文档：");
             }
             catch (Exception exception)
             {
@@ -218,10 +254,21 @@ namespace ThesisAddIn.VSTO
             }
         }
 
-        private void ReportApplyResult(EngineApplyResult result)
+        private string ReportApplyResult(EngineApplyResult result)
         {
             var message = new System.Text.StringBuilder();
             message.Append("修复完成：已应用 ").Append(result.Applied.Count).Append(" 处");
+            if (result.Applied.Count > 0)
+            {
+                message.Append("（");
+                for (int i = 0; i < result.Applied.Count; i++)
+                {
+                    if (i > 0) message.Append("、");
+                    message.Append(result.Applied[i].RuleId);
+                }
+                message.Append("）");
+            }
+
             if (result.Failures.Count > 0)
             {
                 message.Append("；失败 ").Append(result.Failures.Count).Append(" 处（未产生任何部分写入）");
@@ -234,7 +281,7 @@ namespace ThesisAddIn.VSTO
                     .Append(" @ ").Append(failure.Patch.Location).Append(" — ").Append(failure.Reason);
             }
 
-            _pane.SetStatus(message.ToString());
+            return message.ToString();
         }
 
         private void ShowAnalysisResult(EngineResponse response, string prefix)
@@ -328,8 +375,11 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 生成供引擎读取的临时副本。Word 锁定打开中的 .docx，引擎无法直接打开该文件；
-        /// SaveCopyAs 生成的副本同时包含尚未保存的修改。
+        /// 生成供引擎读取的临时副本。
+        ///
+        /// 优先使用 Word 自己的 SaveCopyAs：它包含尚未保存的修改。部分环境会拒绝该命令
+        /// （本机实测：Office 未激活时返回 0x800A1704），此时退回文件系统复制，检查的
+        /// 是磁盘上已保存的内容——这一点会如实反映在面板状态文字里。
         /// </summary>
         private string CreateWorkingCopy(out string error)
         {
@@ -341,12 +391,45 @@ namespace ThesisAddIn.VSTO
                 return null;
             }
 
+            string directory = Path.Combine(Path.GetTempPath(), "NkuThesisTool");
+            string path = Path.Combine(directory, "work-" + Guid.NewGuid().ToString("N") + ".docx");
             try
             {
-                string directory = Path.Combine(Path.GetTempPath(), "NkuThesisTool");
                 Directory.CreateDirectory(directory);
-                string path = Path.Combine(directory, "work-" + Guid.NewGuid().ToString("N") + ".docx");
+            }
+            catch (Exception exception)
+            {
+                error = "无法创建临时目录：" + exception.Message;
+                return null;
+            }
+
+            try
+            {
                 document.SaveCopyAs(path);
+                if (File.Exists(path))
+                {
+                    _workingCopySource = "当前内容";
+                    return path;
+                }
+
+                WriteStartupLog("SaveCopyAs 未生成文件，改用文件复制。");
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("SaveCopyAs 不可用（" + exception.Message + "），改用文件复制。");
+            }
+
+            try
+            {
+                string source = document.FullName;
+                if (string.IsNullOrEmpty(source) || !File.Exists(source))
+                {
+                    error = "当前文档还没有保存到磁盘，无法生成用于检查的副本。请先保存文档。";
+                    return null;
+                }
+
+                File.Copy(source, path, true);
+                _workingCopySource = "已保存的文件内容";
                 return path;
             }
             catch (Exception exception)
@@ -377,7 +460,9 @@ namespace ThesisAddIn.VSTO
             {
                 dialog.Title = "选择修复结果的保存位置（不会覆盖原文件）";
                 dialog.Filter = "Word 文档 (*.docx)|*.docx";
-                dialog.FileName = "论文格式检查-已修复.docx";
+                // 带时间戳的默认文件名：修复引擎拒绝写已存在的文件，
+                // 固定名字会让第二次修复被安全规则挡下。
+                dialog.FileName = "论文格式检查-已修复-" + DateTime.Now.ToString("MMdd-HHmmss") + ".docx";
                 dialog.OverwritePrompt = true;
                 return dialog.ShowDialog() == DialogResult.OK ? dialog.FileName : null;
             }
