@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -310,8 +310,23 @@ public sealed class EngineProtocolClient
     public EngineResponse Plan(string inputPath, string? ruleId, string? location) =>
         Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location));
 
+    public Task<EngineResponse> PlanAsync(
+        string inputPath,
+        string? ruleId,
+        string? location,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location), cancellationToken);
+
     public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location) =>
         Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location));
+
+    public Task<EngineResponse> ApplyAsync(
+        string inputPath,
+        string outputPath,
+        string? ruleId,
+        string? location,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location), cancellationToken);
 
     public Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default) =>
         SendAsync(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null), cancellationToken);
@@ -460,3 +475,4 @@ public sealed class EngineProtocolClient
         catch (System.ComponentModel.Win32Exception) { }
     }
 }
+
