@@ -32,6 +32,11 @@ namespace ThesisAddIn.VSTO
         private EngineGateway _gateway;
         private string _gatewayError;
         private string _workingCopySource = "已保存的文件内容";
+        private System.Windows.Forms.Timer _documentHoverTimer;
+        private int _lastHoveredWindowHandle = -1;
+        private int _lastHoveredRangeStart = -1;
+        private int _lastHoveredRangeEnd = -1;
+        private string _lastHoveredCommentKey;
 
         public bool IsEngineConfigured
         {
@@ -51,6 +56,12 @@ namespace ThesisAddIn.VSTO
 
             Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
+
+            // Word 没有文档正文的鼠标悬停事件。用低频 UI 计时器查询鼠标下的
+            // Word.Range，再通过批注锚点切换建议卡片；COM 调用仍在 Word UI 线程执行。
+            _documentHoverTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            _documentHoverTimer.Tick += OnDocumentHoverTimerTick;
+            _documentHoverTimer.Start();
 
             // Word can start on its backstage page with no document window. In that
             // state, reading Application.ActiveWindow may throw a COM exception and
@@ -79,6 +90,13 @@ namespace ThesisAddIn.VSTO
         {
             try
             {
+                if (_documentHoverTimer != null)
+                {
+                    _documentHoverTimer.Stop();
+                    _documentHoverTimer.Tick -= OnDocumentHoverTimerTick;
+                    _documentHoverTimer.Dispose();
+                    _documentHoverTimer = null;
+                }
                 Application.WindowActivate -= OnWindowActivate;
                 Application.WindowSelectionChange -= OnWindowSelectionChange;
             }
@@ -503,9 +521,7 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 批注锚点到建议卡片的联动。Word 对象模型没有“鼠标悬停”事件，
-        /// 因此这里监听选择变化（点击或选中锚点）作为回退实现；
-        /// 该限制已在 docs 中如实记录，不宣称支持纯悬停。
+        /// 批注锚点到建议卡片的选择联动。
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
@@ -535,10 +551,91 @@ namespace ThesisAddIn.VSTO
                 return;
             }
 
-            if (_pane.SelectByComment(ruleId, expected, actual))
+            if (_pane.SelectByComment(ruleId, expected, actual, navigateToSource: false))
             {
-                _pane.SetStatus("已按批注锚点激活建议卡片：" + ruleId + "（Word 无悬停事件，此处为点击/选中激活）");
+                _pane.SetStatus("已按批注锚点激活建议卡片：" + ruleId + "。");
             }
+        }
+
+        /// <summary>
+        /// Word 没有文档正文的 MouseHover 事件。定时查询鼠标屏幕坐标下的 Range，
+        /// 并仅在命中范围变化时检查批注锚点，避免每个计时周期遍历批注。
+        /// </summary>
+        private void OnDocumentHoverTimerTick(object sender, EventArgs e)
+        {
+            try
+            {
+                Word.Window window = Application.ActiveWindow;
+                if (window == null)
+                {
+                    ResetHoveredRange();
+                    return;
+                }
+
+                EnsureTaskPaneForWindow(window);
+                if (_pane == null)
+                {
+                    ResetHoveredRange();
+                    return;
+                }
+
+                System.Drawing.Point cursor = Cursor.Position;
+                Word.Range range = window.RangeFromPoint(cursor.X, cursor.Y) as Word.Range;
+                if (range == null)
+                {
+                    ResetHoveredRange();
+                    return;
+                }
+
+                int windowHandle = window.Hwnd;
+                int start = range.Start;
+                int end = range.End;
+                if (windowHandle != _lastHoveredWindowHandle)
+                {
+                    _lastHoveredCommentKey = null;
+                }
+                if (windowHandle == _lastHoveredWindowHandle
+                    && start == _lastHoveredRangeStart
+                    && end == _lastHoveredRangeEnd)
+                {
+                    return;
+                }
+
+                _lastHoveredWindowHandle = windowHandle;
+                _lastHoveredRangeStart = start;
+                _lastHoveredRangeEnd = end;
+
+                string ruleId;
+                string expected;
+                string actual;
+                if (TryReadIssueFromComments(range, out ruleId, out expected, out actual))
+                {
+                    string commentKey = ruleId + "\u001f" + expected + "\u001f" + actual;
+                    if (!string.Equals(commentKey, _lastHoveredCommentKey, StringComparison.Ordinal)
+                        && _pane.SelectByComment(ruleId, expected, actual, navigateToSource: false))
+                    {
+                        _lastHoveredCommentKey = commentKey;
+                    }
+                }
+                else
+                {
+                    _lastHoveredCommentKey = null;
+                }
+            }
+            catch (Exception)
+            {
+                // 切换窗口、切换到 Backstage 或 Word 正在关闭时，坐标查询可能失败。
+                // 悬停是辅助联动，失败时保留现有卡片，不打断分析和编辑。
+                ResetHoveredRange();
+            }
+        }
+
+        private void ResetHoveredRange()
+        {
+            _lastHoveredWindowHandle = -1;
+            _lastHoveredRangeStart = -1;
+            _lastHoveredRangeEnd = -1;
+            _lastHoveredCommentKey = null;
         }
 
         /// <summary>
@@ -738,3 +835,4 @@ namespace ThesisAddIn.VSTO
         }
     }
 }
+
