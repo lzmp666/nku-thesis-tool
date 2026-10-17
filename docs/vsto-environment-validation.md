@@ -5,7 +5,7 @@
 | 项目 | 实测 / 检查结果 |
 | --- | --- |
 | 操作系统 | Windows 11 25H2，64 位，内部版本 26200.9711 |
-| Microsoft Word | 桌面版 16.0.20430.20146，64 位；当前已启动，标题栏显示“未经授权产品”；登录/激活提示阻断继续操作 |
+| Microsoft Word | 桌面版 16.0.20430.20146，64 位；用户已确认 Office 激活恢复，Word 正打开合成样例；Computer Use 两次将目标窗口映射为 E: 盘资源管理器，尚未完成实机验证 |
 | Visual Studio | Community 2022 17.14.37806.7，安装在 `D:\vs2022` |
 | Office/SharePoint development 工作负载 | 已安装；`Microsoft.VisualStudio.Tools.Office.targets` 可用 |
 | .NET Framework 4.8 targeting pack | 已检测到 |
@@ -17,7 +17,7 @@
 | 当前 PR head 的 Word 加载/交互 | 已确认插件加载并显示中文任务窗格；引擎环境变量未被首次 Word 进程识别，重启后被 Office 登录/激活提示阻断；分析、定位、修复、另存尚未验证 |
 | Office 全局安全配置 | 未修改 |
 
-环境阻塞已从“缺少 VSTO 工具链/签名失败”推进到“插件已加载，但引擎调用与修复闭环尚未验证”。构建、签名和任务窗格显示已通过；引擎进程启动、诊断、定位、修复及另存仍未验证。首次 Word 进程未读到已配置的 `THESIS_ENGINE_PROTOCOL_HOST`；写入当前用户环境并广播变更后，重启 Word 被 Office 登录/激活提示阻断，尚不能确认新进程已读取该值。不登录账户或修改 Office 全局安全配置。
+环境已从缺少 VSTO 工具链/签名问题推进到桌面 Word 实机交互待验收。Office 激活已恢复；构建、签名、任务窗格加载和协议宿主层合成样例验证均已通过。桌面用户环境已配置 THESIS_ENGINE_PROTOCOL_HOST 并广播变化。当前 Word 正打开合成样例，但计算机使用工具两次将 Word 请求映射为 E: 盘文件资源管理器，因此未安全执行 UI 操作；仍未验证当前 Word 进程读取引擎路径、通过 JSON Lines 调用宿主、插件启用/禁用及正常启动/退出。
 
 ## 已由自动化测试覆盖的协议能力
 
@@ -34,3 +34,9 @@
 
 在完成上述实测前，Issue #50 保持打开；构建、签名和自动化测试的通过不替代 Word COM 插件实机验收。
 
+
+## Office 激活后的增量复测（2026-10-17）
+
+ProtocolHost Release --no-restore 构建通过（0 warning、0 error）。协议层正式合成样例分析返回 3 项诊断；plan/apply 将 2 项自动修复写入新 DOCX，保留 1 项人工处理；recheck 后仍剩 1 项人工处理，输入文件 SHA-256 未变。另一个格式样例的 5 项补丁写入新输出成功。完整自动测试在样例文件锁释放后通过 67/67；PR #65 Actions run #99 通过 Linux build/test 和 Windows VSTO Release 签名构建。
+
+桌面 Word 的 UI 验收仍未完成：应用列表显示 Word 正打开 known_issues_sample 合成样例，但两次 Computer Use 窗口获取都将请求的 Word 窗口映射成 E: 盘资源管理器。未对错误窗口执行操作，并按安全恢复流程停止 UI 自动化。待能安全聚焦 Word 后，再验证宿主调用、诊断、定位、批注联动、单项/批量修复、另存与重开。
