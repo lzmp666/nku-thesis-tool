@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Office.Tools;
 using Word = Microsoft.Office.Interop.Word;
@@ -33,6 +35,7 @@ namespace ThesisAddIn.VSTO
         private string _gatewayError;
         private string _workingCopySource = "已保存的文件内容";
         private System.Windows.Forms.Timer _documentHoverTimer;
+        private CancellationTokenSource _operationCancellation;
         private int _lastHoveredWindowHandle = -1;
         private int _lastHoveredRangeStart = -1;
         private int _lastHoveredRangeEnd = -1;
@@ -53,6 +56,7 @@ namespace ThesisAddIn.VSTO
                 WriteStartupLog("界面线程异常：" + args.Exception);
 
             _gateway = EngineGateway.Create(out _gatewayError);
+            _operationCancellation = new CancellationTokenSource();
 
             Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
@@ -88,6 +92,11 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Shutdown(object sender, EventArgs e)
         {
+            if (_operationCancellation != null)
+            {
+                _operationCancellation.Cancel();
+            }
+
             try
             {
                 if (_documentHoverTimer != null)
@@ -106,6 +115,11 @@ namespace ThesisAddIn.VSTO
             }
 
             _gateway = null;
+            if (_operationCancellation != null)
+            {
+                _operationCancellation.Dispose();
+                _operationCancellation = null;
+            }
         }
 
         /// <summary>由 ThisAddIn.Designer.cs 生成的初始化流程调用，绑定启动/关闭事件。</summary>
@@ -115,41 +129,46 @@ namespace ThesisAddIn.VSTO
             Shutdown += ThisAddIn_Shutdown;
         }
 
-        private void OnAnalyzeRequested(object sender, EventArgs e)
+        private async void OnAnalyzeRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
+            DiagnosticsPane pane = _pane;
             string workCopy = null;
             try
             {
                 WriteStartupLog("收到“分析当前文档”点击。");
-                if (!EnsureGateway())
+                if (!EnsureGateway(pane))
                 {
                     WriteStartupLog("分析中止：引擎未配置。");
                     return;
                 }
+                EngineGateway gateway = _gateway;
+                CancellationToken cancellationToken = GetOperationCancellationToken();
 
                 string failure;
                 workCopy = CreateWorkingCopy(out failure);
                 if (workCopy == null)
                 {
                     WriteStartupLog("分析中止：临时副本失败 - " + failure);
-                    _pane.ShowFailure(failure);
+                    ShowFailure(pane, failure);
                     return;
                 }
 
                 WriteStartupLog("临时副本已生成，开始调用引擎。");
-                _pane.SetBusy(true, "正在分析文档…（基于" + _workingCopySource + "的临时副本，不修改原文件）");
-                ShowAnalysisResult(_gateway.Analyze(workCopy), "分析完成：");
+                string workingCopySource = _workingCopySource;
+                SetBusy(pane, true, "正在分析文档…（基于" + workingCopySource + "的临时副本，不修改原文件）");
+                EngineResponse response = await gateway.AnalyzeAsync(workCopy, cancellationToken);
+                ShowAnalysisResult(pane, response, "分析完成：");
                 WriteStartupLog("分析调用返回。");
             }
             catch (Exception exception)
             {
                 WriteStartupLog("分析出现异常：" + exception);
-                _pane.ShowFailure("分析出现异常，已停止：" + exception.Message);
+                ShowFailure(pane, "分析出现异常，已停止：" + exception.Message);
             }
             finally
             {
-                _pane.SetBusy(false, null);
+                SetBusy(pane, false, null);
                 TryDelete(workCopy);
             }
         }
@@ -170,31 +189,32 @@ namespace ThesisAddIn.VSTO
             }
         }
 
-        private void OnFixCurrentRequested(object sender, EventArgs e)
+        private async void OnFixCurrentRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
-            EngineDiagnostic diagnostic = _pane.SelectedDiagnostic;
+            DiagnosticsPane pane = _pane;
+            EngineDiagnostic diagnostic = pane != null ? pane.SelectedDiagnostic : null;
             if (diagnostic == null)
             {
-                _pane.SetStatus("请先在列表中选择一条问题，再执行“修复此项”。");
+                SetStatus(pane, "请先在列表中选择一条问题，再执行“修复此项”。");
                 return;
             }
 
             if (!string.Equals(diagnostic.FixLevel, "auto", StringComparison.OrdinalIgnoreCase))
             {
-                _pane.SetStatus("该问题不能自动修复（处理方式：" + DiagnosticsPane.DescribeFixLevel(diagnostic.FixLevel)
+                SetStatus(pane, "该问题不能自动修复（处理方式：" + DiagnosticsPane.DescribeFixLevel(diagnostic.FixLevel)
                     + "）。请按说明手动调整，或先与规则负责人确认后再纳入自动修复。");
                 return;
             }
 
-            RunRepair(diagnostic, "当前选中项 " + diagnostic.RuleId);
+            await RunRepair(pane, diagnostic, "当前选中项 " + diagnostic.RuleId);
         }
 
-        private void OnFixAllRequested(object sender, EventArgs e)
+        private async void OnFixAllRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
             WriteStartupLog("收到“预览并修复全部”点击。");
-            RunRepair(null, "全部可自动修复项");
+            await RunRepair(_pane, null, "全部可自动修复项");
         }
 
         /// <summary>
@@ -319,38 +339,41 @@ namespace ThesisAddIn.VSTO
         /// 修复闭环：临时副本 → 生成计划 → 中文预览确认 → 选择输出文件 → 执行 → 重新分析。
         /// 任何一步失败都停止，不会产生半成品。
         /// </summary>
-        private void RunRepair(EngineDiagnostic diagnostic, string scopeLabel)
+        private async Task RunRepair(DiagnosticsPane pane, EngineDiagnostic diagnostic, string scopeLabel)
         {
-            WriteStartupLog("收到修复请求：" + scopeLabel + "。");
-            if (!EnsureGateway())
-            {
-                WriteStartupLog("修复中止：引擎未配置。");
-                return;
-            }
-
-            string failure;
-            string workCopy = CreateWorkingCopy(out failure);
-            if (workCopy == null)
-            {
-                WriteStartupLog("修复中止：临时副本失败 - " + failure);
-                _pane.ShowFailure(failure);
-                return;
-            }
-
+            string workCopy = null;
             try
             {
-                _pane.SetBusy(true, "正在生成修复计划…");
-                EngineResponse planResponse = _gateway.Plan(workCopy, diagnostic);
+                WriteStartupLog("收到修复请求：" + scopeLabel + "。");
+                if (!EnsureGateway(pane))
+                {
+                    WriteStartupLog("修复中止：引擎未配置。");
+                    return;
+                }
+                EngineGateway gateway = _gateway;
+                CancellationToken cancellationToken = GetOperationCancellationToken();
+
+                string failure;
+                workCopy = CreateWorkingCopy(out failure);
+                if (workCopy == null)
+                {
+                    WriteStartupLog("修复中止：临时副本失败 - " + failure);
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                SetBusy(pane, true, "正在生成修复计划…");
+                EngineResponse planResponse = await gateway.PlanAsync(workCopy, diagnostic, cancellationToken);
                 if (planResponse == null || !planResponse.Ok || planResponse.Plan == null)
                 {
-                    _pane.ShowFailure(EngineGateway.DescribeError(planResponse != null ? planResponse.Error : null));
+                    ShowFailure(pane, EngineGateway.DescribeError(planResponse != null ? planResponse.Error : null));
                     return;
                 }
 
                 EnginePatchPlan plan = planResponse.Plan;
                 if (plan.Patches.Count == 0)
                 {
-                    _pane.SetStatus("没有可自动修复的项目（" + scopeLabel + "）。这些项目可能需要人工确认，或者已经修复。");
+                    SetStatus(pane, "没有可自动修复的项目（" + scopeLabel + "）。这些项目可能需要人工确认，或者已经修复。");
                     return;
                 }
 
@@ -361,7 +384,7 @@ namespace ThesisAddIn.VSTO
                     if (preview.ShowDialog() != DialogResult.OK)
                     {
                         WriteStartupLog("用户在预览窗口取消。");
-                        _pane.SetStatus("已取消修复，文档没有任何改动。");
+                        SetStatus(pane, "已取消修复，文档没有任何改动。");
                         return;
                     }
 
@@ -372,18 +395,18 @@ namespace ThesisAddIn.VSTO
                 if (string.IsNullOrEmpty(outputPath))
                 {
                     WriteStartupLog("用户未选择输出文件。");
-                    _pane.SetStatus("未选择输出文件，已取消修复。");
+                    SetStatus(pane, "未选择输出文件，已取消修复。");
                     return;
                 }
 
                 WriteStartupLog("开始写入：" + outputPath);
-                _pane.SetStatus("正在写入新文件…（原文件保持不变）");
-                EngineResponse applyResponse = _gateway.Apply(workCopy, outputPath, diagnostic);
+                SetStatus(pane, "正在写入新文件…（原文件保持不变）");
+                EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, outputPath, diagnostic, cancellationToken);
                 if (applyResponse == null || !applyResponse.Ok || applyResponse.Apply == null)
                 {
                     string applyError = EngineGateway.DescribeError(applyResponse != null ? applyResponse.Error : null);
                     WriteStartupLog("写入失败：" + applyError);
-                    _pane.ShowFailure(applyError);
+                    ShowFailure(pane, applyError);
                     return;
                 }
 
@@ -392,7 +415,7 @@ namespace ThesisAddIn.VSTO
                 {
                     string failureSummary = ReportApplyResult(applied);
                     WriteStartupLog(failureSummary);
-                    _pane.ShowFailure(failureSummary + Environment.NewLine + "原始文档未修改，也没有生成部分修复文件。");
+                    ShowFailure(pane, failureSummary + Environment.NewLine + "原始文档未修改，也没有生成部分修复文件。");
                     return;
                 }
 
@@ -400,7 +423,7 @@ namespace ThesisAddIn.VSTO
                 {
                     const string missingOutput = "修复引擎未生成可复查的输出文件；原始文档保持不变。";
                     WriteStartupLog(missingOutput);
-                    _pane.ShowFailure(missingOutput);
+                    ShowFailure(pane, missingOutput);
                     return;
                 }
 
@@ -409,33 +432,33 @@ namespace ThesisAddIn.VSTO
 
                 // 输出文件是实际修复结果；原文仍保持打开且未修改。复查输出文件，
                 // 同时保留侧边栏与当前打开的原文对应，避免把输出问题定位到原文。
-                EngineResponse outputCheck = _gateway.Analyze(applied.OutputPath);
+                EngineResponse outputCheck = await gateway.AnalyzeAsync(applied.OutputPath, cancellationToken);
                 if (outputCheck != null && outputCheck.Ok && outputCheck.Result != null)
                 {
-                    EngineResponse sourceCheck = _gateway.Analyze(workCopy);
+                    EngineResponse sourceCheck = await gateway.AnalyzeAsync(workCopy, cancellationToken);
                     if (sourceCheck != null && sourceCheck.Ok && sourceCheck.Result != null)
                     {
-                        _pane.ShowAnalysis(sourceCheck.Result);
+                        ShowAnalysis(pane, sourceCheck.Result);
                     }
 
-                    _pane.SetStatus(applySummary + Environment.NewLine
+                    SetStatus(pane, applySummary + Environment.NewLine
                         + "修复结果复查：输出文件剩余 " + outputCheck.Result.Diagnostics.Count + " 条问题。"
                         + Environment.NewLine + "当前列表仍对应未修改的原始文档；修复结果已另存到上方路径。");
                 }
                 else
                 {
-                    _pane.SetStatus(applySummary + Environment.NewLine
+                    SetStatus(pane, applySummary + Environment.NewLine
                         + "输出文件已生成，但复查未完成："
                         + EngineGateway.DescribeError(outputCheck != null ? outputCheck.Error : null));
                 }
             }
             catch (Exception exception)
             {
-                _pane.ShowFailure("修复过程出现异常，已停止：" + exception.Message);
+                ShowFailure(pane, "修复过程出现异常，已停止：" + exception.Message);
             }
             finally
             {
-                _pane.SetBusy(false, null);
+                SetBusy(pane, false, null);
                 TryDelete(workCopy);
             }
         }
@@ -479,16 +502,16 @@ namespace ThesisAddIn.VSTO
             return message.ToString();
         }
 
-        private void ShowAnalysisResult(EngineResponse response, string prefix)
+        private static void ShowAnalysisResult(DiagnosticsPane pane, EngineResponse response, string prefix)
         {
             if (response != null && response.Ok && response.Result != null)
             {
-                _pane.ShowAnalysis(response.Result);
-                _pane.SetStatus(prefix + "当前剩余 " + response.Result.Diagnostics.Count + " 条问题（含未自动修复项）。");
+                ShowAnalysis(pane, response.Result);
+                SetStatus(pane, prefix + "当前剩余 " + response.Result.Diagnostics.Count + " 条问题（含未自动修复项）。");
                 return;
             }
 
-            _pane.ShowFailure(EngineGateway.DescribeError(response != null ? response.Error : null));
+            ShowFailure(pane, EngineGateway.DescribeError(response != null ? response.Error : null));
         }
 
         /// <summary>把一条诊断定位到原文：选中对应段落（选中即为可见高亮，不修改文档内容）。</summary>
@@ -789,15 +812,45 @@ namespace ThesisAddIn.VSTO
             }
         }
 
-        private bool EnsureGateway()
+        private bool EnsureGateway(DiagnosticsPane pane)
         {
             if (_gateway != null)
             {
                 return true;
             }
 
-            _pane.ShowFailure(_gatewayError ?? "引擎未配置。");
+            ShowFailure(pane, _gatewayError ?? "引擎未配置。");
             return false;
+        }
+
+        private CancellationToken GetOperationCancellationToken()
+        {
+            return _operationCancellation != null ? _operationCancellation.Token : CancellationToken.None;
+        }
+
+        private static bool IsPaneAvailable(DiagnosticsPane pane)
+        {
+            return pane != null && !pane.IsDisposed && pane.IsHandleCreated;
+        }
+
+        private static void ShowFailure(DiagnosticsPane pane, string message)
+        {
+            if (IsPaneAvailable(pane)) pane.ShowFailure(message);
+        }
+
+        private static void ShowAnalysis(DiagnosticsPane pane, EngineAnalysisResult result)
+        {
+            if (IsPaneAvailable(pane)) pane.ShowAnalysis(result);
+        }
+
+        private static void SetBusy(DiagnosticsPane pane, bool busy, string message)
+        {
+            if (IsPaneAvailable(pane)) pane.SetBusy(busy, message);
+        }
+
+        private static void SetStatus(DiagnosticsPane pane, string message)
+        {
+            if (IsPaneAvailable(pane)) pane.SetStatus(message);
         }
 
         private Word.Document TryGetActiveDocument()
