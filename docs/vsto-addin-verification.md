@@ -4,7 +4,7 @@
 
 ## PR #65 最新本机复核（2026-10-17）
 
-复核代码基于 PR head `67f8c925`，并合入 `main`（`9b7e10a`），本地集成提交为 `21d290e`。
+本机编译工作树为 `098928b`；`ThisAddIn.cs`、`EngineGateway.cs` 与 `DiagnosticsPane.cs` 的 blob 与当前 PR head `6194bce` 一致。PR base `main` 为 `9b7e10a`。
 VS Community 2022 17.14.37806.7 安装在 `D:\vs2022`；Office/SharePoint 开发工作负载、
 VSTO targets、.NET Framework 4.8 targeting pack 与 VSTO Runtime 10.0 均可用。
 
@@ -15,16 +15,10 @@ VS 2022 MSBuild 的 Debug 与 Release VSTO 构建均成功；`mage.exe -Verify` 
 `dotnet test tests/ThesisEngine.Tests/ThesisEngine.Tests.csproj --configuration Release --no-restore`
 通过 **67/67**。
 
-当前 PR head 的构建产物尚未在桌面 Word 中加载；侧边栏、锚点点击联动、定位、单项/批量修复和
-另存结果还没有针对这份构建逐项复测。GitHub Actions 只构建协议、引擎宿主和自动化测试，不包含
-`ThesisAddIn.VSTO.csproj`。在完成 Word 实测前，#51 保持打开且 PR 保持 Draft。
+当前 PR #65 head `6194bce` 对应的本机 Release 产物已在桌面 Word 中成功加载，并显示中文「论文格式检查」任务窗格。打开合成样例 `known_issues_sample.docx` 后，任务窗格初始提示未配置 `THESIS_ENGINE_PROTOCOL_HOST`，因此本轮尚未执行分析、定位、单项/批量修复或另存操作。随后已将引擎宿主 DLL 路径写入当前用户环境变量并通知 Windows 更新环境；重启 Word 后，Office 的登录/激活提示阻止继续打开样例。当前 Office 标题为“未经授权产品”，本轮不登录账户、不绕过激活。样例 SHA-256 为 `B8A3DD37B94AAC2B0AB100F20698106369F22311542DBAF2457B271A4EF674CE`，与仓库预期值一致；本轮没有对样例执行修改。
 
-安全复核发现此前提交的 `ThesisAddIn.VSTO_TemporaryKey.pfx` **确实包含私钥**，原 README 的
-“不包含任何真实密钥”表述错误。当前 PR 补丁已从工作树移除该 PFX，并改为由开发者在本机证书库生成
-不可导出的调试私钥；由于旧 PFX 曾出现在公开分支历史中，请将旧证书视为已泄露，不再信任或复用。
-
-记录在真实桌面 Word 中运行中文问题侧边栏的实测过程与结果。全部样例均为仓库内的
-合成演示文件，不含真实论文或个人信息。
+PR 的 CI run 87（run ID `39015449160`）通过，但它仍不构建 `ThesisAddIn.VSTO.csproj`。VSTO Debug/Release 构建与 manifest 签名已通过，插件加载和任务窗格显示已验证；协议调用和完整交互闭环仍未验证。Issue #51 保持打开，PR 保持 Draft。
+安全复核发现此前提交的 `ThesisAddIn.VSTO_TemporaryKey.pfx` 确实包含私钥，当前源码树已移除并忽略 PFX；由于旧文件曾出现在公开历史中，必须视为已泄露，不再信任或复用。所有演示样例均为合成 DOCX，不含真实论文或个人信息。
 
 ## Word 交互实测环境（此前一次记录）
 
@@ -80,4 +74,5 @@ VS 2022 MSBuild 的 Debug 与 Release VSTO 构建均成功；`mage.exe -Verify` 
 - 未在其他 Word 版本上验证，也未提供安装包/部署流程。
 - 测试套件依赖 `tests/fixtures/synthetic/demo/` 下的样例文件：Word 打开这些文件会锁定它们，
   导致相关用例失败。运行测试前请关闭 Word；持续集成环境无此问题。
+
 
