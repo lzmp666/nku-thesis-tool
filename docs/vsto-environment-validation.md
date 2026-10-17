@@ -6,15 +6,15 @@
 | --- | --- |
 | Windows | 25H2，build 26200.9711；注册表 ProductName 显示 Windows 10 Home China |
 | Word | 桌面版 16.0.20430.20146，64 位（来自 2026-10-16 的环境记录，本轮未重新启动 Word 核验） |
-| Visual Studio | Community 2022 安装在 `D:\\vs2022`；本轮 MSBuild 版本为 17.14.60.43110 |
-| Office/SharePoint 开发工具 | 已安装；`D:\\vs2022\\MSBuild\\Microsoft\\VisualStudio\\v17.0\\OfficeTools\\Microsoft.VisualStudio.Tools.Office.targets` 存在 |
+| Visual Studio | Community 2022 安装在 `D:/vs2022`；本轮 MSBuild 版本为 17.14.60.43110 |
+| Office/SharePoint 开发工具 | 已安装；`D:/vs2022/MSBuild/Microsoft/VisualStudio/v17.0/OfficeTools/Microsoft.VisualStudio.Tools.Office.targets` 存在 |
 | .NET Framework 4.8 targeting pack | 已检测到 |
 | VSTO Runtime 10.0 | 已检测到 `VSTOInstaller.exe` 与 `VSTOLoader.dll` |
 | 本机开发签名证书 | 当前用户证书库中尚无项目开发证书；生成证书时本受限构建会话返回 `0x80070005 ACCESS_DENIED` |
-| VSTO 完整签名构建 | 阻塞：不能在当前会话写入证书库，尚未生成可安装的已签名清单 |
+| VSTO 完整签名构建 | C# 插件 DLL 编译成功；ClickOnce 清单签名阻塞：不能在当前会话写入证书库，尚未生成可安装的已签名清单 |
 | 当前 PR #67 的 Word 实测 | 待完成；不能以历史 #51 测试或 CI 通过替代 |
 
-本机已具备在 D 盘安装的 VS2022、Office/SharePoint VSTO targets、.NET Framework 4.8 targeting pack 和 VSTO Runtime。当前会话尝试创建开发签名证书时被访问控制拒绝；因此尚未证明 PR #67 可产出可安装的已签名 VSTO 清单，也未在 Word 中加载当前分支。
+本机已具备安装在 D 盘的 VS2022、Office/SharePoint VSTO targets、.NET Framework 4.8 targeting pack 和 VSTO Runtime。本轮用 VS2022 MSBuild 编译 PR #67，成功生成 `ThesisAddIn.VSTO.dll`；随后签名步骤因证书库中缺少证书而失败。创建本机开发证书时，当前受限会话返回 `0x80070005 ACCESS_DENIED`。所以当前分支尚未生成可安装的已签名 VSTO 清单，也未在 Word 中加载。
 
 ## 自动化测试与 CI 的边界
 
