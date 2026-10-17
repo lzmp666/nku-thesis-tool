@@ -192,7 +192,8 @@
 
   <!-- 契约程序集是 netstandard2.0 的 SDK 风格工程，用 dotnet CLI 构建：它自带
        MSBuild 18，不受本机 Visual Studio MSBuild 版本的限制。 -->
-  <Target Name="BuildProtocolContracts" BeforeTargets="ResolveAssemblyReferences">
+  <Target Name="BuildProtocolContracts" BeforeTargets="ResolveAssemblyReferences"
+          Condition="'$(SkipProtocolContractBuild)' != 'true'">
     <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)\Protocol\ThesisAddIn.Protocol.csproj&quot; -c Release --nologo -v minimal /p:CopyLocalLockFileAssemblies=true"
           WorkingDirectory="$(MSBuildProjectDirectory)\Protocol" />
   </Target>

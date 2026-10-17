@@ -37,6 +37,15 @@ if (-not (Test-Path $msbuild)) { throw "未找到 VS 2022 MSBuild：$msbuild" }
   /p:SignManifests=true "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT"
 ```
 
+如果 NuGet 源暂时不可用，但协议项目已还原过依赖，可先用 `--no-restore` 构建契约程序集，
+再让 VSTO MSBuild 复用该输出，避免重复访问 NuGet：
+
+```powershell
+dotnet build src\ThesisAddIn.VSTO\Protocol\ThesisAddIn.Protocol.csproj -c Release --no-restore
+& $msbuild src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj /p:Configuration=Release `
+  /p:SkipProtocolContractBuild=true
+```
+
 公开仓库不保存签名私钥。上述脚本只导出公开证书，并将它加入当前用户的 Root 与
 TrustedPublisher 存储，以便本机演示；私钥保留在当前用户的个人证书库且不可导出。不要将
 私钥或 PFX 加入版本控制，也不要把本机开发证书用于发布版本。若之前已下载过旧测试 PFX，
@@ -52,8 +61,10 @@ New-Item -Path $key -Force | Out-Null
 Set-ItemProperty -Path $key -Name FriendlyName -Value "论文格式检查"
 Set-ItemProperty -Path $key -Name Description   -Value "南开研究生学位论文格式检查插件"
 Set-ItemProperty -Path $key -Name LoadBehavior  -Value 3 -Type DWord
+$configuration = "Release"
+$addinDirectory = (Resolve-Path "src\ThesisAddIn.VSTO\bin\$configuration").Path
 Set-ItemProperty -Path $key -Name Manifest `
-  -Value ("file:///" + ((Resolve-Path "src\ThesisAddIn.VSTO\bin\Debug").Path -replace '\\','/') + "/ThesisAddIn.VSTO.vsto|vstolocal")
+  -Value ("file:///" + ($addinDirectory -replace '\\','/') + "/ThesisAddIn.VSTO.vsto|vstolocal")
 
 # 告诉插件引擎宿主在哪
 [Environment]::SetEnvironmentVariable("THESIS_ENGINE_PROTOCOL_HOST",

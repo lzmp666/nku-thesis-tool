@@ -49,20 +49,27 @@ namespace ThesisAddIn.VSTO
 
             _gateway = EngineGateway.Create(out _gatewayError);
 
-            _pane = new DiagnosticsPane();
-            _pane.AnalyzeRequested += OnAnalyzeRequested;
-            _pane.FixCurrentRequested += OnFixCurrentRequested;
-            _pane.FixAllRequested += OnFixAllRequested;
-            _pane.DiagnosticSelected += OnDiagnosticSelected;
-
-            _taskPane = CustomTaskPanes.Add(_pane, TaskPaneTitle);
-            _taskPane.Visible = true;
-
+            Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
 
-            _pane.SetStatus(string.IsNullOrEmpty(_gatewayError)
-                ? "准备就绪。点击“分析当前文档”开始检查。"
-                : _gatewayError);
+            // Word can start on its backstage page with no document window. In that
+            // state, reading Application.ActiveWindow may throw a COM exception and
+            // make Office disable the add-in (LoadBehavior 3 -> 2) before the user
+            // opens a document. WindowActivate will create the pane when a window
+            // becomes available.
+            try
+            {
+                Word.Window activeWindow = Application.ActiveWindow;
+                if (activeWindow != null)
+                {
+                    EnsureTaskPaneForWindow(activeWindow);
+                }
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("启动时当前没有可用的 Word 文档窗口；等待窗口激活后创建侧边栏："
+                    + exception.Message);
+            }
 
             WriteStartupLog("插件启动完成；引擎已配置：" + (IsEngineConfigured ? "是" : "否")
                 + "；侧边栏：" + (_taskPane != null ? "已创建" : "创建失败"));
@@ -72,6 +79,7 @@ namespace ThesisAddIn.VSTO
         {
             try
             {
+                Application.WindowActivate -= OnWindowActivate;
                 Application.WindowSelectionChange -= OnWindowSelectionChange;
             }
             catch (Exception)
@@ -91,6 +99,7 @@ namespace ThesisAddIn.VSTO
 
         private void OnAnalyzeRequested(object sender, EventArgs e)
         {
+            ActivatePaneFromSender(sender);
             string workCopy = null;
             try
             {
@@ -129,6 +138,7 @@ namespace ThesisAddIn.VSTO
 
         private void OnDiagnosticSelected(object sender, EventArgs e)
         {
+            ActivatePaneFromSender(sender);
             EngineDiagnostic diagnostic = _pane.SelectedDiagnostic;
             if (diagnostic == null)
             {
@@ -144,6 +154,7 @@ namespace ThesisAddIn.VSTO
 
         private void OnFixCurrentRequested(object sender, EventArgs e)
         {
+            ActivatePaneFromSender(sender);
             EngineDiagnostic diagnostic = _pane.SelectedDiagnostic;
             if (diagnostic == null)
             {
@@ -163,8 +174,127 @@ namespace ThesisAddIn.VSTO
 
         private void OnFixAllRequested(object sender, EventArgs e)
         {
+            ActivatePaneFromSender(sender);
             WriteStartupLog("收到“预览并修复全部”点击。");
             RunRepair(null, "全部可自动修复项");
+        }
+
+        /// <summary>
+        /// Word 每个文档窗口都需要自己的任务窗格和诊断列表。启动时只创建首个窗口的
+        /// 窗格会导致后来打开的文档没有侧栏；WindowActivate 同时覆盖新窗口和窗口切换。
+        /// </summary>
+        private void OnWindowActivate(Word.Document document, Word.Window window)
+        {
+            EnsureTaskPaneForWindow(window);
+        }
+
+        private void EnsureTaskPaneForWindow(Word.Window window)
+        {
+            if (window == null)
+            {
+                _taskPane = null;
+                _pane = null;
+                return;
+            }
+
+            int windowHandle;
+            try
+            {
+                windowHandle = window.Hwnd;
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("无法读取 Word 窗口标识，未创建侧边栏：" + exception.Message);
+                return;
+            }
+
+            for (int i = 0; i < CustomTaskPanes.Count; i++)
+            {
+                CustomTaskPane existingTaskPane = CustomTaskPanes[i];
+                try
+                {
+                    Word.Window paneWindow = existingTaskPane.Window as Word.Window;
+                    if (paneWindow == null)
+                    {
+                        continue;
+                    }
+
+                    if (paneWindow.Hwnd == windowHandle)
+                    {
+                        _taskPane = existingTaskPane;
+                        _pane = existingTaskPane.Control as DiagnosticsPane;
+                        return;
+                    }
+                }
+                catch (Exception)
+                {
+                    // 任务窗格可能正随文档窗口关闭；跳过失效的 COM 窗口引用。
+                }
+            }
+
+            DiagnosticsPane pane = CreateDiagnosticsPane();
+            CustomTaskPane taskPane = null;
+            try
+            {
+                taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
+                taskPane.Visible = true;
+                _taskPane = taskPane;
+                _pane = pane;
+                pane.SetStatus(string.IsNullOrEmpty(_gatewayError)
+                    ? "准备就绪。点击“分析当前文档”开始检查。"
+                    : _gatewayError);
+                WriteStartupLog("已为 Word 窗口 " + windowHandle + " 创建中文侧边栏。");
+            }
+            catch (Exception exception)
+            {
+                if (taskPane != null)
+                {
+                    try
+                    {
+                        CustomTaskPanes.Remove(taskPane);
+                    }
+                    catch (Exception)
+                    {
+                        // Word 关闭窗口期间集合可能已不可访问；继续清理控件自身。
+                    }
+                }
+
+                pane.Dispose();
+                _taskPane = null;
+                _pane = null;
+                WriteStartupLog("创建 Word 任务窗格失败：" + exception);
+            }
+        }
+
+        private DiagnosticsPane CreateDiagnosticsPane()
+        {
+            var pane = new DiagnosticsPane();
+            pane.AnalyzeRequested += OnAnalyzeRequested;
+            pane.FixCurrentRequested += OnFixCurrentRequested;
+            pane.FixAllRequested += OnFixAllRequested;
+            pane.DiagnosticSelected += OnDiagnosticSelected;
+            return pane;
+        }
+
+        private void ActivatePaneFromSender(object sender)
+        {
+            DiagnosticsPane pane = sender as DiagnosticsPane;
+            if (pane == null)
+            {
+                return;
+            }
+
+            _pane = pane;
+            _taskPane = null;
+            for (int i = 0; i < CustomTaskPanes.Count; i++)
+            {
+                CustomTaskPane taskPane = CustomTaskPanes[i];
+                if (object.ReferenceEquals(taskPane.Control, pane))
+                {
+                    _taskPane = taskPane;
+                    break;
+                }
+            }
         }
 
         /// <summary>
@@ -379,6 +509,15 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
+            try
+            {
+                EnsureTaskPaneForWindow(Application.ActiveWindow);
+            }
+            catch (Exception)
+            {
+                // Word 关闭文档或切换窗口期间，ActiveWindow 可能暂时不可用。
+            }
+
             // Word raises WindowSelectionChange with a Word.Selection COM object.
             // It is not a Word.Range, so read its Range explicitly.
             Word.Selection wordSelection = selection as Word.Selection;
