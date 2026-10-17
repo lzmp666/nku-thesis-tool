@@ -8,3 +8,6 @@ TestResults/
 *.docx
 *.docm
 !tests/fixtures/synthetic/*.docx
+
+# Local signing credentials for VSTO development
+*.pfx
