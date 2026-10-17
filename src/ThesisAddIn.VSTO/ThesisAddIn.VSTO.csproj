@@ -26,7 +26,6 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
     <SignManifests>true</SignManifests>
-    <ManifestCertificateThumbprint>0A5930114E51736D3FD4EA4A958FBBB8E5FAC447</ManifestCertificateThumbprint>
     <BootstrapperEnabled>true</BootstrapperEnabled>
     <BootstrapperComponentsLocation>HomeSite</BootstrapperComponentsLocation>
     <ResolveComReferenceSilent>true</ResolveComReferenceSilent>
@@ -185,7 +184,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="ThesisAddIn.VSTO_TemporaryKey.pfx" />
     <None Include="README.md" />
   </ItemGroup>
 
