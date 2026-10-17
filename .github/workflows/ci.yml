@@ -17,3 +17,26 @@ jobs:
       - run: dotnet restore NkuThesisTool.sln
       - run: dotnet build NkuThesisTool.sln --no-restore --configuration Release
       - run: dotnet test NkuThesisTool.sln --no-build --configuration Release
+  vsto-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build signed VSTO add-in
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer vswhere.exe was not found." }
+
+          $vsPath = & $vswhere -latest -products '*' -version '[17.0,18.0)' -property installationPath
+          if (-not $vsPath) { throw "Visual Studio 2022 was not found." }
+
+          $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+          if (-not (Test-Path $msbuild)) { throw "Visual Studio 2022 MSBuild was not found: $msbuild" }
+
+          .\scripts\New-VstoDevCertificate.ps1
+          if (-not $env:THESIS_VSTO_CERT_THUMBPRINT) { throw "The ephemeral VSTO development certificate was not created." }
+
+          & $msbuild 'src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj' /p:Configuration=Release /p:SignManifests=true "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT" /m:1 /verbosity:minimal
