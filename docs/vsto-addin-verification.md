@@ -1,20 +1,23 @@
 # Word 插件实测记录（Issue #51）
 
-> **验收边界：** 下方 Word 交互步骤与结果来自此前一次提交，不代表本次 PR 最新改动已在 Word 中复测。请勿将旧记录当作当前 PR head 的验收证明。
+> **验收边界：** 下方标注为 2026-10-16 的 Word 操作记录来自此前构建，不能代替当前 PR head 的复测。当前 head 已完成构建和自动化验证；是否通过桌面 Word 交互验收，见最新记录。
 
-## PR #65 本次本机复核（2026-10-17）
+## PR #65 最新本机复核（2026-10-17）
 
-复核代码基于 PR head `22910d8`，并合入当时的 `main`（`9b7e10a`）。VS Community 2022
-17.14.37806.7 已安装在 `D:\vs2022`；Office/SharePoint 开发工作负载的
-`Microsoft.VisualStudio.Tools.Office.targets` 已存在，.NET Framework 4.8 targeting pack 与
-VSTO Runtime 10.0 也可见。使用 VS 2022 自带 MSBuild 构建时，C# 插件程序集成功编译；完整
-VSTO 构建在 ClickOnce 清单签名阶段失败（`MSB3326`/`MSB3321`）。仓库的本机开发证书脚本
-无法在当前受限构建会话写入当前用户证书库，Windows 返回 `0x80070005 ACCESS_DENIED`；因此
-本次没有生成可安装的已签名 VSTO 加载项，也没有在 Word 中加载这份最新构建。
+复核代码基于 PR head `67f8c925`，并合入 `main`（`9b7e10a`），本地集成提交为 `21d290e`。
+VS Community 2022 17.14.37806.7 安装在 `D:\vs2022`；Office/SharePoint 开发工作负载、
+VSTO targets、.NET Framework 4.8 targeting pack 与 VSTO Runtime 10.0 均可用。
 
-本机 `dotnet test tests/ThesisEngine.Tests/ThesisEngine.Tests.csproj --configuration Release`
-通过 **67/67**。GitHub Actions run 81 通过，但 workflow 只构建协议、引擎宿主和自动化测试，
-没有构建 `ThesisAddIn.VSTO.csproj`；两者都不能替代最新代码的 Word 加载与交互验收。
+在 Windows PowerShell 5.1 中运行 `scripts/New-VstoDevCertificate.ps1` 成功创建/复用当前用户
+本机开发证书。脚本需 UTF-8 BOM，否则 PowerShell 5.1 会误读中文字符串；该兼容修复已纳入本分支。
+VS 2022 MSBuild 的 Debug 与 Release VSTO 构建均成功；`mage.exe -Verify` 确认 Release 输出的
+`ThesisAddIn.VSTO.vsto` 和 `ThesisAddIn.VSTO.dll.manifest` 均有有效签名。本机
+`dotnet test tests/ThesisEngine.Tests/ThesisEngine.Tests.csproj --configuration Release --no-restore`
+通过 **67/67**。
+
+当前 PR head 的构建产物尚未在桌面 Word 中加载；侧边栏、锚点点击联动、定位、单项/批量修复和
+另存结果还没有针对这份构建逐项复测。GitHub Actions 只构建协议、引擎宿主和自动化测试，不包含
+`ThesisAddIn.VSTO.csproj`。在完成 Word 实测前，#51 保持打开且 PR 保持 Draft。
 
 安全复核发现此前提交的 `ThesisAddIn.VSTO_TemporaryKey.pfx` **确实包含私钥**，原 README 的
 “不包含任何真实密钥”表述错误。当前 PR 补丁已从工作树移除该 PFX，并改为由开发者在本机证书库生成
