@@ -1,18 +1,20 @@
 # Word 插件实测记录（Issue #51）
 
-> **本次复核补记：** 下方交互步骤与结果是此前一次 Word 实测记录，不代表本次 PR 最新改动已在 Word 中复测。当前复核遇到 VSTO 构建工具缺失，因此没有把下方记录当作本次 PR head 的验收证明。
+> **验收边界：** 下方 Word 交互步骤与结果来自此前一次提交，不代表本次 PR 最新改动已在 Word 中复测。请勿将旧记录当作当前 PR head 的验收证明。
 
-## PR #65 本次构建复核
+## PR #65 本次本机复核（2026-10-17）
 
-本机复核时安装的是 Visual Studio Community 2026 18.5.2，MSBuild 18.5.4.18101，.NET SDK 10.0.203。
-尝试构建 `src/ThesisAddIn.VSTO/ThesisAddIn.VSTO.csproj` 时失败：MSBuild 报 `MSB4226`，找不到
-`Microsoft.VisualStudio.Tools.Office.targets`。`vswhere` 显示 Office/SharePoint 开发组件已登记，
-但 VSTO Build Tools 组件和对应 targets 不存在。通过安装器添加官方 VSTO Build Tools 组件时，
-安装器返回 5007（操作被阻止/计算机不满足安装要求）。因此当前仍无法确认 VSTO 插件工程可编译。
+复核代码基于 PR head `22910d8`，并合入当时的 `main`（`9b7e10a`）。VS Community 2022
+17.14.37806.7 已安装在 `D:\vs2022`；Office/SharePoint 开发工作负载的
+`Microsoft.VisualStudio.Tools.Office.targets` 已存在，.NET Framework 4.8 targeting pack 与
+VSTO Runtime 10.0 也可见。使用 VS 2022 自带 MSBuild 构建时，C# 插件程序集成功编译；完整
+VSTO 构建在 ClickOnce 清单签名阶段失败（`MSB3326`/`MSB3321`）。仓库的本机开发证书脚本
+无法在当前受限构建会话写入当前用户证书库，Windows 返回 `0x80070005 ACCESS_DENIED`；因此
+本次没有生成可安装的已签名 VSTO 加载项，也没有在 Word 中加载这份最新构建。
 
-GitHub Actions CI run 78（前一复核提交）和 run 80（移除共享签名密钥后的最新提交）均通过；该 workflow 构建协议与引擎宿主测试，未包含
-`ThesisAddIn.VSTO.csproj`，不能替代插件本体构建或 Word 交互验收。本次也没有在 Word 中重新跑最新
-侧边栏、批注联动和修复流程。
+本机 `dotnet test tests/ThesisEngine.Tests/ThesisEngine.Tests.csproj --configuration Release`
+通过 **67/67**。GitHub Actions run 81 通过，但 workflow 只构建协议、引擎宿主和自动化测试，
+没有构建 `ThesisAddIn.VSTO.csproj`；两者都不能替代最新代码的 Word 加载与交互验收。
 
 安全复核发现此前提交的 `ThesisAddIn.VSTO_TemporaryKey.pfx` **确实包含私钥**，原 README 的
 “不包含任何真实密钥”表述错误。当前 PR 补丁已从工作树移除该 PFX，并改为由开发者在本机证书库生成
@@ -75,3 +77,4 @@ GitHub Actions CI run 78（前一复核提交）和 run 80（移除共享签名�
 - 未在其他 Word 版本上验证，也未提供安装包/部署流程。
 - 测试套件依赖 `tests/fixtures/synthetic/demo/` 下的样例文件：Word 打开这些文件会锁定它们，
   导致相关用例失败。运行测试前请关闭 Word；持续集成环境无此问题。
+
