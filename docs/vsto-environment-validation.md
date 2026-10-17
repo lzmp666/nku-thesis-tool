@@ -33,3 +33,32 @@
 6. 记录 Windows、Word、Visual Studio、.NET Framework、VSTO runtime 的版本与位数，并附实测结果。不得关闭或降低 Office 全局安全配置来绕过加载问题。
 
 在完成上述实测前，Issue #50 保持打开；协议实现和自动化测试可单独合入，不据此自动关闭总体验收任务。
+
+## Issue #52 修复闭环验收记录（2026-10-16）
+
+验收样例限定为 `tests/fixtures/synthetic/demo/known_issues_sample.docx`。自动化协议测试验证单项修复只应用所选规则和位置、批量计划只包含 `auto` 项、另存输出、输入字节不变，以及重新分析输出后已修复问题消失、不可自动修复的西文字体诊断仍保留。自动测试不等同于 Word 实机验收。
+
+| 项目 | 当前记录 |
+| --- | --- |
+| Windows | Windows 11 25H2，内部版本 26200.9711（环境核查记录） |
+| Word | 桌面版 16.0.20430.20146，64 位；本次环境核查时未运行 |
+| Visual Studio / VSTO | Visual Studio Community 2026 18.5.11723.231；缺少 Office/SharePoint workload、VSTO MSBuild targets 和 VSTO runtime |
+| 插件版本 | 未生成可验收的插件二进制；项目当前没有单独发布版本号 |
+| 协议版本 | 1.1 |
+| 引擎规则版本 | `demo-0.1.0`（仅合成演示规则） |
+| .NET / CI | GitHub Actions 使用 .NET 10；本地用户级环境已配置 .NET SDK 10.0.100（同时保留 8.0.425），可按 `global.json` 构建并测试解决方案；Linux 环境仍不能替代 Word/VSTO 实机验收 |
+| Word 插件实测 | 待完成：当前 Windows 环境缺少 VSTO 构建与运行组件，未启动本分支插件 |
+
+### 可重复运行步骤
+
+在 Windows 上安装仓库要求的 .NET 10 SDK、Visual Studio Office/SharePoint development workload、.NET Framework 4.8 targeting pack 和 VSTO runtime 后，按 [Word 插件运行说明](../src/ThesisAddIn.VSTO/README.md) 构建并注册插件。随后：
+
+1. 打开 `known_issues_sample.docx`，分析并核对 3 条诊断及其原文位置。
+2. 单独修复 `demo/font-size`，确认预览只含该属性；检查复查结果只消除了字号问题。
+3. 从原始样例执行批量修复，确认预览只含两个 `auto` 项，西文字体明确列为保留项。
+4. 确认原文件 SHA-256 不变；在 Word 中打开另存输出，记录是否出现修复提示，并重新分析输出。
+5. 将 Windows、Word、Visual Studio/VSTO、插件程序集版本、协议版本、规则版本、命令、输出路径和结果补入本节。未通过的项目注明原因，不用静态图片代替 Word 实测。
+
+当前已记录的 Windows/Word 版本仅说明目标机器具备桌面 Word；由于 VSTO 组件缺失，尚未完成插件构建、加载、单项/批量 UI 操作或输出 DOCX 的 Word 打开验证。不得将这些项目标记为通过，也不得把剩余诊断解释成整篇论文合规。
+
+本次本地回归（2026-10-17）：`dotnet build NkuThesisTool.sln --configuration Release` 构建成功，`dotnet test NkuThesisTool.sln --configuration Release` 通过 68/68；结果仅覆盖引擎、协议宿主和自动化测试，不改变上述 Word/VSTO 实机验收状态。
