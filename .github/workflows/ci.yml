@@ -19,11 +19,22 @@ jobs:
       - run: dotnet test NkuThesisTool.sln --no-build --configuration Release
   vsto-build:
     runs-on: windows-2022
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Create ephemeral VSTO signing certificate
+        shell: pwsh
+        run: |
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=NKU Thesis Tool CI' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(1)
+          $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'vsto-ci.cer'
+          Export-Certificate -Cert $certificate -FilePath $publicCertificatePath -Force | Out-Null
+          foreach ($storeName in @('Root', 'TrustedPublisher')) {
+            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\$storeName" | Out-Null
+          }
+          "THESIS_VSTO_CERT_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
       - name: Build signed VSTO add-in
         shell: pwsh
         run: |
@@ -36,11 +47,5 @@ jobs:
           $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
           if (-not (Test-Path $msbuild)) { throw "Visual Studio 2022 MSBuild was not found: $msbuild" }
 
-          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=NKU Thesis Tool CI' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(1)
-          $publicCertificatePath = Join-Path $env:RUNNER_TEMP 'vsto-ci.cer'
-          Export-Certificate -Cert $certificate -FilePath $publicCertificatePath -Force | Out-Null
-          foreach ($storeName in @('Root', 'TrustedPublisher')) {
-            Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\$storeName" | Out-Null
-          }
-
-          & $msbuild 'src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj' /p:Configuration=Release /p:SignManifests=true "/p:ManifestCertificateThumbprint=$($certificate.Thumbprint)" /m:1 /verbosity:minimal
+          if (-not $env:THESIS_VSTO_CERT_THUMBPRINT) { throw "The ephemeral VSTO development certificate was not created." }
+          & $msbuild 'src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj' /p:Configuration=Release /p:SignManifests=true "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT" /m:1 /verbosity:minimal
