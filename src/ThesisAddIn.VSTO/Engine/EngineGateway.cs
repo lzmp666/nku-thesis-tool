@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using ThesisAddIn.Protocol;
 
 namespace ThesisAddIn.VSTO.Engine
@@ -54,6 +56,21 @@ namespace ThesisAddIn.VSTO.Engine
             return _client.Analyze(documentPath);
         }
 
+        public Task<EngineResponse> AnalyzeAsync(string documentPath, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath))
+            {
+                return Task.FromResult(new EngineResponse
+                {
+                    ProtocolVersion = EngineProtocol.Version,
+                    Ok = false,
+                    Error = new EngineError { Code = EngineProtocol.InvalidRequest, Message = "当前没有可分析的文档，请先打开一个 .docx 文件。" }
+                });
+            }
+
+            return _client.AnalyzeAsync(documentPath, cancellationToken);
+        }
+
         /// <summary>生成修复计划；diagnostic 为 null 时计划全部可自动修复项。</summary>
         public EngineResponse Plan(string documentPath, EngineDiagnostic diagnostic)
         {
@@ -61,6 +78,18 @@ namespace ThesisAddIn.VSTO.Engine
                 documentPath,
                 diagnostic != null ? diagnostic.RuleId : null,
                 diagnostic != null ? diagnostic.Location : null);
+        }
+
+        public Task<EngineResponse> PlanAsync(
+            string documentPath,
+            EngineDiagnostic diagnostic,
+            CancellationToken cancellationToken)
+        {
+            return _client.PlanAsync(
+                documentPath,
+                diagnostic != null ? diagnostic.RuleId : null,
+                diagnostic != null ? diagnostic.Location : null,
+                cancellationToken);
         }
 
         /// <summary>执行修复并另存为新文件；diagnostic 为 null 时修复全部可自动项。</summary>
@@ -71,6 +100,20 @@ namespace ThesisAddIn.VSTO.Engine
                 outputPath,
                 diagnostic != null ? diagnostic.RuleId : null,
                 diagnostic != null ? diagnostic.Location : null);
+        }
+
+        public Task<EngineResponse> ApplyAsync(
+            string documentPath,
+            string outputPath,
+            EngineDiagnostic diagnostic,
+            CancellationToken cancellationToken)
+        {
+            return _client.ApplyAsync(
+                documentPath,
+                outputPath,
+                diagnostic != null ? diagnostic.RuleId : null,
+                diagnostic != null ? diagnostic.Location : null,
+                cancellationToken);
         }
 
         public static string DescribeError(EngineError error)
@@ -102,3 +145,4 @@ namespace ThesisAddIn.VSTO.Engine
         }
     }
 }
+
