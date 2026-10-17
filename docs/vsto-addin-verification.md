@@ -132,3 +132,11 @@ PR 的 CI run 87（run ID `39015449160`）通过，但它仍不构建 `ThesisAdd
 
 以上记录只证明本机合成样例上的交互与修复闭环。当前工作树中的 UI 改进仍需推送到 PR #65，等待 GitHub Actions 和维护者复审；Issue #50 的启用/禁用及错误提示场景、纯悬停人工验证、正式安装包和南开大学完整规则覆盖仍未完成。
 
+## 异步前端响应更新（2026-10-18）
+
+为避免引擎较慢时冻结 Word，分析、修复计划、补丁应用和输出复查改为异步进程调用；Word 关闭时会取消调用，协议客户端终止正在等待的引擎子进程。文档副本创建、Word COM 操作及 UI 更新仍在 Word UI 线程进行。协议客户端的 plan/apply 异步调用已纳入测试编译。
+
+- `ThesisAddIn.Protocol` Release 构建通过；`ThesisEngine.Tests` Release 构建通过，0 warning、0 error。
+- 本机 VSTO C# 编译阶段生成插件 DLL；ClickOnce 最终签名步骤因当前用户证书库没有配置该开发证书而未通过。之前的 CI 成功对应改动前 head，异步改动后的 CI 尚待运行。
+- 本机目标测试启动后在 45 秒内未能连接 testhost，未记为通过；改动后的自动化结果以新 head Actions 为准。
+
