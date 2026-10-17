@@ -151,6 +151,146 @@ public sealed class EngineProtocolTests
         Assert.Contains("引擎进程启动或通信失败", response.Error.Message);
     }
 
+    [Fact]
+    public async Task ProtocolHostPlansAutoPatchesAndKeepsDeferredDiagnostics()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+
+        var response = await RunHost(host, new EngineRequest
+        {
+            RequestId = "plan-1",
+            Operation = EngineProtocol.PlanOperation,
+            InputPath = input
+        });
+
+        Assert.True(response.Ok, response.Error?.Message);
+        Assert.Equal("plan-1", response.RequestId);
+        Assert.Null(response.Result);
+        Assert.NotNull(response.Plan);
+        Assert.Equal(2, response.Plan!.Patches.Count);
+        Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/east-asian-font");
+        Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/font-size");
+        var deferred = Assert.Single(response.Plan.Deferred);
+        Assert.Equal("demo/western-font", deferred.RuleId);
+    }
+
+    [Fact]
+    public async Task ProtocolHostAppliesPatchesToNewFileAndReportsRecheck()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-fixed.docx");
+        var before = File.ReadAllBytes(input);
+        try
+        {
+            var apply = await RunHost(host, new EngineRequest
+            {
+                RequestId = "apply-1",
+                Operation = EngineProtocol.ApplyOperation,
+                InputPath = input,
+                OutputPath = output
+            });
+
+            Assert.True(apply.Ok, apply.Error?.Message);
+            Assert.NotNull(apply.Apply);
+            Assert.Equal(2, apply.Apply!.Applied.Count);
+            Assert.Empty(apply.Apply.Failures);
+            Assert.Equal(Path.GetFullPath(output), apply.Apply.OutputPath);
+            Assert.True(File.Exists(output));
+            Assert.Equal(before, File.ReadAllBytes(input));
+
+            var recheck = await RunHost(host, new EngineRequest { RequestId = "recheck-1", InputPath = output });
+            Assert.True(recheck.Ok, recheck.Error?.Message);
+            var remaining = Assert.Single(recheck.Result!.Diagnostics);
+            Assert.Equal("demo/western-font", remaining.RuleId);
+
+            var replan = await RunHost(host, new EngineRequest
+            {
+                RequestId = "replan-1",
+                Operation = EngineProtocol.PlanOperation,
+                InputPath = output
+            });
+            Assert.True(replan.Ok, replan.Error?.Message);
+            Assert.Empty(replan.Plan!.Patches);
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public async Task ClientAcceptsPlanAndApplyPayloadsFromHost()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-client-fixed.docx");
+        try
+        {
+            var client = new EngineProtocolClient(EngineProcessOptions.ForDotnet(host, TimeSpan.FromSeconds(15)));
+
+            // plan 的成功响应带的是 plan 载荷；早期客户端只校验 result，会把它误判成协议异常。
+            var plan = await client.PlanAsync(input, null, null);
+            Assert.True(plan.Ok, plan.Error?.Message);
+            Assert.NotNull(plan.Plan);
+            Assert.Equal(2, plan.Plan!.Patches.Count);
+
+            var filtered = await client.PlanAsync(input, "demo/font-size", "word/document.xml#paragraph[2]/run[0]");
+            Assert.True(filtered.Ok, filtered.Error?.Message);
+            var single = Assert.Single(filtered.Plan!.Patches);
+            Assert.Equal("demo/font-size", single.RuleId);
+            // 过滤后保留的应是：本身不可自动修复的西文字体，以及被过滤掉的东亚字体 auto 项。
+            Assert.Equal(2, filtered.Plan.Deferred.Count);
+            Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/western-font");
+            Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/east-asian-font");
+
+            var apply = await client.ApplyAsync(input, output, null, null);
+            Assert.True(apply.Ok, apply.Error?.Message);
+            Assert.NotNull(apply.Apply);
+            Assert.Equal(2, apply.Apply!.Applied.Count);
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public async Task ProtocolHostRefusesToOverwriteExistingOutput()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-existing.docx");
+        File.WriteAllText(output, "existing");
+        try
+        {
+            var response = await RunHost(host, new EngineRequest
+            {
+                RequestId = "overwrite-1",
+                Operation = EngineProtocol.ApplyOperation,
+                InputPath = input,
+                OutputPath = output
+            });
+
+            Assert.False(response.Ok);
+            Assert.Equal(EngineProtocol.PatchConflict, response.Error!.Code);
+            Assert.Equal("existing", File.ReadAllText(output));
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
     private static async Task<EngineResponse> RunHost(string host, EngineRequest request)
     {
         using var process = new Process
@@ -200,3 +340,4 @@ public sealed class EngineProtocolTests
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 }
+

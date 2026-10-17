@@ -1,5 +1,7 @@
 # Word 插件引擎进程协议
 
+当前版本：**1.1**（在 1.0 的 analyze 之上新增 plan 与 apply）。
+
 ## 边界
 
 src/ThesisAddIn.VSTO/Protocol/ 是插件与引擎共用的契约程序集，目标框架为
@@ -9,9 +11,12 @@ netstandard2.0，不引用 ThesisEngine.Core。Word VSTO 插件目标为 .NET Fr
 
 协议使用标准输入/标准输出上的 JSON Lines：每行一个 UTF-8 JSON 请求，每个请求只
 产生一行响应。宿主标准输出只能写协议响应，诊断日志应写标准错误。连接关闭后宿主
-退出，不保存或修改输入文档。
+退出。
 
-## 版本 1.0
+宿主本身只读取输入文档：analyze 与 plan 不写入任何文件；apply 只写入调用方指定的
+新文件，且**拒绝覆盖已存在的输出文件**，因此原始文档不会被覆盖。
+
+## 版本 1.0：analyze
 
 分析请求：
 
@@ -32,8 +37,47 @@ netstandard2.0，不引用 ThesisEngine.Core。Word VSTO 插件目标为 .NET Fr
 ~~~
 
 requestId 必须原样回显，插件据此拒绝过期或串线的响应。protocolVersion 必须精确
-匹配 1.0；不匹配时宿主不调用引擎，返回 protocol_version_mismatch。当前只实现
-analyze，输入必须是存在的 .docx 文件。
+匹配宿主版本；不匹配时宿主不调用引擎，返回 protocol_version_mismatch。输入必须是
+存在的 .docx 文件。
+
+## 版本 1.1：plan 与 apply
+
+### plan：生成可审阅的修复计划
+
+~~~json
+{"protocolVersion":"1.1","requestId":"p1","operation":"plan","inputPath":"C:\\work\\sample.docx"}
+~~~
+
+可选过滤字段 `ruleId` 与 `location` 用于“只计划当前这一项”；两者都省略时计划全部
+可自动修复项。
+
+成功响应：
+
+~~~json
+{"protocolVersion":"1.1","requestId":"p1","ok":true,"plan":{"patches":[{"ruleId":"demo/east-asian-font","location":"word/document.xml#paragraph[0]/run[0]","expectedBefore":"黑体","desiredAfter":"宋体","reason":"将正文 run 的东亚字体改为规则目标值。"}],"deferred":[{"ruleId":"demo/western-font","severity":"warning","location":"word/document.xml#paragraph[1]/run[0]","expected":"Times New Roman","actual":"Arial","fixLevel":"suggest","message":"…"}],"ruleVersion":"demo-0.1.0","coverage":"…","unsupportedScopes":[]}}
+~~~
+
+`patches` 只包含处理分类为 auto 的项目；`deferred` 是留给用户的诊断，既包括引擎判定
+不能自动修复的，也包括被 `ruleId`/`location` 过滤掉的 auto 项。插件必须先展示计划并
+取得用户确认，再调用 apply。
+
+### apply：执行修复并另存
+
+~~~json
+{"protocolVersion":"1.1","requestId":"a1","operation":"apply","inputPath":"C:\\work\\sample.docx","outputPath":"C:\\work\\sample-fixed.docx"}
+~~~
+
+`outputPath` 必须与 `inputPath` 不同、必须以 .docx 结尾且不得已存在。宿主在应用前先
+重新分析输入文件，因此计划不会因预览期间的改动而失效或扩大范围。全部前置条件在写入
+之前检查完毕，失败时不会产生部分修复的文件。
+
+成功响应：
+
+~~~json
+{"protocolVersion":"1.1","requestId":"a1","ok":true,"apply":{"outputPath":"C:\\work\\sample-fixed.docx","applied":[],"failures":[],"unresolved":[]}}
+~~~
+
+`failures` 非空时表示该批次未发布任何输出；`unresolved` 是被过滤掉、本次未处理的补丁。
 
 错误码和处理方式：
 
@@ -46,6 +90,7 @@ analyze，输入必须是存在的 .docx 文件。
 | engine_exit | 宿主无法启动或提前退出 | 提示引擎不可用 |
 | engine_error | Core 读取或分析失败 | 展示错误，不写入文档 |
 | cancelled | 调用方取消 | 终止宿主进程 |
+| patch_conflict | 输出文件已存在，或修复前置条件冲突 | 中文提示，保留原文件并要求更换文件名 |
 
 ## 构建和手工联调
 
@@ -56,10 +101,17 @@ dotnet build src\ThesisAddIn.VSTO\ProtocolHost\ThesisEngine.ProtocolHost.csproj
 dotnet run --project src\ThesisAddIn.VSTO\ProtocolHost\ThesisEngine.ProtocolHost.csproj -- --protocol-stdio
 ~~~
 
-VSTO 项目使用 Visual Studio 的 Office/SharePoint development 工作负载、桌面版
-Word、.NET Framework 4.8 targeting pack 和 VSTO runtime 构建。设置
-THESIS_ENGINE_PROTOCOL_HOST 为宿主 DLL 的完整路径后启动 Word 插件；插件会在
-ThisAddIn_Startup 中创建进程客户端。插件只引用 Protocol 项目，不引用 Core。
+VSTO 项目需要 Visual Studio 的 Office/SharePoint development 工作负载、桌面版
+Word、.NET Framework 4.8 targeting pack 和 VSTO runtime。它是经典（非 SDK 风格）
+工程，必须用 Visual Studio 自带的 MSBuild 构建；工程内会自动调用 dotnet CLI 构建
+netstandard2.0 的契约程序集。完整命令见 src/ThesisAddIn.VSTO/README.md。
+
+插件只引用 Protocol 程序集，不引用 Core。设置 THESIS_ENGINE_PROTOCOL_HOST 为宿主
+DLL 的完整路径后启动 Word，插件会在 ThisAddIn_Startup 中创建进程客户端。
+
+Word 会锁定正在编辑的 .docx，引擎无法直接读取，因此插件在分析或修复前先用
+Document.SaveCopyAs 生成临时副本，再以副本作为 inputPath；修复结果另存到用户指定的
+新文件。这一限制与处理方式记录在 docs/vsto-addin-verification.md。
 
 协议测试位于 tests/ThesisEngine.Tests/EngineProtocolTests.cs，包括 JSON 往返、宿主
 分析、非法输入和超时终止。正式规则仍以 Core 当前的 demo 规则版本为准；本协议不把
