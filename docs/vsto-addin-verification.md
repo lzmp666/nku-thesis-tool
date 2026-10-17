@@ -76,3 +76,9 @@ PR 的 CI run 87（run ID `39015449160`）通过，但它仍不构建 `ThesisAdd
   导致相关用例失败。运行测试前请关闭 Word；持续集成环境无此问题。
 
 
+
+## Office 激活后的增量复测（2026-10-17）
+
+用户已确认 Office 激活恢复。桌面用户环境中的 THESIS_ENGINE_PROTOCOL_HOST 已指向本机 Release 协议宿主，并已广播环境变更。ProtocolHost Release --no-restore 构建通过（0 warning、0 error）。协议层正式合成样例分析返回 3 项诊断；2 项自动修复另存至新 DOCX，保留 1 项人工处理，recheck 后剩余 1 项，输入文件 SHA-256 未变。另一个格式样例的 5 项补丁写入新输出成功。完整自动测试最终通过 67/67；PR #65 Actions run #99 的 Linux build/test 和 Windows VSTO Release 签名构建均通过。
+
+当前 Word 正打开合成样例，但两次 Computer Use 窗口获取都将请求的 Word 窗口映射为 E: 盘文件资源管理器；未操作错误窗口，并按安全恢复流程停止 UI 自动化。因此尚未验证当前 Word 进程读取引擎路径、引擎调用、诊断定位、批注联动、单项/批量修复及另存/重开。Office 激活已不再是阻塞项；PR #65 保持 Draft，Issue #50/#51 保持打开。
