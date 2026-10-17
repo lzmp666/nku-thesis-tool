@@ -237,12 +237,12 @@ public sealed class EngineProtocolTests
             var client = new EngineProtocolClient(EngineProcessOptions.ForDotnet(host, TimeSpan.FromSeconds(15)));
 
             // plan 的成功响应带的是 plan 载荷；早期客户端只校验 result，会把它误判成协议异常。
-            var plan = client.Plan(input, null, null);
+            var plan = await client.PlanAsync(input, null, null);
             Assert.True(plan.Ok, plan.Error?.Message);
             Assert.NotNull(plan.Plan);
             Assert.Equal(2, plan.Plan!.Patches.Count);
 
-            var filtered = client.Plan(input, "demo/font-size", "word/document.xml#paragraph[2]/run[0]");
+            var filtered = await client.PlanAsync(input, "demo/font-size", "word/document.xml#paragraph[2]/run[0]");
             Assert.True(filtered.Ok, filtered.Error?.Message);
             var single = Assert.Single(filtered.Plan!.Patches);
             Assert.Equal("demo/font-size", single.RuleId);
@@ -251,7 +251,7 @@ public sealed class EngineProtocolTests
             Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/western-font");
             Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/east-asian-font");
 
-            var apply = client.Apply(input, output, null, null);
+            var apply = await client.ApplyAsync(input, output, null, null);
             Assert.True(apply.Ok, apply.Error?.Message);
             Assert.NotNull(apply.Apply);
             Assert.Equal(2, apply.Apply!.Applied.Count);
@@ -340,3 +340,4 @@ public sealed class EngineProtocolTests
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 }
+
