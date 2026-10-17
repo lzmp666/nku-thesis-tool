@@ -24,26 +24,25 @@ SDK 10，SDK 风格工程需要 MSBuild 18 及以上，两者互斥；经典工�
 # 1. 引擎宿主（.NET 10，任意平台可用）
 dotnet build src\ThesisAddIn.VSTO\ProtocolHost\ThesisEngine.ProtocolHost.csproj -c Release
 
-# 2. 插件本体（必须用 Visual Studio 自带的 MSBuild）
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
-  src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj /p:Configuration=Debug
+# 2. 插件本体（必须用 Visual Studio 2022 自带的 MSBuild）
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$vsPath = & $vswhere -latest -products * -version '[17.0,18.0)' -property installationPath
+if (-not $vsPath) { throw '未找到 Visual Studio 2022。' }
+$msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+if (-not (Test-Path $msbuild)) { throw "未找到 VS 2022 MSBuild：$msbuild" }
+
+# 生成仅保存在当前用户证书库中的本地开发证书；不导出私钥。
+.\scripts\New-VstoDevCertificate.ps1
+& $msbuild src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj /p:Configuration=Debug /p:SignManifests=true "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT"
 ```
 
 构建产物包括 `bin\Debug\ThesisAddIn.VSTO.dll` 与签名后的 `ThesisAddIn.VSTO.vsto`。
-工程目录下的 `ThesisAddIn.VSTO_TemporaryKey.pfx` 是 Visual Studio 生成 VSTO 项目时
-同样会创建的临时签名证书，用于清单签名，不包含任何真实密钥。
+公开仓库不保存签名私钥，构建时使用 `scripts/New-VstoDevCertificate.ps1` 在当前用户证书库创建不可导出的本机开发证书。旧临时 PFX 已从当前分支删除，但曾出现在公开提交历史中，应按已泄露处理；不得继续信任或复用。若此前已信任该旧证书，应从当前用户的 Root 与 TrustedPublisher 存储中移除。
 
 ## 安装到 Word（当前用户）
 
 ```powershell
-# 信任工程自带的临时证书（仅当前用户）
-$pfx = "src\ThesisAddIn.VSTO\ThesisAddIn.VSTO_TemporaryKey.pfx"
-$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfx, "")
-foreach ($name in @("Root","TrustedPublisher")) {
-  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($name,"CurrentUser")
-  $store.Open("ReadWrite"); $store.Add($cert); $store.Close()
-}
-
+# 先执行上方证书脚本并成功构建插件，再注册加载项。
 # 注册加载项
 $key = "HKCU:\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO"
 New-Item -Path $key -Force | Out-Null
