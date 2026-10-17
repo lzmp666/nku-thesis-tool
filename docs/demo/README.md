@@ -120,3 +120,18 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 - **正确样例复测**：另以 `clean_sample.docx` 运行 CLI 并输出 `artifacts/clean.annotated.docx`，得到 0 条诊断；该副本没有 `word/comments.xml`，正文没有高亮元素。两份输入样例均与仓库原始样本的 SHA-256 一致，输入未被改写。
 - Word 以“兼容模式”打开该标注副本。本次不影响验收结论；是否需要为生成的文档补充兼容性设置，建议作为后续项单独评估。
 - 本记录只覆盖演示范围内的三项规则（中文字体、西文字体、字号）。表格、页眉页脚、脚注尾注、超链接、修订、内容控件及无法解析的主题字体等仍未覆盖，详见上文“当前检查范围”。未覆盖项不因本次没有诊断或诊断已标注而被视为合规。
+
+## Word 修复闭环演示（Issue #52）
+
+本阶段使用同一份合成错误样例，演示“分析 → 定位 → 预览 → 另存 → 复查”。样例只有三项演示诊断，不含真实论文或个人信息。插件构建、注册和完整操作步骤见 [Word 插件运行说明](../../src/ThesisAddIn.VSTO/README.md)；本次环境的实测状态见 [VSTO 环境验证记录](../vsto-environment-validation.md#issue-52-修复闭环验收记录2026-10-16)。
+
+在仓库根目录先执行 Release 构建与自动测试：
+
+```sh
+dotnet build src/ThesisAddIn.VSTO/ProtocolHost/ThesisEngine.ProtocolHost.csproj --configuration Release
+dotnet test NkuThesisTool.sln --configuration Release
+```
+
+自动化验收应确认：只修复 `demo/font-size` 时输出只消除字号诊断；批量预览只包含 `auto` 的东亚字体和字号，西文字体保留为需确认项；两种操作都输出为新 DOCX，输入字节保持不变，输出可重新分析。重新分析的剩余诊断表示仍待处理，不代表整篇论文合规。
+
+Word 桌面验收使用 `tests/fixtures/synthetic/demo/known_issues_sample.docx`：先核对三条中文诊断及原文定位，再分别执行单项修复和批量修复；确认预览内容、另存文件、复查结果及原样例 SHA-256。还需在 Word 中打开输出，确认未出现文档修复提示。当前记录的 Windows 环境缺少 VSTO 构建/运行组件，因此插件 UI、Word 打开输出和修复提示检查仍待具备 VSTO 的 Windows 环境实测，不能标为通过。

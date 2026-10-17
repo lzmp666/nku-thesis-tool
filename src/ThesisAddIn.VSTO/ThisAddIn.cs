@@ -236,12 +236,27 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                string applySummary = ReportApplyResult(applyResponse.Apply);
+                EngineApplyResult applyResult = applyResponse.Apply;
+                string applySummary = ReportApplyResult(applyResult);
                 WriteStartupLog(applySummary);
 
-                // 重新分析**当前文档**而不是输出文件：列表必须和用户正在编辑的文档保持一致，
-                // 否则“已修复”之后列表显示的是另一份文件的问题。
-                ShowAnalysisResult(_gateway.Analyze(workCopy), applySummary + Environment.NewLine + "已重新分析当前文档：");
+                if (applyResult.Failures.Count > 0 || string.IsNullOrWhiteSpace(applyResult.OutputPath)
+                    || !File.Exists(applyResult.OutputPath))
+                {
+                    _pane.ShowFailure(applySummary + Environment.NewLine + "未生成可重新分析的修复文件。原始文档保持不变。");
+                    return;
+                }
+
+                EngineResponse recheck = _gateway.Analyze(applyResult.OutputPath);
+                if (recheck == null || !recheck.Ok || recheck.Result == null)
+                {
+                    _pane.ShowFailure(applySummary + Environment.NewLine + "修复文件已保存，但重新分析失败："
+                        + EngineGateway.DescribeError(recheck != null ? recheck.Error : null));
+                    return;
+                }
+
+                ShowAnalysisResult(recheck, applySummary + Environment.NewLine
+                    + "已重新分析修复结果。当前打开的原始文档未修改；继续处理请打开输出文件：");
             }
             catch (Exception exception)
             {
@@ -257,7 +272,9 @@ namespace ThesisAddIn.VSTO
         private string ReportApplyResult(EngineApplyResult result)
         {
             var message = new System.Text.StringBuilder();
-            message.Append("修复完成：已应用 ").Append(result.Applied.Count).Append(" 处");
+            bool incomplete = result.Failures.Count > 0 || result.Unresolved.Count > 0;
+            message.Append(incomplete ? "修复未完全完成：已应用 " : "修复完成：已应用 ")
+                .Append(result.Applied.Count).Append(" 处");
             if (result.Applied.Count > 0)
             {
                 message.Append("（");
@@ -274,11 +291,22 @@ namespace ThesisAddIn.VSTO
                 message.Append("；失败 ").Append(result.Failures.Count).Append(" 处（未产生任何部分写入）");
             }
 
+            if (result.Unresolved.Count > 0)
+            {
+                message.Append("；仍有未处理项目 ").Append(result.Unresolved.Count).Append(" 处");
+            }
+
             message.Append("。输出文件：").Append(result.OutputPath);
             foreach (EnginePatchFailure failure in result.Failures)
             {
                 message.Append(Environment.NewLine).Append("· 失败：").Append(failure.Patch.RuleId)
                     .Append(" @ ").Append(failure.Patch.Location).Append(" — ").Append(failure.Reason);
+            }
+
+            foreach (EnginePatch patch in result.Unresolved)
+            {
+                message.Append(Environment.NewLine).Append("· 未处理：").Append(patch.RuleId)
+                    .Append(" @ ").Append(patch.Location);
             }
 
             return message.ToString();

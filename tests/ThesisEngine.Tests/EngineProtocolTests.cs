@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using ThesisAddIn.Protocol;
 using Xunit;
 
@@ -255,6 +256,48 @@ public sealed class EngineProtocolTests
             Assert.True(apply.Ok, apply.Error?.Message);
             Assert.NotNull(apply.Apply);
             Assert.Equal(2, apply.Apply!.Applied.Count);
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public void ClientSingleRepairOnlyChangesSelectedAutoPropertyAndCanReanalyzeOutput()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-single-fixed.docx");
+        var before = File.ReadAllBytes(input);
+        try
+        {
+            var client = new EngineProtocolClient(EngineProcessOptions.ForDotnet(host, TimeSpan.FromSeconds(15)));
+            var location = "word/document.xml#paragraph[2]/run[0]";
+
+            var apply = client.Apply(input, output, "demo/font-size", location);
+
+            Assert.True(apply.Ok, apply.Error?.Message);
+            var applied = Assert.Single(apply.Apply!.Applied);
+            Assert.Equal("demo/font-size", applied.RuleId);
+            Assert.Equal(location, applied.Location);
+            Assert.Empty(apply.Apply.Failures);
+            Assert.Equal(before, File.ReadAllBytes(input));
+            Assert.True(File.Exists(output));
+
+            using (var package = ZipFile.OpenRead(output))
+            {
+                Assert.NotNull(package.GetEntry("[Content_Types].xml"));
+                Assert.NotNull(package.GetEntry("word/document.xml"));
+            }
+
+            var recheck = client.Analyze(output);
+            Assert.True(recheck.Ok, recheck.Error?.Message);
+            Assert.Contains(recheck.Result!.Diagnostics, item => item.RuleId == "demo/east-asian-font");
+            Assert.Contains(recheck.Result.Diagnostics, item => item.RuleId == "demo/western-font");
+            Assert.DoesNotContain(recheck.Result.Diagnostics, item => item.RuleId == "demo/font-size");
         }
         finally
         {
