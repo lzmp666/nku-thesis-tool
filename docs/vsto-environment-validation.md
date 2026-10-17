@@ -1,5 +1,22 @@
 # VSTO 环境验证记录
 
+## 最新实机状态（2026-10-17；代码提交 `e906101`）
+
+以下结果取代后文中早先“Office 激活阻断”“Word 窗口无法聚焦”“没有任务窗格”的历史记录：
+
+| 项目 | 最新结果 |
+| --- | --- |
+| VSTO Release 构建 | 使用 `D:\vs2022` 下 VS 2022 MSBuild 和 VSTO targets 成功构建并签名，0 warning、0 error |
+| 引擎自动化测试 | `ThesisEngine.Tests` Release：67/67 通过 |
+| Word 启动 | 从 Word 起始页启动后打开合成 DOCX，中文插件侧栏自动出现；当前用户 `LoadBehavior` 保持为 3 |
+| 多文档窗口 | 同一 Word 进程第二个文档窗口自动出现独立侧栏；首个文档显示 3 条诊断，第二个显示 1 条，切换窗口后各自结果保留 |
+| 正文批注锚点 | 选中第一段高亮后激活 `demo/east-asian-font`，选中第二段后切换到 `demo/western-font`。实测的是点击/选中，不是悬停 |
+| 原始测试文档 | 本轮仅分析和选择锚点，没有执行修复或保存；完整单项/批量修复另存记录见 [Word 插件实测记录](vsto-addin-verification.md) |
+| 待办 | 新提交推送到 PR #65 后等待 CI 和复审；Issue #50 的 Word 内错误场景及完整启用/禁用流程仍需验收 |
+| Office 全局安全配置 | 未修改 |
+
+自动加载问题的原因是 Word 在无活动文档的起始页启动时，`Application.ActiveWindow` 可能抛出 COM 异常，导致 Office 把加载项的 `LoadBehavior` 从 3 降为 2。当前实现捕获无文档状态，等 Word 的窗口激活事件出现后再创建任务窗格；[Microsoft VSTO 文档](https://learn.microsoft.com/en-us/visualstudio/vsto/registry-entries-for-vsto-add-ins)说明启动加载失败会将 `LoadBehavior` 降为 2。
+
 ## 当前环境核查（2026-10-17）
 
 | 项目 | 实测 / 检查结果 |

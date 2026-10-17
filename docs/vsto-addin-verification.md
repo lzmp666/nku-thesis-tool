@@ -2,6 +2,19 @@
 
 > **验收边界：** 下方标注为 2026-10-16 的 Word 操作记录来自此前构建，不能代替当前 PR head 的复测。当前 head 已完成构建和自动化验证；是否通过桌面 Word 交互验收，见最新记录。
 
+## 当前复测结论（2026-10-17；代码提交 `e906101`）
+
+本节记录本次最新实测，覆盖前文中“尚未加载引擎”“新窗口没有侧栏”“原文锚点联动未验证”等旧状态。旧记录保留作历史，不代表当前状态。
+
+- Release VSTO 使用 `D:\vs2022\MSBuild\Current\Bin\MSBuild.exe` 和 VS 2022 VSTO targets 构建、签名成功；无警告、无错误。`ThesisEngine.Tests` Release 测试通过 **67/67**。
+- 修复了 Word 从起始页启动时没有活动文档窗口的场景：启动期读取 `Application.ActiveWindow` 可能抛 COM 异常，Office 会把加载项 `LoadBehavior` 从 3 降为 2。现在捕获该状态并等 `WindowActivate` 创建窗格。官方 VSTO 文档也说明，启动加载出错会把该值改为 2：[VSTO 加载项注册项](https://learn.microsoft.com/en-us/visualstudio/vsto/registry-entries-for-vsto-add-ins)。
+- Word 从起始页重启后打开合成样例 `known_issues_sample.docx`，中文侧栏自动出现，分析列出 **3 条**问题；注册值保持 `LoadBehavior=3`。
+- 同一 Word 进程再打开合成副本 `known_issues_batch_fixed.docx`，第二个窗口也自动出现独立侧栏，分析列出 **1 条**待人工确认问题；切回第一个窗口仍保留 **3 条**，两个窗口的结果没有串线。
+- 在合成标注文件 `known_issues.annotated.docx` 中点选正文锚点：第一段切换到 `demo/east-asian-font` 建议，第二段切换到 `demo/western-font` 建议。侧栏问题到正文的定位此前已通过实测。Word 对象模型没有纯悬停事件；这里验证的是点击/选中回退，不称为悬停。
+- 本次只做分析和选区联动，没有改动测试文档内容。单项/批量修复、预览、另存及重分析的实测结果见下方“Word 实机验收更新”。
+
+代码已提交到本机分支 `codex/issue-51-window-lifecycle`，待推送到 PR #65 的分支并等待新 CI 与复审。PR #65、Issue #51/#63 暂不关闭；Issue #50 仍需完成 Word 内错误场景和启用/禁用的完整验收。
+
 ## PR #65 最新本机复核（2026-10-17）
 
 本机编译工作树为 `098928b`；`ThisAddIn.cs`、`EngineGateway.cs` 与 `DiagnosticsPane.cs` 的 blob 与当前 PR head `6194bce` 一致。PR base `main` 为 `9b7e10a`。
