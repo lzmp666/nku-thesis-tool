@@ -15,13 +15,15 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly FlowLayoutPanel _diagnosticList = new FlowLayoutPanel();
         private readonly Panel _resultsHost = new Panel();
         private readonly Label _emptyState = new Label();
-        private readonly TextBox _detail = new TextBox();
         private readonly Label _status = new Label();
         private readonly Label _coverage = new Label();
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
-        private readonly List<Button> _diagnosticCards = new List<Button>();
+        private readonly List<Panel> _diagnosticCards = new List<Panel>();
         private int _selectedIndex = -1;
         private bool _isBusy;
+
+        // 当前演示规则集依据南开大学 2026 版规范第 4.7 节表 4.6。
+        private const string DemoRequirementSource = "2026版第4.7节表4.6";
 
         public event EventHandler AnalyzeRequested;
         public event EventHandler FixCurrentRequested;
@@ -78,13 +80,6 @@ namespace ThesisAddIn.VSTO.Ui
             _resultsHost.Controls.Add(_emptyState);
             _emptyState.BringToFront();
 
-            _detail.Dock = DockStyle.Fill;
-            _detail.Multiline = true;
-            _detail.ReadOnly = true;
-            _detail.ScrollBars = ScrollBars.Vertical;
-            _detail.WordWrap = true;
-            _detail.Text = "选择一条问题可定位到原文，并查看补充说明。";
-
             _status.Dock = DockStyle.Fill;
             _status.Padding = new Padding(2);
             _status.Text = "准备就绪。";
@@ -93,22 +88,19 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 5,
+                RowCount = 4,
                 Padding = new Padding(8)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            // 窄任务窗格下第三个操作按钮会换到第二行；保留足够高度，
-            // 避免它被下方的覆盖范围说明遮住。
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 112F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 82F));
+            // 操作按钮置于批注卡片上方；在窄窗格里允许按钮自然换行。
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
             layout.Controls.Add(buttons, 0, 0);
             layout.Controls.Add(_coverage, 0, 1);
             layout.Controls.Add(_resultsHost, 0, 2);
-            layout.Controls.Add(_detail, 0, 3);
-            layout.Controls.Add(_status, 0, 4);
+            layout.Controls.Add(_status, 0, 3);
             Controls.Add(layout);
         }
 
@@ -169,17 +161,16 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 _emptyState.Text = "未发现问题。\n结果仅覆盖已检查范围。";
             }
-            _detail.Text = "选择一条问题可定位到原文，并查看补充说明。";
-
             string ruleVersion = result != null ? result.RuleVersion : string.Empty;
             string coverage = result != null ? result.Coverage : string.Empty;
             _coverage.Text = "规则版本：" + (string.IsNullOrEmpty(ruleVersion) ? "（未提供）" : ruleVersion)
-                + Environment.NewLine + "已检查范围：" + (string.IsNullOrEmpty(coverage) ? "（未提供）" : coverage);
+                + "；已检查：" + (string.IsNullOrEmpty(coverage) ? "（未提供）" : coverage);
 
             string uncovered = (result == null || result.UnsupportedScopes == null || result.UnsupportedScopes.Count == 0)
-                ? "未覆盖范围：引擎未报告。本次仅覆盖演示范围内的少量规则，不代表论文合规。"
+                ? "未覆盖：引擎未报告；本演示只覆盖少量规则，不代表论文合规。"
                 : "未覆盖范围：" + string.Join("、", result.UnsupportedScopes.ToArray());
-            SetStatus("完成分析，共 " + _diagnostics.Count + " 条问题。" + Environment.NewLine + uncovered);
+            _coverage.Text += Environment.NewLine + uncovered;
+            SetStatus("分析完成，共 " + _diagnostics.Count + " 条问题。悬停正文高亮可联动建议。");
 
             _fixOneButton.Enabled = CanFixSelected;
             _fixAllButton.Enabled = HasAutoDiagnostics;
@@ -204,7 +195,7 @@ namespace ThesisAddIn.VSTO.Ui
         /// 按批注中的规则、期望值和实际值选中唯一的问题。
         /// 多条诊断无法唯一对应时不激活卡片，避免跳到错误问题。
         /// </summary>
-        public bool SelectByComment(string ruleId, string expected, string actual, bool navigateToSource)
+        public bool SelectByComment(string ruleId, string expected, string actual, string location, bool navigateToSource)
         {
             if (string.IsNullOrWhiteSpace(ruleId))
             {
@@ -217,7 +208,9 @@ namespace ThesisAddIn.VSTO.Ui
                 EngineDiagnostic diagnostic = _diagnostics[i];
                 if (string.Equals(diagnostic.RuleId, ruleId, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(diagnostic.Expected ?? string.Empty, expected ?? string.Empty, StringComparison.Ordinal)
-                    && string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal))
+                    && string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal)
+                    && (string.IsNullOrEmpty(location)
+                        || string.Equals(diagnostic.Location ?? string.Empty, location, StringComparison.Ordinal)))
                 {
                     if (matchIndex >= 0)
                     {
@@ -239,27 +232,78 @@ namespace ThesisAddIn.VSTO.Ui
 
         private void AddDiagnosticCard(int index, EngineDiagnostic diagnostic)
         {
-            var card = new Button
+            var card = new Panel
             {
-                AutoSize = false,
-                Height = 104,
-                Text = BuildDiagnosticCardText(diagnostic),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(8),
-                FlatStyle = FlatStyle.Flat,
-                UseVisualStyleBackColor = false,
+                Height = 120,
+                Padding = new Padding(0),
                 BackColor = SystemColors.Window,
-                ForeColor = SystemColors.ControlText,
-                AutoEllipsis = false,
+                BorderStyle = BorderStyle.FixedSingle,
                 AccessibleRole = AccessibleRole.ListItem,
-                AccessibleName = diagnostic.RuleId + "，" + diagnostic.Location
-                    + "，期望值：" + diagnostic.Expected + "，实际值：" + diagnostic.Actual,
+                AccessibleName = BuildDiagnosticCardText(diagnostic),
                 Tag = index,
-                Margin = new Padding(0, 0, 0, 6)
+                Margin = new Padding(0, 0, 0, 8),
+                Cursor = Cursors.Hand
             };
-            card.FlatAppearance.BorderSize = 1;
-            card.FlatAppearance.BorderColor = SystemColors.ControlDark;
-            card.Click += OnDiagnosticCardClick;
+
+            var avatar = new Panel
+            {
+                Name = "Avatar",
+                Left = 10,
+                Top = 12,
+                Width = 36,
+                Height = 36,
+                BackColor = SystemColors.Window,
+                Cursor = Cursors.Hand
+            };
+            avatar.Paint += (sender, args) =>
+            {
+                args.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var brush = new SolidBrush(Color.FromArgb(211, 50, 57)))
+                using (var font = new Font("Microsoft YaHei UI", 8F, FontStyle.Bold))
+                using (var format = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                })
+                {
+                    args.Graphics.FillEllipse(brush, 1, 1, avatar.Width - 2, avatar.Height - 2);
+                    args.Graphics.DrawString("NT", font, Brushes.White,
+                        new RectangleF(1, 1, avatar.Width - 2, avatar.Height - 2), format);
+                }
+            };
+
+            var author = new Label
+            {
+                Name = "Author",
+                Text = "NKU Thesis Tool",
+                Left = 56,
+                Top = 10,
+                Height = 22,
+                Font = new Font(Font, FontStyle.Bold),
+                ForeColor = SystemColors.ControlText,
+                BackColor = Color.Transparent,
+                AutoEllipsis = true,
+                Cursor = Cursors.Hand
+            };
+
+            var body = new Label
+            {
+                Name = "Body",
+                Text = BuildDiagnosticCardText(diagnostic),
+                Left = 56,
+                Top = 34,
+                AutoSize = false,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                ForeColor = SystemColors.ControlText,
+                BackColor = Color.Transparent,
+                UseMnemonic = false,
+                Cursor = Cursors.Hand
+            };
+
+            card.Controls.Add(avatar);
+            card.Controls.Add(author);
+            card.Controls.Add(body);
+            AttachCardClickHandlers(card);
             _diagnosticCards.Add(card);
             _diagnosticList.Controls.Add(card);
             ResizeDiagnosticCards();
@@ -267,33 +311,56 @@ namespace ThesisAddIn.VSTO.Ui
 
         private static string BuildDiagnosticCardText(EngineDiagnostic diagnostic)
         {
-            return diagnostic.RuleId + "  ·  " + DescribeSeverity(diagnostic.Severity)
-                + " / " + DescribeFixLevel(diagnostic.FixLevel)
-                + Environment.NewLine + "位置：" + (diagnostic.Location ?? "（未提供）")
-                + Environment.NewLine + "期望：" + (diagnostic.Expected ?? "（未提供）")
-                + Environment.NewLine + "实际：" + (diagnostic.Actual ?? "（未提供）");
+            return "要求参考来源：" + DemoRequirementSource
+                + Environment.NewLine + "规则：" + (diagnostic.RuleId ?? "（未提供）")
+                + Environment.NewLine + "期望值：" + (diagnostic.Expected ?? "（未提供）")
+                + Environment.NewLine + "实际值：" + (diagnostic.Actual ?? "（未提供）");
         }
 
         private void ResizeDiagnosticCards()
         {
             int width = Math.Max(120, _diagnosticList.ClientSize.Width - _diagnosticList.Padding.Horizontal - 4);
-            foreach (Button card in _diagnosticCards)
+            foreach (Panel card in _diagnosticCards)
             {
                 card.Width = width;
-                int textWidth = Math.Max(80, width - card.Padding.Horizontal - 4);
+                Label author = card.Controls["Author"] as Label;
+                Label body = card.Controls["Body"] as Label;
+                if (author == null || body == null)
+                {
+                    continue;
+                }
+
+                int textWidth = Math.Max(80, width - body.Left - 12);
+                author.Width = textWidth;
+                body.Width = textWidth;
                 Size textSize = TextRenderer.MeasureText(
-                    card.Text,
-                    card.Font,
+                    body.Text,
+                    body.Font,
                     new Size(textWidth, int.MaxValue),
                     TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-                card.Height = Math.Max(104, textSize.Height + card.Padding.Vertical + 8);
+                body.Height = textSize.Height + 2;
+                card.Height = Math.Max(82, body.Top + body.Height + 12);
+            }
+        }
+
+        private void AttachCardClickHandlers(Control control)
+        {
+            control.Click += OnDiagnosticCardClick;
+            foreach (Control child in control.Controls)
+            {
+                AttachCardClickHandlers(child);
             }
         }
 
         private void OnDiagnosticCardClick(object sender, EventArgs e)
         {
-            Button card = sender as Button;
-            if (card != null && card.Tag is int)
+            Control control = sender as Control;
+            while (control != null && !(control.Tag is int))
+            {
+                control = control.Parent;
+            }
+
+            if (control is Panel card && card.Tag is int)
             {
                 SelectDiagnostic((int)card.Tag);
             }
@@ -314,17 +381,13 @@ namespace ThesisAddIn.VSTO.Ui
             _selectedIndex = index;
             for (int i = 0; i < _diagnosticCards.Count; i++)
             {
-                Button card = _diagnosticCards[i];
+                Panel card = _diagnosticCards[i];
                 bool selected = i == index;
                 card.BackColor = selected ? SystemColors.Info : SystemColors.Window;
-                card.FlatAppearance.BorderColor = selected ? SystemColors.Highlight : SystemColors.ControlDark;
+                card.BorderStyle = BorderStyle.FixedSingle;
                 card.AccessibleDescription = selected ? "当前选中" : string.Empty;
             }
 
-            EngineDiagnostic diagnostic = SelectedDiagnostic;
-            _detail.Text = string.IsNullOrWhiteSpace(diagnostic.Message)
-                ? "该规则没有提供补充说明。"
-                : diagnostic.Message;
             _fixOneButton.Enabled = !_isBusy && CanFixSelected;
             _diagnosticList.ScrollControlIntoView(_diagnosticCards[index]);
             if (navigateToSource)

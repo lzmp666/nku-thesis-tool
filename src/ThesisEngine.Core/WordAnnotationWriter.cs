@@ -190,7 +190,13 @@ public static class WordAnnotationWriter
             new XAttribute(W + "date", timestamp),
             new XElement(W + "p",
                 new XElement(W + "r",
-                    new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text))));
+                    new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text)),
+                // This hidden tag disambiguates repeated diagnostics without adding a fifth
+                // visible field to the comment shown in Word.
+                new XElement(W + "r",
+                    new XElement(W + "rPr", new XElement(W + "vanish")),
+                    new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"),
+                        "[NKU-LOCATION:" + diagnostic.Location + "]"))));
     }
 
     private static XElement CreateCommentReference(int id) =>
@@ -464,3 +470,4 @@ public static class WordAnnotationWriter
         public List<Diagnostic> Diagnostics { get; } = [];
     }
 }
+

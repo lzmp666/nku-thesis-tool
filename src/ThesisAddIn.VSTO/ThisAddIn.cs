@@ -28,6 +28,9 @@ namespace ThesisAddIn.VSTO
         private static readonly Regex RuleIdPattern = new Regex(@"规则[:：]\s*(?<id>[A-Za-z0-9_\-/]+)", RegexOptions.Compiled);
         private static readonly Regex ExpectedValuePattern = new Regex(@"期望值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
         private static readonly Regex ActualValuePattern = new Regex(@"实际值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
+        private static readonly Regex CommentLocationPattern = new Regex(
+            @"\[NKU-LOCATION:(?<location>word/document\.xml#paragraph\[\d+\]/run\[\d+\])\]",
+            RegexOptions.Compiled);
 
         private CustomTaskPane _taskPane;
         private DiagnosticsPane _pane;
@@ -37,8 +40,6 @@ namespace ThesisAddIn.VSTO
         private System.Windows.Forms.Timer _documentHoverTimer;
         private CancellationTokenSource _operationCancellation;
         private int _lastHoveredWindowHandle = -1;
-        private int _lastHoveredRangeStart = -1;
-        private int _lastHoveredRangeEnd = -1;
         private string _lastHoveredCommentKey;
 
         public bool IsEngineConfigured
@@ -61,7 +62,7 @@ namespace ThesisAddIn.VSTO
             Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
 
-            // Word 没有文档正文的鼠标悬停事件。用低频 UI 计时器查询鼠标下的
+            // Word 没有文档正文的鼠标悬停事件。用 UI 计时器查询鼠标下的
             // Word.Range，再通过批注锚点切换建议卡片；COM 调用仍在 Word UI 线程执行。
             _documentHoverTimer = new System.Windows.Forms.Timer { Interval = 250 };
             _documentHoverTimer.Tick += OnDocumentHoverTimerTick;
@@ -569,20 +570,24 @@ namespace ThesisAddIn.VSTO
             string ruleId;
             string expected;
             string actual;
-            if (!TryReadIssueFromComments(range, out ruleId, out expected, out actual))
+            string location;
+            int matchCount;
+            if (!TryReadIssueFromComments(range, out ruleId, out expected, out actual, out location, out matchCount))
             {
                 return;
             }
 
-            if (_pane.SelectByComment(ruleId, expected, actual, navigateToSource: false))
+            if (_pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
             {
-                _pane.SetStatus("已按批注锚点激活建议卡片：" + ruleId + "。");
+                _pane.SetStatus(matchCount > 1
+                    ? "此处有多条建议，已显示第一条；可在侧栏选择其他问题。"
+                    : "已按批注锚点激活建议卡片：" + ruleId + "。");
             }
         }
 
         /// <summary>
-        /// Word 没有文档正文的 MouseHover 事件。定时查询鼠标屏幕坐标下的 Range，
-        /// 并仅在命中范围变化时检查批注锚点，避免每个计时周期遍历批注。
+        /// Word 没有文档正文的 MouseHover 事件。每个计时周期都检查鼠标坐标下的批注：
+        /// RangeFromPoint 有时会对同一段中的不同位置返回相同范围，因此不能只在范围变化时检查。
         /// </summary>
         private void OnDocumentHoverTimerTick(object sender, EventArgs e)
         {
@@ -611,33 +616,28 @@ namespace ThesisAddIn.VSTO
                 }
 
                 int windowHandle = window.Hwnd;
-                int start = range.Start;
-                int end = range.End;
                 if (windowHandle != _lastHoveredWindowHandle)
                 {
                     _lastHoveredCommentKey = null;
                 }
-                if (windowHandle == _lastHoveredWindowHandle
-                    && start == _lastHoveredRangeStart
-                    && end == _lastHoveredRangeEnd)
-                {
-                    return;
-                }
-
                 _lastHoveredWindowHandle = windowHandle;
-                _lastHoveredRangeStart = start;
-                _lastHoveredRangeEnd = end;
 
                 string ruleId;
                 string expected;
                 string actual;
-                if (TryReadIssueFromComments(range, out ruleId, out expected, out actual))
+                string location;
+                int matchCount;
+                if (TryReadIssueFromComments(range, out ruleId, out expected, out actual, out location, out matchCount))
                 {
-                    string commentKey = ruleId + "\u001f" + expected + "\u001f" + actual;
+                    string commentKey = location + "\u001f" + ruleId + "\u001f" + expected + "\u001f" + actual;
                     if (!string.Equals(commentKey, _lastHoveredCommentKey, StringComparison.Ordinal)
-                        && _pane.SelectByComment(ruleId, expected, actual, navigateToSource: false))
+                        && _pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
                     {
                         _lastHoveredCommentKey = commentKey;
+                        if (matchCount > 1)
+                        {
+                            _pane.SetStatus("此处有多条建议，已显示第一条；可在侧栏选择其他问题。");
+                        }
                     }
                 }
                 else
@@ -656,8 +656,6 @@ namespace ThesisAddIn.VSTO
         private void ResetHoveredRange()
         {
             _lastHoveredWindowHandle = -1;
-            _lastHoveredRangeStart = -1;
-            _lastHoveredRangeEnd = -1;
             _lastHoveredCommentKey = null;
         }
 
@@ -665,11 +663,19 @@ namespace ThesisAddIn.VSTO
         /// 只读取与当前选区锚点相交的批注，避免同一段有多条批注时总是激活第一条。
         /// 若选区覆盖多条批注或无法唯一匹配，则不切换侧边栏。
         /// </summary>
-        private static bool TryReadIssueFromComments(Word.Range selection, out string ruleId, out string expected, out string actual)
+        private static bool TryReadIssueFromComments(
+            Word.Range selection,
+            out string ruleId,
+            out string expected,
+            out string actual,
+            out string location,
+            out int matchCount)
         {
             ruleId = null;
             expected = null;
             actual = null;
+            location = null;
+            matchCount = 0;
             try
             {
                 Word.Comments comments = selection.Document.Comments;
@@ -690,25 +696,32 @@ namespace ThesisAddIn.VSTO
                     Match ruleMatch = RuleIdPattern.Match(text);
                     Match expectedMatch = ExpectedValuePattern.Match(text);
                     Match actualMatch = ActualValuePattern.Match(text);
+                    Match locationMatch = CommentLocationPattern.Match(text);
                     if (ruleMatch.Success && expectedMatch.Success && actualMatch.Success)
                     {
                         matches.Add(new[]
                         {
                             ruleMatch.Groups["id"].Value.Trim(),
                             expectedMatch.Groups["value"].Value.Trim(),
-                            actualMatch.Groups["value"].Value.Trim()
+                            actualMatch.Groups["value"].Value.Trim(),
+                            locationMatch.Success ? locationMatch.Groups["location"].Value.Trim() : string.Empty
                         });
                     }
                 }
 
-                if (matches.Count != 1)
+                matchCount = matches.Count;
+                if (matches.Count == 0)
                 {
                     return false;
                 }
 
+                // 多条批注可能共用同一个高亮范围（例如同一段同时有字体和字号问题）。
+                // RangeFromPoint 无法区分重叠锚点，先激活批注列表中的第一条，
+                // 并提示用户可以在侧栏选择同一位置的其他建议。
                 ruleId = matches[0][0];
                 expected = matches[0][1];
                 actual = matches[0][2];
+                location = matches[0][3];
                 return true;
             }
             catch (Exception)
