@@ -40,6 +40,8 @@ namespace ThesisAddIn.VSTO
         private System.Windows.Forms.Timer _documentHoverTimer;
         private CancellationTokenSource _operationCancellation;
         private int _lastHoveredWindowHandle = -1;
+        private int _lastHoveredCursorX = -1;
+        private int _lastHoveredCursorY = -1;
         private string _lastHoveredCommentKey;
 
         public bool IsEngineConfigured
@@ -586,8 +588,8 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// Word 没有文档正文的 MouseHover 事件。每个计时周期都检查鼠标坐标下的批注：
-        /// RangeFromPoint 有时会对同一段中的不同位置返回相同范围，因此不能只在范围变化时检查。
+        /// Word 没有文档正文的 MouseHover 事件。鼠标坐标变化时查询对应范围并检查锚点：
+        /// RangeFromPoint 有时会对同一段中的不同位置返回相同范围，因此不能只比较 Word.Range。
         /// </summary>
         private void OnDocumentHoverTimerTick(object sender, EventArgs e)
         {
@@ -607,20 +609,29 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
+                int windowHandle = window.Hwnd;
+                if (windowHandle != _lastHoveredWindowHandle)
+                {
+                    _lastHoveredCommentKey = null;
+                }
                 System.Drawing.Point cursor = Cursor.Position;
+                if (windowHandle == _lastHoveredWindowHandle
+                    && cursor.X == _lastHoveredCursorX
+                    && cursor.Y == _lastHoveredCursorY)
+                {
+                    return;
+                }
+
+                _lastHoveredWindowHandle = windowHandle;
+                _lastHoveredCursorX = cursor.X;
+                _lastHoveredCursorY = cursor.Y;
+
                 Word.Range range = window.RangeFromPoint(cursor.X, cursor.Y) as Word.Range;
                 if (range == null)
                 {
                     ResetHoveredRange();
                     return;
                 }
-
-                int windowHandle = window.Hwnd;
-                if (windowHandle != _lastHoveredWindowHandle)
-                {
-                    _lastHoveredCommentKey = null;
-                }
-                _lastHoveredWindowHandle = windowHandle;
 
                 string ruleId;
                 string expected;
@@ -656,6 +667,8 @@ namespace ThesisAddIn.VSTO
         private void ResetHoveredRange()
         {
             _lastHoveredWindowHandle = -1;
+            _lastHoveredCursorX = -1;
+            _lastHoveredCursorY = -1;
             _lastHoveredCommentKey = null;
         }
 
