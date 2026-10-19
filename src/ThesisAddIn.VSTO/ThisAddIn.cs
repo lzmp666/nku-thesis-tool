@@ -280,7 +280,7 @@ namespace ThesisAddIn.VSTO
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
                 // Keep the Chinese diagnostic cards readable and make all three actions
                 // visible without relying on a very wide monitor or a second task pane.
-                taskPane.Width = 360;
+                taskPane.Width = 520;
                 taskPane.Visible = true;
                 _taskPane = taskPane;
                 _pane = pane;
