@@ -93,7 +93,7 @@ namespace ThesisAddIn.VSTO.Ui
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             // 操作按钮置于批注卡片上方；在窄窗格里允许按钮自然换行。
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 144F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
@@ -381,7 +381,10 @@ namespace ThesisAddIn.VSTO.Ui
                     body.Font,
                     new Size(textWidth, int.MaxValue),
                     TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-                body.Height = textSize.Height + 2;
+                // TextRenderer can measure wrapped Chinese text one line shorter than
+                // the WinForms Label paints it at the pane's DPI. Reserve one extra
+                // line so the final “实际值” row is never clipped by the card border.
+                body.Height = textSize.Height + body.Font.Height + 2;
                 card.Height = Math.Max(82, body.Top + body.Height + 12);
             }
         }
