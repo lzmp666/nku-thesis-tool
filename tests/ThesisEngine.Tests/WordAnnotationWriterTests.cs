@@ -32,6 +32,11 @@ public sealed class WordAnnotationWriterTests
 
             Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
             Assert.Equal(originalText, ReadTextRuns(outputPath));
+            var rechecked = new FontSizeAnalyzer().Analyze(
+                new WordFormattingReader().Read(outputPath),
+                DemoRuleSet.NkuDraftSample);
+            Assert.Equal(3, rechecked.Diagnostics.Count);
+            Assert.DoesNotContain(rechecked.Diagnostics, diagnostic => diagnostic.Actual == "(unknown)");
             using var archive = ZipFile.OpenRead(outputPath);
             var document = ReadXml(archive, "word/document.xml");
             var body = document.Descendants(W + "body").Single();
@@ -261,4 +266,5 @@ public sealed class WordAnnotationWriterTests
         writer.Write(content);
     }
 }
+
 
