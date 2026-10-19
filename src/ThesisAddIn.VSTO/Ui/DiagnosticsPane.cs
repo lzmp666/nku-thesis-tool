@@ -93,7 +93,7 @@ namespace ThesisAddIn.VSTO.Ui
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             // 操作按钮置于批注卡片上方；在窄窗格里允许按钮自然换行。
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 76F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
@@ -504,4 +504,5 @@ namespace ThesisAddIn.VSTO.Ui
         }
     }
 }
+
 
