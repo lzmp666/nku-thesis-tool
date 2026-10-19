@@ -200,11 +200,12 @@ namespace ThesisAddIn.VSTO.Ui
             _diagnosticList.Visible = false;
             _selectedIndex = -1;
             _emptyState.Visible = true;
-            _emptyState.Text = "本次分析未完成。";
+            string detail = string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim();
+            _emptyState.Text = "本次分析未完成。" + Environment.NewLine + Environment.NewLine + detail;
             _fixOneButton.Enabled = false;
             _fixAllButton.Enabled = false;
             _coverage.Text = "本次分析未完成。";
-            SetStatus(message);
+            _status.Text = "本次分析未完成，错误详情见结果区域。";
         }
 
         /// <summary>
