@@ -63,12 +63,17 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             var runIndex = 0;
             foreach (var run in paragraph.Elements(W + "r"))
             {
+                var currentRunIndex = runIndex++;
                 var properties = run.Element(W + "rPr");
                 var characterStyle = properties?.Element(W + "rStyle")?.Attribute(W + "val")?.Value;
                 var effective = Merge(inherited, ResolveStyle(characterStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "character"));
                 effective = Merge(effective, ReadRunProperties(properties, theme, effective.EastAsiaLanguage));
                 var text = string.Concat(run.Descendants(W + "t").Select(t => t.Value));
-                runs.Add(new TextRunSnapshot(runIndex++, effective.EastAsia, effective.Ascii, effective.SizePt, text));
+                // Comment references and other OOXML markers can be represented by
+                // textless runs. Keep their physical index for stable locations, but
+                // do not diagnose formatting on content that is not visible text.
+                if (text.Length == 0) continue;
+                runs.Add(new TextRunSnapshot(currentRunIndex, effective.EastAsia, effective.Ascii, effective.SizePt, text));
             }
             paragraphs.Add(new ParagraphSnapshot(paragraphIndex++, runs));
         }
@@ -231,3 +236,4 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         bool SizeSpecified = false);
     private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting);
 }
+
