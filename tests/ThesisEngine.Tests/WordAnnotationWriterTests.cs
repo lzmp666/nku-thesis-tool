@@ -32,6 +32,11 @@ public sealed class WordAnnotationWriterTests
 
             Assert.Equal(originalBytes, File.ReadAllBytes(inputPath));
             Assert.Equal(originalText, ReadTextRuns(outputPath));
+            var rechecked = new FontSizeAnalyzer().Analyze(
+                new WordFormattingReader().Read(outputPath),
+                DemoRuleSet.NkuDraftSample);
+            Assert.Equal(3, rechecked.Diagnostics.Count);
+            Assert.DoesNotContain(rechecked.Diagnostics, diagnostic => diagnostic.Actual == "(unknown)");
             using var archive = ZipFile.OpenRead(outputPath);
             var document = ReadXml(archive, "word/document.xml");
             var body = document.Descendants(W + "body").Single();
@@ -59,13 +64,23 @@ public sealed class WordAnnotationWriterTests
 
             var comments = ReadXml(archive, "word/comments.xml");
             Assert.Equal(3, comments.Root!.Elements(W + "comment").Count());
-            var commentTexts = comments.Root!.Elements(W + "comment")
-                .Select(comment => string.Concat(comment.Descendants(W + "t").Select(element => element.Value)))
+            var commentElements = comments.Root!.Elements(W + "comment").ToArray();
+            var commentTexts = commentElements
+                .Select(comment => string.Concat(comment.Descendants(W + "r")
+                    .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is null)
+                    .SelectMany(run => run.Elements(W + "t").Select(element => element.Value))))
                 .ToArray();
             Assert.Equal(3, commentTexts.Length);
             Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/east-asian-font；期望值：宋体；实际值：黑体。", commentTexts);
             Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/western-font；期望值：Times New Roman；实际值：Arial。", commentTexts);
             Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/font-size；期望值：12pt；实际值：10.5pt。", commentTexts);
+            var hiddenLocations = commentElements
+                .SelectMany(comment => comment.Descendants(W + "r")
+                    .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
+                    .SelectMany(run => run.Elements(W + "t").Select(element => element.Value)))
+                .ToArray();
+            Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[0]/run[0]]", hiddenLocations);
+            Assert.DoesNotContain("NKU-LOCATION", string.Join("", commentTexts));
             Assert.All(commentTexts, text =>
             {
                 Assert.DoesNotContain("修改建议：", text);
@@ -251,3 +266,5 @@ public sealed class WordAnnotationWriterTests
         writer.Write(content);
     }
 }
+
+

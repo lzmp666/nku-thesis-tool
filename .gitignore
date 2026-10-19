@@ -7,4 +7,5 @@ TestResults/
 *.suo
 *.docx
 *.docm
+/src/ThesisAddIn.VSTO/*.pfx
 !tests/fixtures/synthetic/*.docx
