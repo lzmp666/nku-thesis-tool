@@ -6,21 +6,26 @@ using ThesisAddIn.Protocol;
 
 namespace ThesisAddIn.VSTO.Ui
 {
-    /// <summary>中文问题侧边栏：列出诊断、支持定位与修复操作。</summary>
+    /// <summary>紧凑的中文任务窗格：联动原文批注、定位诊断并提供修复操作。</summary>
     public sealed class DiagnosticsPane : UserControl
     {
         private readonly Button _analyzeButton = new Button();
         private readonly Button _fixOneButton = new Button();
         private readonly Button _fixAllButton = new Button();
+        private readonly Button _previousButton = new Button();
+        private readonly Button _nextButton = new Button();
+        private readonly Button _toggleListButton = new Button();
         private readonly FlowLayoutPanel _diagnosticList = new FlowLayoutPanel();
         private readonly Panel _resultsHost = new Panel();
         private readonly Label _emptyState = new Label();
+        private readonly Label _issueSummary = new Label();
         private readonly Label _status = new Label();
         private readonly Label _coverage = new Label();
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<Panel> _diagnosticCards = new List<Panel>();
         private int _selectedIndex = -1;
         private bool _isBusy;
+        private bool _showDiagnosticList;
 
         // 当前演示规则集依据南开大学 2026 版规范第 4.7 节表 4.6。
         private const string DemoRequirementSource = "2026版第4.7节表4.6";
@@ -48,9 +53,15 @@ namespace ThesisAddIn.VSTO.Ui
             ConfigureButton(_fixAllButton, "预览并修复全部");
             _fixOneButton.Enabled = false;
             _fixAllButton.Enabled = false;
+            _previousButton.Enabled = false;
+            _nextButton.Enabled = false;
+            _toggleListButton.Enabled = false;
             _analyzeButton.Click += (s, e) => OnEvent(AnalyzeRequested);
             _fixOneButton.Click += (s, e) => OnEvent(FixCurrentRequested);
             _fixAllButton.Click += (s, e) => OnEvent(FixAllRequested);
+            _previousButton.Click += (s, e) => NavigateSelection(-1);
+            _nextButton.Click += (s, e) => NavigateSelection(1);
+            _toggleListButton.Click += (s, e) => ToggleDiagnosticList();
             buttons.Controls.Add(_analyzeButton);
             buttons.Controls.Add(_fixOneButton);
             buttons.Controls.Add(_fixAllButton);
@@ -75,6 +86,26 @@ namespace ThesisAddIn.VSTO.Ui
             _emptyState.Padding = new Padding(12);
             _emptyState.Text = "点击“分析当前文档”开始检查。";
 
+            _issueSummary.Dock = DockStyle.Fill;
+            _issueSummary.Padding = new Padding(2, 6, 2, 2);
+            _issueSummary.AutoEllipsis = true;
+            _issueSummary.Text = "分析后，问题详情会显示在原文旁的 Word 批注中。";
+
+            var navigation = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                WrapContents = true,
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoScroll = true,
+                Padding = new Padding(0, 2, 0, 0)
+            };
+            ConfigureButton(_previousButton, "上一项");
+            ConfigureButton(_nextButton, "下一项");
+            ConfigureButton(_toggleListButton, "展开问题列表");
+            navigation.Controls.Add(_previousButton);
+            navigation.Controls.Add(_nextButton);
+            navigation.Controls.Add(_toggleListButton);
+
             _resultsHost.Dock = DockStyle.Fill;
             _resultsHost.Controls.Add(_diagnosticList);
             _resultsHost.Controls.Add(_emptyState);
@@ -88,19 +119,23 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = 6,
                 Padding = new Padding(8)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            // 操作按钮置于批注卡片上方；在窄窗格里允许按钮自然换行。
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 144F));
+            // 操作按钮紧凑置顶；问题详情优先由原文旁的 Word 批注呈现。
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
             layout.Controls.Add(buttons, 0, 0);
             layout.Controls.Add(_coverage, 0, 1);
-            layout.Controls.Add(_resultsHost, 0, 2);
-            layout.Controls.Add(_status, 0, 3);
+            layout.Controls.Add(navigation, 0, 2);
+            layout.Controls.Add(_issueSummary, 0, 3);
+            layout.Controls.Add(_resultsHost, 0, 4);
+            layout.Controls.Add(_status, 0, 5);
             Controls.Add(layout);
         }
 
@@ -127,6 +162,9 @@ namespace ThesisAddIn.VSTO.Ui
                 _analyzeButton.Enabled = !busy;
                 _fixOneButton.Enabled = !busy && CanFixSelected;
                 _fixAllButton.Enabled = !busy && HasAutoDiagnostics;
+                _previousButton.Enabled = !busy && _diagnostics.Count > 0;
+                _nextButton.Enabled = !busy && _diagnostics.Count > 0;
+                _toggleListButton.Enabled = !busy && _diagnostics.Count > 0;
                 if (!string.IsNullOrEmpty(message))
                 {
                     _status.Text = message;
@@ -153,6 +191,7 @@ namespace ThesisAddIn.VSTO.Ui
             _diagnosticList.Controls.Clear();
             _diagnosticCards.Clear();
             _selectedIndex = -1;
+            _showDiagnosticList = false;
             if (result != null && result.Diagnostics != null)
             {
                 foreach (EngineDiagnostic diagnostic in result.Diagnostics)
@@ -166,12 +205,19 @@ namespace ThesisAddIn.VSTO.Ui
                 AddDiagnosticCard(i, _diagnostics[i]);
             }
             bool hasDiagnostics = _diagnostics.Count > 0;
-            _diagnosticList.Visible = hasDiagnostics;
+            _diagnosticList.Visible = hasDiagnostics && _showDiagnosticList;
             _emptyState.Visible = !hasDiagnostics;
             if (!hasDiagnostics)
             {
                 _emptyState.Text = "未发现问题。\n结果仅覆盖已检查范围。";
             }
+            _previousButton.Enabled = hasDiagnostics;
+            _nextButton.Enabled = hasDiagnostics;
+            _toggleListButton.Enabled = hasDiagnostics;
+            _toggleListButton.Text = "展开问题列表";
+            _issueSummary.Text = hasDiagnostics
+                ? "检测到 " + _diagnostics.Count + " 条问题。悬停原文高亮查看对应批注；也可用上一项/下一项浏览。"
+                : "没有待处理问题。详情仍以原文旁的 Word 批注为准。";
             string ruleVersion = result != null ? result.RuleVersion : string.Empty;
             string coverage = result != null ? result.Coverage : string.Empty;
             _coverage.Text = "规则版本：" + (string.IsNullOrEmpty(ruleVersion) ? "（未提供）" : ruleVersion)
@@ -199,11 +245,17 @@ namespace ThesisAddIn.VSTO.Ui
             _diagnosticCards.Clear();
             _diagnosticList.Visible = false;
             _selectedIndex = -1;
+            _showDiagnosticList = false;
             _emptyState.Visible = true;
             string detail = string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim();
             _emptyState.Text = "本次分析未完成。" + Environment.NewLine + Environment.NewLine + detail;
             _fixOneButton.Enabled = false;
             _fixAllButton.Enabled = false;
+            _previousButton.Enabled = false;
+            _nextButton.Enabled = false;
+            _toggleListButton.Enabled = false;
+            _toggleListButton.Text = "展开问题列表";
+            _issueSummary.Text = "分析失败；请查看下方错误说明。";
             _coverage.Text = "本次分析未完成。";
             _status.Text = "本次分析未完成，错误详情见结果区域。";
         }
@@ -426,6 +478,9 @@ namespace ThesisAddIn.VSTO.Ui
             }
 
             _selectedIndex = index;
+            EngineDiagnostic selectedDiagnostic = _diagnostics[index];
+            _issueSummary.Text = "当前 " + (index + 1) + "/" + _diagnostics.Count + "："
+                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + "。详细要求见原文旁对应批注。";
             for (int i = 0; i < _diagnosticCards.Count; i++)
             {
                 Panel card = _diagnosticCards[i];
@@ -436,10 +491,50 @@ namespace ThesisAddIn.VSTO.Ui
             }
 
             _fixOneButton.Enabled = !_isBusy && CanFixSelected;
-            _diagnosticList.ScrollControlIntoView(_diagnosticCards[index]);
+            if (_showDiagnosticList && index < _diagnosticCards.Count)
+            {
+                _diagnosticList.ScrollControlIntoView(_diagnosticCards[index]);
+            }
             if (navigateToSource)
             {
                 OnEvent(DiagnosticSelected);
+            }
+        }
+
+        private void NavigateSelection(int direction)
+        {
+            if (_isBusy || _diagnostics.Count == 0 || direction == 0)
+            {
+                return;
+            }
+
+            int nextIndex;
+            if (_selectedIndex < 0)
+            {
+                nextIndex = direction > 0 ? 0 : _diagnostics.Count - 1;
+            }
+            else
+            {
+                nextIndex = (_selectedIndex + direction + _diagnostics.Count) % _diagnostics.Count;
+            }
+
+            SelectDiagnostic(nextIndex);
+        }
+
+        private void ToggleDiagnosticList()
+        {
+            if (_isBusy || _diagnostics.Count == 0)
+            {
+                return;
+            }
+
+            _showDiagnosticList = !_showDiagnosticList;
+            _diagnosticList.Visible = _showDiagnosticList;
+            _emptyState.Visible = false;
+            _toggleListButton.Text = _showDiagnosticList ? "收起问题列表" : "展开问题列表";
+            if (_showDiagnosticList && _selectedIndex >= 0 && _selectedIndex < _diagnosticCards.Count)
+            {
+                _diagnosticList.ScrollControlIntoView(_diagnosticCards[_selectedIndex]);
             }
         }
 
