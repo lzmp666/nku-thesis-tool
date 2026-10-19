@@ -43,6 +43,7 @@ namespace ThesisAddIn.VSTO
         private int _lastHoveredCursorX = -1;
         private int _lastHoveredCursorY = -1;
         private string _lastHoveredCommentKey;
+        private bool _isNavigatingToDiagnostic;
 
         public bool IsEngineConfigured
         {
@@ -549,12 +550,19 @@ namespace ThesisAddIn.VSTO
 
             try
             {
+                // 程序化选中段落会触发 WindowSelectionChange。重叠批注无法由段落选区
+                // 唯一辨认，忽略这一次回调，避免导航到后续问题时又切回第一条批注。
+                _isNavigatingToDiagnostic = true;
                 range.Select();
                 return "已定位到" + DocumentLocator.Describe(location) + "：" + diagnostic.RuleId + "。";
             }
             catch (Exception exception)
             {
                 return "定位失败：" + exception.Message;
+            }
+            finally
+            {
+                _isNavigatingToDiagnostic = false;
             }
         }
 
@@ -563,6 +571,11 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
+            if (_isNavigatingToDiagnostic)
+            {
+                return;
+            }
+
             try
             {
                 EnsureTaskPaneForWindow(Application.ActiveWindow);
