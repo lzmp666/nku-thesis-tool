@@ -121,22 +121,33 @@ namespace ThesisAddIn.VSTO.Ui
 
         public void SetBusy(bool busy, string message)
         {
-            _isBusy = busy;
-            _analyzeButton.Enabled = !busy;
-            _fixOneButton.Enabled = !busy && CanFixSelected;
-            _fixAllButton.Enabled = !busy && HasAutoDiagnostics;
-            if (!string.IsNullOrEmpty(message))
+            InvokeOnUiThread(() =>
             {
-                SetStatus(message);
-            }
+                _isBusy = busy;
+                _analyzeButton.Enabled = !busy;
+                _fixOneButton.Enabled = !busy && CanFixSelected;
+                _fixAllButton.Enabled = !busy && HasAutoDiagnostics;
+                if (!string.IsNullOrEmpty(message))
+                {
+                    _status.Text = message;
+                }
+            });
         }
 
         public void SetStatus(string message)
         {
-            _status.Text = message;
+            InvokeOnUiThread(() =>
+            {
+                _status.Text = message;
+            });
         }
 
         public void ShowAnalysis(EngineAnalysisResult result)
+        {
+            InvokeOnUiThread(() => ShowAnalysisCore(result));
+        }
+
+        private void ShowAnalysisCore(EngineAnalysisResult result)
         {
             _diagnostics.Clear();
             _diagnosticList.Controls.Clear();
@@ -178,6 +189,11 @@ namespace ThesisAddIn.VSTO.Ui
 
         public void ShowFailure(string message)
         {
+            InvokeOnUiThread(() => ShowFailureCore(message));
+        }
+
+        private void ShowFailureCore(string message)
+        {
             _diagnostics.Clear();
             _diagnosticList.Controls.Clear();
             _diagnosticCards.Clear();
@@ -189,6 +205,33 @@ namespace ThesisAddIn.VSTO.Ui
             _fixAllButton.Enabled = false;
             _coverage.Text = "本次分析未完成。";
             SetStatus(message);
+        }
+
+        /// <summary>
+        /// Engine protocol calls use ConfigureAwait(false), so their callers may resume
+        /// on a worker thread. Keep all WinForms control access on the pane's UI thread.
+        /// Invoke is synchronous so the async operation observes UI exceptions and keeps
+        /// updates ordered with the following status changes.
+        /// </summary>
+        public T InvokeOnUiThread<T>(Func<T> action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            if (IsDisposed || Disposing || !IsHandleCreated)
+            {
+                throw new InvalidOperationException("论文格式检查面板已关闭，无法更新界面。");
+            }
+
+            return InvokeRequired ? (T)Invoke(action) : action();
+        }
+
+        public void InvokeOnUiThread(Action action)
+        {
+            if (action == null) throw new ArgumentNullException(nameof(action));
+            InvokeOnUiThread(() =>
+            {
+                action();
+                return true;
+            });
         }
 
         /// <summary>

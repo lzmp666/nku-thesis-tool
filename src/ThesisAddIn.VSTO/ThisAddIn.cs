@@ -381,20 +381,24 @@ namespace ThesisAddIn.VSTO
                 }
 
                 WriteStartupLog("修复计划已生成：待修改 " + plan.Patches.Count + " 处，保留 " + plan.Deferred.Count + " 处。");
-                using (var preview = new FixPreviewDialog(plan, scopeLabel))
+                DialogResult previewResult = pane.InvokeOnUiThread(() =>
                 {
-                    WriteStartupLog("准备显示修复预览窗口。");
-                    if (preview.ShowDialog() != DialogResult.OK)
+                    using (var preview = new FixPreviewDialog(plan, scopeLabel))
                     {
-                        WriteStartupLog("用户在预览窗口取消。");
-                        SetStatus(pane, "已取消修复，文档没有任何改动。");
-                        return;
+                        WriteStartupLog("准备显示修复预览窗口。");
+                        return preview.ShowDialog();
                     }
-
-                    WriteStartupLog("用户确认预览。");
+                });
+                if (previewResult != DialogResult.OK)
+                {
+                    WriteStartupLog("用户在预览窗口取消。");
+                    SetStatus(pane, "已取消修复，文档没有任何改动。");
+                    return;
                 }
 
-                string outputPath = AskOutputPath();
+                WriteStartupLog("用户确认预览。");
+
+                string outputPath = pane.InvokeOnUiThread(() => AskOutputPath());
                 if (string.IsNullOrEmpty(outputPath))
                 {
                     WriteStartupLog("用户未选择输出文件。");
@@ -402,6 +406,11 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
+                /*
+                 * The dialogs above are synchronous UI-thread calls. After they return,
+                 * the engine can continue on a worker thread; DiagnosticsPane marshals
+                 * subsequent status and result updates back to the same UI thread.
+                 */
                 WriteStartupLog("开始写入：" + outputPath);
                 SetStatus(pane, "正在写入新文件…（原文件保持不变）");
                 EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, outputPath, diagnostic, cancellationToken);
