@@ -199,7 +199,7 @@ namespace ThesisAddIn.VSTO
             EngineDiagnostic diagnostic = pane != null ? pane.SelectedDiagnostic : null;
             if (diagnostic == null)
             {
-                SetStatus(pane, "请先在列表中选择一条问题，再执行“修复此项”。");
+                SetStatus(pane, "请先悬停原文标注，或用上一项/下一项选择问题，再执行“修复此项”。");
                 return;
             }
 
@@ -594,8 +594,8 @@ namespace ThesisAddIn.VSTO
             if (_pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
             {
                 _pane.SetStatus(matchCount > 1
-                    ? "此处有多条建议，已显示第一条；可在侧栏选择其他问题。"
-                    : "已按批注锚点激活建议卡片：" + ruleId + "。");
+                    ? "此处有多条建议，当前关联第一条；可用上一项/下一项浏览。"
+                    : "当前批注已关联到问题：" + ruleId + "。");
             }
         }
 
@@ -659,7 +659,7 @@ namespace ThesisAddIn.VSTO
                         _lastHoveredCommentKey = commentKey;
                         if (matchCount > 1)
                         {
-                            _pane.SetStatus("此处有多条建议，已显示第一条；可在侧栏选择其他问题。");
+                            _pane.SetStatus("此处有多条建议，已显示第一条；可用上一项/下一项浏览。");
                         }
                     }
                 }
@@ -741,8 +741,8 @@ namespace ThesisAddIn.VSTO
                 }
 
                 // 多条批注可能共用同一个高亮范围（例如同一段同时有字体和字号问题）。
-                // RangeFromPoint 无法区分重叠锚点，先激活批注列表中的第一条，
-                // 并提示用户可以在侧栏选择同一位置的其他建议。
+                // RangeFromPoint 无法区分重叠锚点，先激活第一条；用户可用紧凑导航切换，
+                // 或展开可选的问题列表选择同一位置的其他建议。
                 ruleId = matches[0][0];
                 expected = matches[0][1];
                 actual = matches[0][2];
