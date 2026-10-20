@@ -89,7 +89,7 @@ namespace ThesisAddIn.VSTO.Ui
             _issueSummary.Dock = DockStyle.Fill;
             _issueSummary.Padding = new Padding(2, 6, 2, 2);
             _issueSummary.AutoEllipsis = true;
-            _issueSummary.Text = "分析后，问题详情会显示在原文旁的 Word 批注中。";
+            _issueSummary.Text = "分析后可展开问题列表；已有工具批注与原文保持联动。";
 
             var navigation = new FlowLayoutPanel
             {
@@ -216,8 +216,8 @@ namespace ThesisAddIn.VSTO.Ui
             _toggleListButton.Enabled = hasDiagnostics;
             _toggleListButton.Text = "展开问题列表";
             _issueSummary.Text = hasDiagnostics
-                ? "检测到 " + _diagnostics.Count + " 条问题。悬停原文高亮查看对应批注；也可用上一项/下一项浏览。"
-                : "没有待处理问题。详情仍以原文旁的 Word 批注为准。";
+                ? "检测到 " + _diagnostics.Count + " 条问题。可用上一项/下一项浏览，或展开问题列表查看详情。"
+                : "没有待处理问题。结果仅覆盖已检查范围。";
             string ruleVersion = result != null ? result.RuleVersion : string.Empty;
             string coverage = result != null ? result.Coverage : string.Empty;
             _coverage.Text = "规则版本：" + (string.IsNullOrEmpty(ruleVersion) ? "（未提供）" : ruleVersion)
@@ -480,7 +480,7 @@ namespace ThesisAddIn.VSTO.Ui
             _selectedIndex = index;
             EngineDiagnostic selectedDiagnostic = _diagnostics[index];
             _issueSummary.Text = "当前 " + (index + 1) + "/" + _diagnostics.Count + "："
-                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + "。详细要求见原文旁对应批注。";
+                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + "。已有批注可在原文查看，或展开问题列表查看详情。";
             for (int i = 0; i < _diagnosticCards.Count; i++)
             {
                 Panel card = _diagnosticCards[i];
