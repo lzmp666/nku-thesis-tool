@@ -50,6 +50,34 @@ namespace ThesisAddIn.VSTO
             get { return _gateway != null; }
         }
 
+        protected override Microsoft.Office.Core.IRibbonExtensibility CreateRibbonExtensibilityObject()
+        {
+            return new ThesisRibbon(OpenDiagnosticsPane);
+        }
+
+        private void OpenDiagnosticsPane()
+        {
+            try
+            {
+                EnsureTaskPaneForWindow(Application.ActiveWindow);
+                if (_taskPane == null)
+                {
+                    throw new InvalidOperationException("当前 Word 窗口没有可用的检查面板。");
+                }
+
+                // WindowActivate 会复用已有窗格；用户关闭的窗格仍在集合中，
+                // 因此必须明确恢复 Visible，不能仅再次调用创建方法。
+                _taskPane.Visible = true;
+                WriteStartupLog("已通过功能区打开当前文档的检查面板。");
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("通过功能区打开检查面板失败：" + exception);
+                MessageBox.Show("未能打开检查面板。请先打开 Word 文档，再重试。",
+                    TaskPaneTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
             // 任何未捕获的异常都写进日志：未激活的 Office 环境下部分 Word 调用会抛
