@@ -298,25 +298,8 @@ namespace ThesisAddIn.VSTO.Ui
                 return false;
             }
 
-            int matchIndex = -1;
-            for (int i = 0; i < _diagnostics.Count; i++)
-            {
-                EngineDiagnostic diagnostic = _diagnostics[i];
-                if (string.Equals(diagnostic.RuleId, ruleId, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(diagnostic.Expected ?? string.Empty, expected ?? string.Empty, StringComparison.Ordinal)
-                    && string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal)
-                    && (string.IsNullOrEmpty(location)
-                        || string.Equals(diagnostic.Location ?? string.Empty, location, StringComparison.Ordinal)))
-                {
-                    if (matchIndex >= 0)
-                    {
-                        return false;
-                    }
-
-                    matchIndex = i;
-                }
-            }
-
+            int matchIndex = CommentDiagnosticMatcher.FindUniqueMatchIndex(
+                _diagnostics, ruleId, expected, actual, location);
             if (matchIndex < 0)
             {
                 return false;
@@ -603,5 +586,6 @@ namespace ThesisAddIn.VSTO.Ui
         }
     }
 }
+
 
 

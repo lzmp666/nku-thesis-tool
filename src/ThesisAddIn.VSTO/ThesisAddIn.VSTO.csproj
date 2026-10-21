@@ -182,6 +182,7 @@
     <Compile Include="Engine\DocumentLocator.cs" />
     <Compile Include="Engine\EngineGateway.cs" />
     <Compile Include="Ui\DiagnosticsPane.cs" />
+    <Compile Include="Ui\CommentDiagnosticMatcher.cs" />
     <Compile Include="Ui\FixPreviewDialog.cs" />
     <Compile Include="Ui\ThesisRibbon.cs" />
     <AppDesigner Include="Properties\" />
@@ -235,3 +236,4 @@
     </VisualStudio>
   </ProjectExtensions>
 </Project>
+

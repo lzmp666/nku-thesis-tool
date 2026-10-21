@@ -16,4 +16,8 @@
     <ProjectReference Include="../../src/ThesisAddIn.VSTO/Protocol/ThesisAddIn.Protocol.csproj" />
     <ProjectReference Include="../../src/ThesisAddIn.VSTO/ProtocolHost/ThesisEngine.ProtocolHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/ThesisAddIn.VSTO/Ui/CommentDiagnosticMatcher.cs" Link="Ui/CommentDiagnosticMatcher.cs" />
+  </ItemGroup>
 </Project>
+
