@@ -53,4 +53,4 @@ $env:THESIS_VSTO_CERT_THUMBPRINT = '<当前用户开发证书指纹>'
 .\scripts\New-WindowsWordDemoPackage.ps1
 ```
 
-生成的 ZIP 位于 `artifacts`。此开发打包流程始终标记为 PREVIEW；验收表被填写不等于已批准发布。包内 `vsto`、`engine`、`samples` 分开存放，省略 PDB，仅包含部署所需 Release 输出、合成稿、公开 `.cer` 和 SHA-256 清单。不会将私钥/PFX 导出或加入 Git。正式发布需另行核对受测提交、二进制校验值、独立环境验收和负责人批准，并使用正式代码签名发布流程。
+生成的 ZIP 位于 `artifacts`。此开发打包流程始终标记为 PREVIEW；验收表被填写不等于已批准发布。包内 `vsto`、`engine`、`samples` 分开存放，省略 PDB，仅包含部署所需 Release 输出、合成稿、公开 `.cer` 和 SHA-256 清单。若源码包含 `docs/demo/word-acceptance-2026-10-22.md`，包会一并带上候选实测记录；它不替代最终同包和独立环境验收。不会将私钥/PFX 导出或加入 Git。正式发布需另行核对受测提交、二进制校验值、独立环境验收和负责人批准，并使用正式代码签名发布流程。

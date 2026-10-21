@@ -43,6 +43,8 @@ $outDir = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $acceptancePath = Join-Path $root 'docs\demo\word-acceptance.md'
 $acceptanceIncluded = Test-Path -LiteralPath $acceptancePath -PathType Leaf
+$acceptanceRecordPath = Join-Path $root 'docs\demo\word-acceptance-2026-10-22.md'
+$acceptanceRecordIncluded = Test-Path -LiteralPath $acceptanceRecordPath -PathType Leaf
 # A checklist with no pending cells can still contain failed or unrelated results.
 # Distribution approval requires a separately reviewed release record; this developer
 # packaging path therefore always produces an explicitly labelled preview.
@@ -85,9 +87,12 @@ try {
         @'
 # Word 插件验收记录
 
-这是 PREVIEW 包。Issue #52 的 Word 桌面实测尚未并入此源码提交，因此本文件不包含通过结论。
-请完成 #52 合成文档验收并合并其记录后，重新从该提交生成正式演示包。
+这是 PREVIEW 包。请先按本说明在桌面 Word 中完成合成稿验收；本包未包含完整验收清单，也不代表已通过最终验收。
+只使用合成稿。完成统一验收、记录受测源码与包校验值并经审查后，才能另行准备可分发版本。
 '@ | Set-Content -LiteralPath (Join-Path $docsStage 'word-acceptance.md') -Encoding utf8
+    }
+    if ($acceptanceRecordIncluded) {
+        Copy-Item -LiteralPath $acceptanceRecordPath -Destination (Join-Path $docsStage 'word-acceptance-2026-10-22.md')
     }
     [System.IO.File]::WriteAllBytes((Join-Path $stage 'publisher.cer'), $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
 
@@ -97,6 +102,7 @@ try {
         builtAtUtc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         signingCertificateThumbprint = $certificate.Thumbprint
         wordAcceptanceChecklistIncluded = $acceptanceIncluded
+        candidateWordAcceptanceRecordIncluded = $acceptanceRecordIncluded
         wordAcceptanceComplete = $acceptanceComplete
         readyForDistribution = $readyForDistribution
         note = 'Synthetic demonstration only; no private key or real thesis is included.'
