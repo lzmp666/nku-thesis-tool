@@ -41,7 +41,14 @@ public sealed class NkuGraduate2026BodyAnalyzer
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(profile);
         if (!string.Equals(profile.Status, "draft", StringComparison.Ordinal))
-            throw new ArgumentException("This implementation only supports the draft profile until rule samples and applicability are approved.", nameof(profile));
+            throw new ArgumentException("规则仍为草案，完成适用范围与样例验收前不能按已批准规则执行。", nameof(profile));
+        var implemented = NkuGraduate2026BodyProfile.Draft;
+        if (!string.Equals(profile.ProfileId, implemented.ProfileId, StringComparison.Ordinal) ||
+            !string.Equals(profile.RuleVersion, implemented.RuleVersion, StringComparison.Ordinal) ||
+            !string.Equals(profile.ChineseFontExpected, implemented.ChineseFontExpected, StringComparison.Ordinal) ||
+            !string.Equals(profile.LatinFontExpected, implemented.LatinFontExpected, StringComparison.Ordinal) ||
+            profile.FontSizeExpectedPt != implemented.FontSizeExpectedPt)
+            throw new ArgumentException("所选配置的身份、版本或规则值与已实现的 2026 正文草案不匹配。", nameof(profile));
 
         var diagnostics = new List<Diagnostic>();
         var unsupported = new List<string>(snapshot.UnsupportedScopes);
@@ -81,7 +88,7 @@ public sealed class NkuGraduate2026BodyAnalyzer
         }
 
         var distinctUnsupported = unsupported.Distinct(StringComparer.Ordinal).ToArray();
-        var coverage = $"规则状态：{profile.Status}；已检查 {checkedRuns} 个已确认正文文本片段；未覆盖 {distinctUnsupported.Length} 项";
+        var coverage = $"规则状态：草案（{profile.Status}）；已检查 {checkedRuns} 个已确认正文文本片段；未覆盖 {distinctUnsupported.Length} 项";
         return new AnalysisResult(diagnostics, profile.RuleVersion, coverage, distinctUnsupported);
     }
 
@@ -255,4 +262,3 @@ internal static class NkuGraduate2026BodyScopeClassifier
         return decisions;
     }
 }
-

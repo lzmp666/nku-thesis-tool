@@ -289,5 +289,3 @@ public sealed class WordFormattingReader : IDemoDocumentReader
     private readonly record struct StyleResolution(Formatting Formatting, bool IsResolved);
     private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting, bool IsHeading);
 }
-
-

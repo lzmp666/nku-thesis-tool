@@ -94,4 +94,3 @@ public interface IDemoAnalysisService
 {
     AnalysisResult Analyze(string path, DemoRuleSet profile);
 }
-

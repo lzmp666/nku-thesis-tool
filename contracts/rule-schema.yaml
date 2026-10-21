@@ -130,4 +130,3 @@ allOf:
                 - {required: [text_script]}
                 - {required: [font_slots]}
                 - {required: [unknown_policy]}
-

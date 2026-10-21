@@ -325,4 +325,3 @@ public sealed class WordFormattingReaderTests
         writer.Write(xml);
     }
 }
-

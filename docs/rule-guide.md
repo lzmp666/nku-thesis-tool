@@ -6,4 +6,3 @@
 5. `rules/nku-graduate/general.yaml` 是基于 2025 版的 draft 规则。`rules/nku-graduate/2026-body-v1.yaml` 是独立的 2026 正文 draft profile，不会自动启用或代替旧版；待负责人审核来源、适用范围、语义与样本后，才可更改状态。
 6. 每条规则至少有正确、错误、边界/不支持样本与 golden，记录修复等级。auto 必须安全定位并通过二次诊断/补丁为零验证。
 不提供未经核验的宋体/字号/边距示例值。真实出处完整性与 property/unit 的跨字段匹配需人工及后续规则加载器验证，单靠 schema 无法代替。
-
