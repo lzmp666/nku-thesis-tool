@@ -16,6 +16,7 @@ public static class EngineProtocol
     public const string AnalyzeOperation = "analyze";
     public const string PlanOperation = "plan";
     public const string ApplyOperation = "apply";
+    public const string AnnotateOperation = "annotate";
 
     public const string InvalidRequest = "invalid_request";
     public const string ProtocolVersionMismatch = "protocol_version_mismatch";
@@ -41,7 +42,7 @@ public sealed class EngineRequest
     [JsonPropertyName("inputPath")]
     public string InputPath { get; set; } = string.Empty;
 
-    /// <summary>apply 操作的目标路径；必须与 inputPath 不同，且不得已存在。</summary>
+    /// <summary>apply/annotate 操作的目标路径；必须与 inputPath 不同，且不得已存在。</summary>
     [JsonPropertyName("outputPath")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OutputPath { get; set; }
@@ -82,9 +83,23 @@ public sealed class EngineResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineApplyResult? Apply { get; set; }
 
+    /// <summary>annotate 操作写入的新文档及批注数量。</summary>
+    [JsonPropertyName("annotation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineAnnotationResult? Annotation { get; set; }
+
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineError? Error { get; set; }
+}
+
+public sealed class EngineAnnotationResult
+{
+    [JsonPropertyName("outputPath")]
+    public string OutputPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("commentCount")]
+    public int CommentCount { get; set; }
 }
 
 /// <summary>一条待执行的修复：位置、改前值、目标值和依据。</summary>
@@ -320,6 +335,15 @@ public sealed class EngineProtocolClient
     public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location) =>
         Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location));
 
+    public EngineResponse Annotate(string inputPath, string outputPath) =>
+        Send(CreateRequest(EngineProtocol.AnnotateOperation, inputPath, outputPath, null, null));
+
+    public Task<EngineResponse> AnnotateAsync(
+        string inputPath,
+        string outputPath,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.AnnotateOperation, inputPath, outputPath, null, null), cancellationToken);
+
     public Task<EngineResponse> ApplyAsync(
         string inputPath,
         string outputPath,
@@ -451,6 +475,7 @@ public sealed class EngineProtocolClient
     {
         EngineProtocol.PlanOperation => response.Plan is not null,
         EngineProtocol.ApplyOperation => response.Apply is not null,
+        EngineProtocol.AnnotateOperation => response.Annotation is not null && response.Result is not null,
         _ => response.Result is not null
     };
 

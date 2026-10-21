@@ -80,6 +80,8 @@ public sealed class WordAnnotationWriterTests
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value)))
                 .ToArray();
             Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[0]/run[0]]", hiddenLocations);
+            Assert.Contains("[NKU-TOOL-ANNOTATION:v1]", hiddenLocations);
+            Assert.Contains("[NKU-HIGHLIGHT:absent]", hiddenLocations);
             Assert.DoesNotContain("NKU-LOCATION", string.Join("", commentTexts));
             Assert.All(commentTexts, text =>
             {
@@ -143,6 +145,8 @@ public sealed class WordAnnotationWriterTests
             Assert.DoesNotContain("检测提示：", commentText);
             Assert.Contains("期望值：12pt；实际值：14pt", commentText);
             Assert.Contains("Existing note", commentText);
+            Assert.Contains("[NKU-TOOL-ANNOTATION:v1]", commentText);
+            Assert.Contains("[NKU-HIGHLIGHT:pink]", commentText);
 
             var relationships = ReadXml(archive, "word/_rels/document.xml.rels");
             Assert.Single(relationships.Root!.Elements(Rel + "Relationship"), element =>
@@ -157,6 +161,39 @@ public sealed class WordAnnotationWriterTests
         {
             File.Delete(inputPath);
             if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public void RefreshRemovesOnlyToolOwnedCommentsAndRestoresOriginalHighlight()
+    {
+        var inputPath = CreatePackage();
+        var firstOutput = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var refreshedOutput = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var diagnostic = new Diagnostic("demo/font-size", "warning", "word/document.xml#paragraph[0]/run[0]", "12pt", "14pt", "auto", "请调整字号。");
+        try
+        {
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, firstOutput, [diagnostic, diagnostic with { RuleId = "demo/east-asian-font" }]);
+            WordAnnotationWriter.WriteAnnotatedCopy(firstOutput, refreshedOutput, Array.Empty<Diagnostic>());
+
+            using var archive = ZipFile.OpenRead(refreshedOutput);
+            var comments = ReadXml(archive, "word/comments.xml");
+            Assert.Single(comments.Root!.Elements(W + "comment"));
+            Assert.Contains("Existing note", string.Concat(comments.Descendants(W + "t").Select(element => element.Value)));
+            Assert.DoesNotContain("NKU-TOOL-ANNOTATION", string.Concat(comments.Descendants(W + "t").Select(element => element.Value)));
+
+            var document = ReadXml(archive, "word/document.xml");
+            Assert.Empty(document.Descendants(W + "commentRangeStart"));
+            Assert.Empty(document.Descendants(W + "commentRangeEnd"));
+            Assert.Empty(document.Descendants(W + "commentReference"));
+            var run = Assert.Single(document.Descendants(W + "r"), element => element.Descendants(W + "t").Any());
+            Assert.Equal("pink", (string?)run.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val"));
+        }
+        finally
+        {
+            File.Delete(inputPath);
+            if (File.Exists(firstOutput)) File.Delete(firstOutput);
+            if (File.Exists(refreshedOutput)) File.Delete(refreshedOutput);
         }
     }
 
@@ -215,7 +252,7 @@ public sealed class WordAnnotationWriterTests
             """);
         Add(archive, "word/document.xml", """
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-              <w:body><w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" /><w:sz w:val="28" /><w:u w:val="single" /></w:rPr><w:t>原文内容</w:t></w:r></w:p><w:sectPr /></w:body>
+              <w:body><w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" /><w:sz w:val="28" /><w:highlight w:val="pink" /><w:u w:val="single" /></w:rPr><w:t>原文内容</w:t></w:r></w:p><w:sectPr /></w:body>
             </w:document>
             """);
         Add(archive, "word/_rels/document.xml.rels", """

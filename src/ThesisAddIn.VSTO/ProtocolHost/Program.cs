@@ -45,6 +45,9 @@ while ((line = Console.ReadLine()) is not null)
             case EngineProtocol.ApplyOperation:
                 Write(ApplyPlan(request, fullPath));
                 break;
+            case EngineProtocol.AnnotateOperation:
+                Write(Annotate(request, fullPath));
+                break;
             default:
                 Write(ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "不支持的协议操作。"));
                 break;
@@ -98,6 +101,26 @@ EngineResponse ApplyPlan(EngineRequest request, string fullPath)
 
     var result = PatchEngine.ApplyPatches(fullPath, selected, outputPath);
     return ProtocolHostResponse.Applied(request.RequestId, result);
+}
+
+EngineResponse Annotate(EngineRequest request, string fullPath)
+{
+    if (string.IsNullOrWhiteSpace(request.OutputPath))
+        return ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "annotate 操作必须提供 outputPath。");
+    if (!string.Equals(Path.GetExtension(request.OutputPath), ".docx", StringComparison.OrdinalIgnoreCase))
+        return ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "输出文件必须是 .docx。");
+
+    var outputPath = Path.GetFullPath(request.OutputPath);
+    var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    if (string.Equals(Path.GetFullPath(fullPath), outputPath, pathComparison))
+        return ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "输出路径必须与原文不同。");
+    if (File.Exists(outputPath))
+        return ProtocolHostResponse.Error(request.RequestId, EngineProtocol.PatchConflict,
+            "输出文件已存在：" + outputPath + "。为避免覆盖已有文件，请换一个文件名。");
+
+    var analysis = Analyze(fullPath);
+    WordAnnotationWriter.WriteAnnotatedCopy(fullPath, outputPath, analysis.Diagnostics);
+    return ProtocolHostResponse.Annotated(request.RequestId, outputPath, analysis);
 }
 
 static List<Patch> SelectPatches(PatchPlan plan, EngineRequest request)
@@ -171,6 +194,19 @@ static class ProtocolHostResponse
                 Reason = failure.Reason
             }).ToList(),
             Unresolved = result.UnresolvedPatches.Select(ToPatchTransfer).ToList()
+        }
+    };
+
+    public static EngineResponse Annotated(string requestId, string outputPath, AnalysisResult analysis) => new()
+    {
+        ProtocolVersion = EngineProtocol.Version,
+        RequestId = requestId,
+        Ok = true,
+        Result = ToAnalysisTransfer(analysis),
+        Annotation = new EngineAnnotationResult
+        {
+            OutputPath = outputPath,
+            CommentCount = analysis.Diagnostics?.Count ?? 0
         }
     };
 

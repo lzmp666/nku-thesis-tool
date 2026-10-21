@@ -78,6 +78,83 @@ public sealed class EngineProtocolTests
     }
 
     [Fact]
+    public async Task ProtocolHostAnnotatesNewCopyAndRefreshesToolCommentsIdempotently()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var firstOutput = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var secondOutput = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var originalHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(input)));
+        try
+        {
+            var first = await RunHost(host, new EngineRequest
+            {
+                RequestId = "annotate-1",
+                Operation = EngineProtocol.AnnotateOperation,
+                InputPath = input,
+                OutputPath = firstOutput
+            });
+            Assert.True(first.Ok, first.Error?.Message);
+            Assert.Equal(firstOutput, first.Annotation!.OutputPath);
+            Assert.Equal(3, first.Annotation.CommentCount);
+            Assert.Equal(3, first.Result!.Diagnostics.Count);
+
+            var second = await RunHost(host, new EngineRequest
+            {
+                RequestId = "annotate-2",
+                Operation = EngineProtocol.AnnotateOperation,
+                InputPath = firstOutput,
+                OutputPath = secondOutput
+            });
+            Assert.True(second.Ok, second.Error?.Message);
+            Assert.Equal(3, second.Annotation!.CommentCount);
+            Assert.Equal(first.Result.Diagnostics.Select(item => item.Location), second.Result!.Diagnostics.Select(item => item.Location));
+            Assert.Equal(originalHash, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(input))));
+
+            using var archive = System.IO.Compression.ZipFile.OpenRead(secondOutput);
+            System.Xml.Linq.XDocument comments;
+            using (var stream = archive.GetEntry("word/comments.xml")!.Open()) comments = System.Xml.Linq.XDocument.Load(stream);
+            var w = System.Xml.Linq.XNamespace.Get("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+            var allCommentText = string.Concat(comments.Descendants(w + "t").Select(item => item.Value));
+            Assert.Equal(3, comments.Root!.Elements(w + "comment").Count());
+            Assert.Equal(3, CountOccurrences(allCommentText, "[NKU-TOOL-ANNOTATION:v1]"));
+        }
+        finally
+        {
+            if (File.Exists(firstOutput)) File.Delete(firstOutput);
+            if (File.Exists(secondOutput)) File.Delete(secondOutput);
+        }
+    }
+
+    [Fact]
+    public async Task ProtocolHostAnnotateRejectsExistingOutputWithoutOverwritingIt()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "demo", "clean_sample.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        File.WriteAllText(output, "keep this file");
+        try
+        {
+            var response = await RunHost(host, new EngineRequest
+            {
+                Operation = EngineProtocol.AnnotateOperation,
+                InputPath = input,
+                OutputPath = output
+            });
+            Assert.False(response.Ok);
+            Assert.Equal(EngineProtocol.PatchConflict, response.Error!.Code);
+            Assert.Equal("keep this file", File.ReadAllText(output));
+        }
+        finally
+        {
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
     public async Task ProtocolHostRejectsAnUnknownProtocolVersion()
     {
         var root = FindRepositoryRoot();
@@ -339,5 +416,13 @@ public sealed class EngineProtocolTests
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
+
+    private static int CountOccurrences(string value, string token)
+    {
+        var count = 0;
+        for (var index = 0; (index = value.IndexOf(token, index, StringComparison.Ordinal)) >= 0; index += token.Length)
+            count++;
+        return count;
+    }
 }
 

@@ -61,7 +61,7 @@ public sealed class WordFormattingReader : IDemoDocumentReader
 
             var runs = new List<TextRunSnapshot>();
             var runIndex = 0;
-            foreach (var run in paragraph.Elements(W + "r"))
+            foreach (var run in paragraph.Elements(W + "r").Where(candidate => candidate.Descendants(W + "t").Any()))
             {
                 var currentRunIndex = runIndex++;
                 var properties = run.Element(W + "rPr");
@@ -70,9 +70,8 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 effective = Merge(effective, ReadRunProperties(properties, theme, effective.EastAsiaLanguage));
                 var text = string.Concat(run.Descendants(W + "t").Select(t => t.Value));
                 // Comment references and other OOXML markers can be represented by
-                // textless runs. Keep their physical index for stable locations, but
-                // do not diagnose formatting on content that is not visible text.
-                if (text.Length == 0) continue;
+                // textless runs. Excluding them keeps locations stable after annotations
+                // are refreshed; locations count only text-bearing runs.
                 runs.Add(new TextRunSnapshot(currentRunIndex, effective.EastAsia, effective.Ascii, effective.SizePt, text));
             }
             paragraphs.Add(new ParagraphSnapshot(paragraphIndex++, runs));

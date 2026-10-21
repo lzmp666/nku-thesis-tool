@@ -1,6 +1,6 @@
 # Word 插件引擎进程协议
 
-当前版本：**1.1**（在 1.0 的 analyze 之上新增 plan 与 apply）。
+当前版本：**1.1**（在 1.0 的 analyze 之上新增 plan、apply 与 annotate 操作）。
 
 ## 边界
 
@@ -79,6 +79,23 @@ requestId 必须原样回显，插件据此拒绝过期或串线的响应。prot
 
 `failures` 非空时表示该批次未发布任何输出；`unresolved` 是被过滤掉、本次未处理的补丁。
 
+### annotate：分析并生成带 Word 原生批注的新副本
+
+~~~json
+{"protocolVersion":"1.1","requestId":"n1","operation":"annotate","inputPath":"C:\\work\\sample.docx","outputPath":"C:\\work\\sample-annotated.docx"}
+~~~
+
+`outputPath` 必须是与输入不同且尚不存在的 `.docx` 文件。宿主分析输入文档，并在新副本中
+为每条诊断添加 Word 原生批注和黄色高亮；响应同时返回 `result`（诊断与规则覆盖信息）和
+`annotation`（输出路径与批注数量）。即使没有诊断，也会产生未经修改的新副本。原文不被覆盖。
+
+批注正文只显示约定的四项：要求参考来源、规则、期望值和实际值。插件所有权、稳定位置和原
+有高亮状态写入 Word 隐藏文字，不会显示为额外字段。重复分析时，宿主仅移除带有本工具所有权
+标记的旧批注，再按最新诊断生成批注；普通用户批注、未带所有权标记的旧批注和原有高亮都会
+保留。不能安全识别或还原的插件元数据会使整个操作失败，不发布半成品文件。
+
+诊断位置的 run 序号只计算正文段落中包含文字的 run，Word 批注引用等无文字结构不会改变位置。
+
 错误码和处理方式：
 
 | 错误码 | 触发条件 | 插件行为 |
@@ -113,6 +130,6 @@ Word 会锁定正在编辑的 .docx，引擎无法直接读取，因此插件在
 Document.SaveCopyAs 生成临时副本，再以副本作为 inputPath；修复结果另存到用户指定的
 新文件。这一限制与处理方式记录在 docs/vsto-addin-verification.md。
 
-协议测试位于 tests/ThesisEngine.Tests/EngineProtocolTests.cs，包括 JSON 往返、宿主
-分析、非法输入和超时终止。正式规则仍以 Core 当前的 demo 规则版本为准；本协议不把
+协议测试位于 tests/ThesisEngine.Tests/EngineProtocolTests.cs 和
+WordAnnotationWriterTests.cs，包括 JSON 往返、宿主分析/批注、重复刷新、原文不变、用户批注保留、非法输入和超时终止。正式规则仍以 Core 当前的 demo 规则版本为准；本协议不把
 demo 结果声明为论文合规结论。
