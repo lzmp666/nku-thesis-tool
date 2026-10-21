@@ -1067,6 +1067,7 @@ namespace ThesisAddIn.VSTO
                 string currentFingerprint = DocxSnapshotFingerprint.Compute(currentCopy);
                 if (!string.Equals(currentFingerprint, operation.Fingerprint, StringComparison.Ordinal))
                 {
+                    WriteStartupLog("快照差异部件：" + DocxSnapshotFingerprint.DescribeDifferences(operation.SnapshotPath, currentCopy));
                     error = "分析期间原文内容发生了变化。为避免把旧结果用于新内容，请重新分析；本次修复没有写入原文。";
                     return false;
                 }
