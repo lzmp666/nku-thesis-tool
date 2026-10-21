@@ -9,6 +9,14 @@ $statePath = Join-Path $installPath '.nku-thesis-tool-install-state.json'
 if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw "没有找到本工具的安装记录，未更改任何设置：$statePath" }
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 if ([System.IO.Path]::GetFullPath([string]$state.installRoot).TrimEnd('\') -ne $installPath) { throw '安装记录中的路径不匹配，拒绝继续。' }
+$checksumPath = Join-Path $installPath 'SHA256SUMS.txt'
+if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw '缺少包内 SHA256SUMS.txt，拒绝更改当前用户设置或删除文件。' }
+$expectedChecksumManifestHash = [string]$state.checksumManifestSha256
+if ($expectedChecksumManifestHash -notmatch '^[0-9a-fA-F]{64}$') { throw '安装记录缺少有效的校验清单指纹，拒绝更改当前用户设置或删除文件。' }
+$actualChecksumManifestHash = (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash
+if (-not [string]::Equals($expectedChecksumManifestHash, $actualChecksumManifestHash, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'SHA256SUMS.txt 已被修改，拒绝更改当前用户设置或自动删除文件。'
+}
 
 $registryPath = 'HKCU:\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO'
 if (Test-Path -LiteralPath $registryPath) {
@@ -54,8 +62,6 @@ foreach ($storeName in @(@{ Name = 'Root'; Added = [bool]$state.addedPublisherTo
 
 $item = Get-Item -LiteralPath $installPath -Force
 if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '安装目录是重解析点，拒绝删除。' }
-$checksumPath = Join-Path $installPath 'SHA256SUMS.txt'
-if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw '缺少包内 SHA256SUMS.txt，无法安全识别本工具文件；已恢复用户设置，请手动检查安装目录。' }
 foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { continue }
     $expectedHash = $Matches[1]
@@ -67,6 +73,14 @@ foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
     $actualHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualHash -eq $expectedHash) { Remove-Item -LiteralPath $filePath -Force }
     else { Write-Warning "文件已被修改，保留：$relative" }
+}
+if (Test-Path -LiteralPath $checksumPath -PathType Leaf) {
+    $currentChecksumManifestHash = (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash
+    if ([string]::Equals($expectedChecksumManifestHash, $currentChecksumManifestHash, [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item -LiteralPath $checksumPath -Force
+    } else {
+        Write-Warning '卸载期间 SHA256SUMS.txt 发生变化，保留该文件。'
+    }
 }
 Remove-Item -LiteralPath $statePath -Force
 foreach ($relativeDirectory in @('vsto', 'engine', 'samples', 'docs')) {

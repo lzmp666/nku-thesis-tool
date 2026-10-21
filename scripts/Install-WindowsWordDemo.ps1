@@ -124,6 +124,7 @@ $state = [ordered]@{
     addedPublisherToRoot = $addedToRoot
     addedPublisherToTrustedPublisher = $addedToPublisher
     publisherThumbprint = $certificate.Thumbprint
+    checksumManifestSha256 = (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statePath -Encoding utf8
 if ($TrustPublisher) {
