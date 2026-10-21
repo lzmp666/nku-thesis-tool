@@ -154,6 +154,8 @@ namespace ThesisAddIn.VSTO.Ui
             get { return _diagnostics; }
         }
 
+        public bool IsBusy { get { return _isBusy; } }
+
         public void SetBusy(bool busy, string message)
         {
             InvokeOnUiThread(() =>

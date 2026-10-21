@@ -617,7 +617,7 @@ namespace ThesisAddIn.VSTO
             // It is not a Word.Range, so read its Range explicitly.
             Word.Selection wordSelection = selection as Word.Selection;
             Word.Range range = wordSelection != null ? wordSelection.Range : selection as Word.Range;
-            if (_pane == null || range == null)
+            if (_pane == null || _pane.IsBusy || range == null)
             {
                 return;
             }
@@ -656,7 +656,7 @@ namespace ThesisAddIn.VSTO
                 }
 
                 EnsureTaskPaneForWindow(window);
-                if (_pane == null)
+                if (_pane == null || _pane.IsBusy)
                 {
                     ResetHoveredRange();
                     return;
@@ -749,7 +749,14 @@ namespace ThesisAddIn.VSTO
                 for (int i = 1; i <= comments.Count; i++)
                 {
                     Word.Comment comment = comments[i];
-                    Word.Range scope = comment.Scope;
+                    // Range offsets are local to a Word story. A clicked comment
+                    // must be compared with its comment text, never with body offsets.
+                    Word.Range scope = selection.StoryType == Word.WdStoryType.wdCommentsStory
+                        ? comment.Range : comment.Scope;
+                    if (selection.StoryType != scope.StoryType)
+                    {
+                        continue;
+                    }
                     bool intersects = selection.Start == selection.End
                         ? selection.Start >= scope.Start && selection.Start <= scope.End
                         : selection.Start < scope.End && scope.Start < selection.End;
@@ -758,7 +765,11 @@ namespace ThesisAddIn.VSTO
                         continue;
                     }
 
-                    string text = comment.Range.Text ?? string.Empty;
+                    // Position markers are hidden; retrieval defaults to Word's view setting.
+                    // Read them explicitly without changing ShowHiddenText or the document.
+                    Word.Range commentText = comment.Range.Duplicate;
+                    commentText.TextRetrievalMode.IncludeHiddenText = true;
+                    string text = commentText.Text ?? string.Empty;
                     Match ruleMatch = RuleIdPattern.Match(text);
                     Match expectedMatch = ExpectedValuePattern.Match(text);
                     Match actualMatch = ActualValuePattern.Match(text);
