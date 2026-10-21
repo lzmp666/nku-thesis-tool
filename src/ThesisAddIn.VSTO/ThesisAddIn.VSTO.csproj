@@ -66,6 +66,7 @@
     <Reference Include="System" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
@@ -180,7 +181,10 @@
       <DependentUpon>ThisAddIn.Designer.xml</DependentUpon>
     </Compile>
     <Compile Include="Engine\DocumentLocator.cs" />
+    <Compile Include="Engine\DocxSnapshotFingerprint.cs" />
+    <Compile Include="Engine\FlatOpcPackageWriter.cs" />
     <Compile Include="Engine\EngineGateway.cs" />
+    <Compile Include="Engine\EngineHostPathResolver.cs" />
     <Compile Include="Ui\DiagnosticsPane.cs" />
     <Compile Include="Ui\CommentDiagnosticMatcher.cs" />
     <Compile Include="Ui\FixPreviewDialog.cs" />

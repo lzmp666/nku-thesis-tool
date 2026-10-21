@@ -1,0 +1,32 @@
+{
+  "ruleVersion": "nku-graduate-2026-body-v1",
+  "diagnostics": [
+    {
+      "ruleId": "NKU-REQ-044",
+      "severity": "warning",
+      "location": "word/document.xml#paragraph[5]/run[0]",
+      "expected": "12pt",
+      "actual": "10.5pt",
+      "fixLevel": "manual",
+      "message": "南开大学研究生学位论文写作规范（2026版）第4.7节表4.6（M26-036）：正文字号应为 12pt，实际为 10.5pt。规则仍为草案，需人工确认。"
+    },
+    {
+      "ruleId": "NKU-REQ-042",
+      "severity": "warning",
+      "location": "word/document.xml#paragraph[5]/run[0]",
+      "expected": "宋体",
+      "actual": "黑体",
+      "fixLevel": "manual",
+      "message": "南开大学研究生学位论文写作规范（2026版）第4.7节表4.6（M26-036）：中文字体应为「宋体」，实际为「黑体」。规则仍为草案，需人工确认。"
+    },
+    {
+      "ruleId": "NKU-REQ-043",
+      "severity": "warning",
+      "location": "word/document.xml#paragraph[5]/run[0]",
+      "expected": "ascii=Times New Roman; hAnsi=Times New Roman",
+      "actual": "ascii=Arial; hAnsi=Arial",
+      "fixLevel": "manual",
+      "message": "南开大学研究生学位论文写作规范（2026版）第4.7节表4.6（M26-036）：英文文字的 ascii 与 hAnsi 字体均应为「Times New Roman」，实际为「ascii=Arial; hAnsi=Arial」。规则仍为草案，需人工确认。"
+    }
+  ]
+}
