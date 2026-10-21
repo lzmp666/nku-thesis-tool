@@ -195,6 +195,117 @@ public sealed class WordFormattingReaderTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public void ConfirmsOnlyParagraphsBetweenRecognizedChapterAndNonBodyHeadings()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+              <w:style w:type="paragraph" w:styleId="Heading2"><w:pPr><w:outlineLvl w:val="1"/></w:pPr></w:style>
+            </w:styles>
+            """;
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>摘要</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>摘要文字</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章绪论</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>正文段落</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading2\"/></w:pPr><w:r><w:t>研究方法</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>第二个正文段落</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>文献条目</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body), styles);
+        try
+        {
+            var paragraphs = new WordFormattingReader().Read(path).Paragraphs;
+
+            Assert.Equal(8, paragraphs.Count);
+            Assert.Equal(ParagraphScopeClassification.Excluded, paragraphs[0].Scope);
+            Assert.Equal(ParagraphScopeClassification.Unknown, paragraphs[1].Scope);
+            Assert.Equal(ParagraphScopeClassification.Excluded, paragraphs[2].Scope);
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, paragraphs[3].Scope);
+            Assert.Equal(ParagraphScopeClassification.Excluded, paragraphs[4].Scope);
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, paragraphs[5].Scope);
+            Assert.Equal(ParagraphScopeClassification.Excluded, paragraphs[6].Scope);
+            Assert.Equal(ParagraphScopeClassification.Unknown, paragraphs[7].Scope);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void LeavesParagraphsUnknownWhenEitherBoundaryCannotBeRecognized()
+    {
+        var path = CreatePackage(Document("<w:p><w:r><w:t>普通段落</w:t></w:r></w:p>"));
+        try
+        {
+            var paragraph = Assert.Single(new WordFormattingReader().Read(path).Paragraphs);
+            Assert.Equal(ParagraphScopeClassification.Unknown, paragraph.Scope);
+            Assert.Contains("未同时识别", paragraph.ScopeReason);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void KeepsAsciiAndHAnsiSlotsIndependentForThe2026Profile()
+    {
+        var path = CreatePackage(Document(
+            "<w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"宋体\" w:ascii=\"Times New Roman\" w:hAnsi=\"Arial\"/><w:sz w:val=\"24\"/></w:rPr><w:t>中文 Latin</w:t></w:r></w:p>"));
+        try
+        {
+            var run = Assert.Single(Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Runs);
+
+            Assert.Equal("宋体", run.EastAsiaFont);
+            Assert.Equal("Times New Roman", run.AsciiFont);
+            Assert.Equal("Times New Roman", run.AsciiSlotFont);
+            Assert.Equal("Arial", run.HAnsiFont);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void InheritsAsciiAndHAnsiFontSlotsIndependentlyAcrossStyles()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Default ASCII" w:hAnsi="Default HAnsi"/></w:rPr></w:rPrDefault></w:docDefaults>
+              <w:style w:type="paragraph" w:styleId="Parent"><w:rPr><w:rFonts w:ascii="Parent ASCII"/></w:rPr></w:style>
+              <w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Parent"/><w:rPr><w:rFonts w:hAnsi="Child HAnsi"/></w:rPr></w:style>
+            </w:styles>
+            """;
+        var path = CreatePackage(Document(
+            "<w:p><w:pPr><w:pStyle w:val=\"Child\"/></w:pPr><w:r><w:t>Latin</w:t></w:r></w:p>"), styles);
+        try
+        {
+            var run = Assert.Single(Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Runs);
+
+            Assert.Equal("Parent ASCII", run.AsciiSlotFont);
+            Assert.Equal("Child HAnsi", run.HAnsiFont);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void LeavesParagraphWithUnsupportedInlineContentOutsideConfirmedBodyScope()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="paragraph" w:styleId="Heading1"><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+            </w:styles>
+            """;
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>普通正文</w:t></w:r><w:hyperlink><w:r><w:t>链接文本</w:t></w:r></w:hyperlink></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body), styles);
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+
+            Assert.Equal(ParagraphScopeClassification.Unknown, snapshot.Paragraphs[1].Scope);
+            Assert.Contains("hyperlinks", snapshot.UnsupportedScopes);
+        }
+        finally { File.Delete(path); }
+    }
+
     private static string CreatePackage(string document, string? styles = null, IEnumerable<(string Name, string Xml)>? entries = null)
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.docx");
@@ -214,3 +325,4 @@ public sealed class WordFormattingReaderTests
         writer.Write(xml);
     }
 }
+

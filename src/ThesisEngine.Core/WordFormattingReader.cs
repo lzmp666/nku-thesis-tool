@@ -12,6 +12,7 @@ public sealed class WordFormattingReader : IDemoDocumentReader
 {
     private const string MainNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private const string ThemeNamespace = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    private const string MathNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/math";
     private static readonly XNamespace W = MainNamespace;
 
     public DocumentSnapshot Read(string path)
@@ -45,18 +46,32 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         if (body.Descendants(W + "hyperlink").Any()) unsupported.Add("hyperlinks");
         if (body.Descendants(W + "smartTag").Any()) unsupported.Add("smart tags");
         if (body.Descendants(W + "fldSimple").Any()) unsupported.Add("simple fields");
+        if (body.Descendants(W + "instrText").Any() || body.Descendants(W + "fldChar").Any()) unsupported.Add("complex fields");
+        if (body.Descendants(XName.Get("oMath", MathNamespace)).Any() || body.Descendants(XName.Get("oMathPara", MathNamespace)).Any())
+            unsupported.Add("equation objects (equation content is not analyzed)");
         if (new[] { "ins", "del", "moveFrom", "moveTo" }.Any(name => body.Descendants(W + name).Any()))
             unsupported.Add("tracked changes");
         if (body.Descendants(W + "p").Any(p => p.Parent != body && !p.Ancestors(W + "tbl").Any()))
             unsupported.Add("nested body paragraphs");
 
         var paragraphs = new List<ParagraphSnapshot>();
+        var scopeInputs = new List<BodyScopeInput>();
         var paragraphIndex = 0;
         foreach (var paragraph in body.Elements(W + "p"))
         {
             var paragraphProperties = paragraph.Element(W + "pPr");
             var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
-            var inherited = Merge(defaults, ResolveStyle(paragraphStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "paragraph"));
+            var paragraphResolution = ResolveStyle(paragraphStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "paragraph");
+            var inherited = Merge(defaults, paragraphResolution.Formatting);
+            var isHeading = HasOutlineLevel(paragraphProperties) ||
+                IsHeadingStyleId(paragraphStyle) ||
+                (paragraphStyle is not null && styleMap.TryGetValue(paragraphStyle, out var paragraphStyleDefinition) && paragraphStyleDefinition.IsHeading);
+            var paragraphText = string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value));
+            var hasUnsupportedInlineContent = paragraph.Descendants().Any(element =>
+                element.Name == W + "hyperlink" || element.Name == W + "sdt" || element.Name == W + "customXml" ||
+                element.Name == W + "altChunk" || element.Name == W + "smartTag" || element.Name == W + "fldSimple" ||
+                element.Name == W + "instrText" || element.Name == W + "fldChar" ||
+                new[] { "ins", "del", "moveFrom", "moveTo" }.Any(name => element.Name == W + name));
             // w:pPr/w:rPr formats the paragraph mark, not the text runs.
 
             var runs = new List<TextRunSnapshot>();
@@ -66,16 +81,28 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 var currentRunIndex = runIndex++;
                 var properties = run.Element(W + "rPr");
                 var characterStyle = properties?.Element(W + "rStyle")?.Attribute(W + "val")?.Value;
-                var effective = Merge(inherited, ResolveStyle(characterStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "character"));
+                var characterResolution = ResolveStyle(characterStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "character");
+                var effective = Merge(inherited, characterResolution.Formatting);
                 effective = Merge(effective, ReadRunProperties(properties, theme, effective.EastAsiaLanguage));
                 var text = string.Concat(run.Descendants(W + "t").Select(t => t.Value));
                 // Comment references and other OOXML markers can be represented by
                 // textless runs. Excluding them keeps locations stable after annotations
                 // are refreshed; locations count only text-bearing runs.
-                runs.Add(new TextRunSnapshot(currentRunIndex, effective.EastAsia, effective.Ascii, effective.SizePt, text));
+                runs.Add(new TextRunSnapshot(currentRunIndex, effective.EastAsia, effective.Ascii ?? effective.HAnsi,
+                    effective.SizePt, text, effective.Ascii, effective.HAnsi,
+                    !paragraphResolution.IsResolved || !characterResolution.IsResolved));
             }
-            paragraphs.Add(new ParagraphSnapshot(paragraphIndex++, runs));
+            paragraphs.Add(new ParagraphSnapshot(paragraphIndex, runs));
+            scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading, hasUnsupportedInlineContent));
+            paragraphIndex++;
         }
+
+        var decisions = NkuGraduate2026BodyScopeClassifier.Classify(scopeInputs);
+        paragraphs = paragraphs.Select((paragraph, index) => paragraph with
+        {
+            Scope = decisions[index].Classification,
+            ScopeReason = decisions[index].Reason
+        }).ToList();
 
         if (theme is null && new[] { document, styles }.Where(d => d is not null)
             .SelectMany(d => d!.Descendants(W + "rFonts")).Any(HasThemeFont))
@@ -133,31 +160,39 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         {
             var id = style.Attribute(W + "styleId")?.Value;
             if (string.IsNullOrWhiteSpace(id)) continue;
-            map[id] = new StyleDefinition(style.Attribute(W + "type")?.Value,
+            var type = style.Attribute(W + "type")?.Value;
+            var paragraphProperties = style.Element(W + "pPr");
+            var isHeading = string.Equals(type, "paragraph", StringComparison.OrdinalIgnoreCase) &&
+                (HasOutlineLevel(paragraphProperties) || IsHeadingStyleId(id));
+            map[id] = new StyleDefinition(type,
                 style.Element(W + "basedOn")?.Attribute(W + "val")?.Value,
-                ReadRunProperties(style.Element(W + "rPr"), theme, defaultLanguage));
+                ReadRunProperties(style.Element(W + "rPr"), theme, defaultLanguage), isHeading);
         }
         return map;
     }
 
-    private static Formatting ResolveStyle(string? id, IReadOnlyDictionary<string, StyleDefinition> styles, Formatting defaults,
+    private static StyleResolution ResolveStyle(string? id, IReadOnlyDictionary<string, StyleDefinition> styles, Formatting defaults,
         HashSet<string> seen, string? expectedType)
     {
-        if (string.IsNullOrWhiteSpace(id) || !styles.TryGetValue(id, out var style) || !seen.Add(id)) return defaults;
+        if (string.IsNullOrWhiteSpace(id)) return new StyleResolution(defaults, true);
+        if (!styles.TryGetValue(id, out var style) || !seen.Add(id)) return new StyleResolution(default, false);
         if (expectedType is not null && style.Type is not null &&
             !string.Equals(style.Type, expectedType, StringComparison.OrdinalIgnoreCase))
-            return defaults;
+            return new StyleResolution(default, false);
         var parentType = style.Type ?? expectedType;
-        return Merge(ResolveStyle(style.BasedOn, styles, defaults, seen, parentType), style.Formatting);
+        var parent = ResolveStyle(style.BasedOn, styles, defaults, seen, parentType);
+        return new StyleResolution(Merge(parent.Formatting, style.Formatting), parent.IsResolved);
     }
 
     private static Formatting Merge(Formatting inherited, Formatting direct) => new(
         direct.EastAsiaSpecified ? direct.EastAsia : inherited.EastAsia,
         direct.AsciiSpecified ? direct.Ascii : inherited.Ascii,
+        direct.HAnsiSpecified ? direct.HAnsi : inherited.HAnsi,
         direct.SizeSpecified ? direct.SizePt : inherited.SizePt,
         direct.EastAsiaLanguage ?? inherited.EastAsiaLanguage,
         direct.EastAsiaSpecified || inherited.EastAsiaSpecified,
         direct.AsciiSpecified || inherited.AsciiSpecified,
+        direct.HAnsiSpecified || inherited.HAnsiSpecified,
         direct.SizeSpecified || inherited.SizeSpecified);
 
     private static Formatting ReadRunProperties(XElement? properties, XDocument? theme, string? fallbackLanguage = null)
@@ -166,19 +201,23 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var fonts = properties.Element(W + "rFonts");
         var eastAsiaAttr = fonts?.Attribute(W + "eastAsia")?.Value;
         var eastAsiaTheme = fonts?.Attribute(W + "eastAsiaTheme")?.Value;
-        var asciiAttr = fonts?.Attribute(W + "ascii")?.Value ?? fonts?.Attribute(W + "hAnsi")?.Value;
-        var asciiTheme = fonts?.Attribute(W + "asciiTheme")?.Value ?? fonts?.Attribute(W + "hAnsiTheme")?.Value;
+        var asciiAttr = fonts?.Attribute(W + "ascii")?.Value;
+        var asciiTheme = fonts?.Attribute(W + "asciiTheme")?.Value;
+        var hAnsiAttr = fonts?.Attribute(W + "hAnsi")?.Value;
+        var hAnsiTheme = fonts?.Attribute(W + "hAnsiTheme")?.Value;
         var language = properties.Element(W + "lang")?.Attribute(W + "eastAsia")?.Value ?? fallbackLanguage;
         var eastAsia = ResolveFont(eastAsiaAttr, eastAsiaTheme, theme, language);
         var ascii = ResolveFont(asciiAttr, asciiTheme, theme, language);
+        var hAnsi = ResolveFont(hAnsiAttr, hAnsiTheme, theme, language);
         var sizeElement = properties.Element(W + "sz");
         var sizeText = sizeElement?.Attribute(W + "val")?.Value;
         double? size = null;
         if (double.TryParse(sizeText, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var halfPoints) && halfPoints > 0)
             size = halfPoints / 2.0;
-        return new Formatting(eastAsia, ascii, size, language,
+        return new Formatting(eastAsia, ascii, hAnsi, size, language,
             eastAsiaAttr is not null || eastAsiaTheme is not null,
             asciiAttr is not null || asciiTheme is not null,
+            hAnsiAttr is not null || hAnsiTheme is not null,
             sizeElement is not null);
     }
 
@@ -215,6 +254,18 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                (fonts.Attribute(W + "hAnsiTheme") is { } hAnsi && ResolveFont(null, hAnsi.Value, theme, language) is null);
     }
 
+    private static bool HasOutlineLevel(XElement? paragraphProperties)
+    {
+        var value = paragraphProperties?.Element(W + "outlineLvl")?.Attribute(W + "val")?.Value;
+        return int.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var level) && level is >= 0 and <= 8;
+    }
+
+    private static bool IsHeadingStyleId(string? styleId) =>
+        styleId is not null && (System.Text.RegularExpressions.Regex.IsMatch(styleId, @"^Heading[1-9]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant) ||
+                                string.Equals(styleId, "Title", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(styleId, "Subtitle", StringComparison.OrdinalIgnoreCase));
+
     private static string? GetThemeScript(string? language)
     {
         if (language is null) return null;
@@ -228,11 +279,15 @@ public sealed class WordFormattingReader : IDemoDocumentReader
     private readonly record struct Formatting(
         string? EastAsia,
         string? Ascii,
+        string? HAnsi,
         double? SizePt,
         string? EastAsiaLanguage = null,
         bool EastAsiaSpecified = false,
         bool AsciiSpecified = false,
+        bool HAnsiSpecified = false,
         bool SizeSpecified = false);
-    private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting);
+    private readonly record struct StyleResolution(Formatting Formatting, bool IsResolved);
+    private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting, bool IsHeading);
 }
+
 

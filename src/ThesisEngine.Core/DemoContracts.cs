@@ -27,16 +27,28 @@ public sealed record DocumentSnapshot(
     IReadOnlyList<ParagraphSnapshot> Paragraphs,
     IReadOnlyList<string> UnsupportedScopes);
 
+public enum ParagraphScopeClassification
+{
+    Unknown,
+    Excluded,
+    ConfirmedBodyProse
+}
+
 public sealed record ParagraphSnapshot(
     int ParagraphIndex,
-    IReadOnlyList<TextRunSnapshot> Runs);
+    IReadOnlyList<TextRunSnapshot> Runs,
+    ParagraphScopeClassification Scope = ParagraphScopeClassification.Unknown,
+    string? ScopeReason = null);
 
 public sealed record TextRunSnapshot(
     int RunIndex,
     string? EastAsiaFont,
     string? AsciiFont,
     double? FontSizePt,
-    string Text);
+    string Text,
+    string? AsciiSlotFont = null,
+    string? HAnsiFont = null,
+    bool HasUnresolvedStyle = false);
 
 /// <summary>
 /// 诊断结果条目，对齐 engine-api.md 中的 Diagnostic 字段。
@@ -82,3 +94,4 @@ public interface IDemoAnalysisService
 {
     AnalysisResult Analyze(string path, DemoRuleSet profile);
 }
+

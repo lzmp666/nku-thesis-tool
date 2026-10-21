@@ -1,0 +1,70 @@
+schema_version: "0.2.0"
+status: draft
+profile:
+  profile_id: nku-graduate-2026-body
+  rule_version: nku-graduate-2026-body-v1
+  standard_version: "2026"
+  status: draft
+  selection: explicit
+  scope_policy:
+    include: [confirmed_body_prose]
+    exclude: [heading, abstract, toc, references, appendix, acknowledgements, title_page, table_cell, footnote, endnote, header_footer, text_box, equation_object, field, non_body_part]
+    unknown: unsupported
+  source:
+    title: 南开大学研究生学位论文写作规范（2026版）
+    url: https://graduate.nankai.edu.cn/_upload/article/files/46/28/7965029e47d08d27f560f8393fd8/28100848-9be2-4f1b-8f74-5899900cf936.docx
+    version: "2026"
+    locator: 第4.7节表4.6，正文段落文字
+    quote: "依据覆盖矩阵 M26-036 摘录：中文宋体12 pt；英文 Times New Roman 12 pt。"
+    verified_on: "2026-10-14"
+rules:
+  - id: NKU-REQ-042
+    matrix_id: M26-036
+    scope: [body]
+    property: font
+    text_script: east_asian
+    font_slots: [eastAsia]
+    unknown_policy: unsupported
+    expect: {value: 宋体, unit: name}
+    severity: warning
+    fix: manual
+    source:
+      title: 南开大学研究生学位论文写作规范（2026版）
+      url: https://graduate.nankai.edu.cn/_upload/article/files/46/28/7965029e47d08d27f560f8393fd8/28100848-9be2-4f1b-8f74-5899900cf936.docx
+      version: "2026"
+      locator: 第4.7节表4.6，正文中文字体
+      quote: "依据覆盖矩阵 M26-036 摘录：中文宋体12 pt。"
+      verified_on: "2026-10-14"
+  - id: NKU-REQ-043
+    matrix_id: M26-036
+    scope: [body]
+    property: font
+    text_script: latin
+    font_slots: [ascii, hAnsi]
+    unknown_policy: unsupported
+    expect: {value: Times New Roman, unit: name}
+    severity: warning
+    fix: manual
+    source:
+      title: 南开大学研究生学位论文写作规范（2026版）
+      url: https://graduate.nankai.edu.cn/_upload/article/files/46/28/7965029e47d08d27f560f8393fd8/28100848-9be2-4f1b-8f74-5899900cf936.docx
+      version: "2026"
+      locator: 第4.7节表4.6，正文英文字体
+      quote: "依据覆盖矩阵 M26-036 摘录：英文 Times New Roman 12 pt。"
+      verified_on: "2026-10-14"
+  - id: NKU-REQ-044
+    matrix_id: M26-036
+    scope: [body]
+    property: font_size
+    unknown_policy: unsupported
+    expect: {value: 12, unit: pt}
+    severity: warning
+    fix: manual
+    source:
+      title: 南开大学研究生学位论文写作规范（2026版）
+      url: https://graduate.nankai.edu.cn/_upload/article/files/46/28/7965029e47d08d27f560f8393fd8/28100848-9be2-4f1b-8f74-5899900cf936.docx
+      version: "2026"
+      locator: 第4.7节表4.6，正文段落字号
+      quote: "依据覆盖矩阵 M26-036 摘录：正文字号12 pt。"
+      verified_on: "2026-10-14"
+
