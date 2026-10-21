@@ -71,6 +71,29 @@ namespace ThesisAddIn.VSTO.Engine
             return _client.AnalyzeAsync(documentPath, cancellationToken);
         }
 
+        /// <summary>分析文档并在独立输出副本中创建或刷新工具批注。</summary>
+        public Task<EngineResponse> AnnotateAsync(
+            string documentPath,
+            string outputPath,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath) || string.IsNullOrWhiteSpace(outputPath))
+            {
+                return Task.FromResult(new EngineResponse
+                {
+                    ProtocolVersion = EngineProtocol.Version,
+                    Ok = false,
+                    Error = new EngineError
+                    {
+                        Code = EngineProtocol.InvalidRequest,
+                        Message = "生成标注副本时必须提供输入和输出文件路径。"
+                    }
+                });
+            }
+
+            return _client.AnnotateAsync(documentPath, outputPath, cancellationToken);
+        }
+
         /// <summary>生成修复计划；diagnostic 为 null 时计划全部可自动修复项。</summary>
         public EngineResponse Plan(string documentPath, EngineDiagnostic diagnostic)
         {
@@ -145,4 +168,5 @@ namespace ThesisAddIn.VSTO.Engine
         }
     }
 }
+
 
