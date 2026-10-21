@@ -750,7 +750,7 @@ namespace ThesisAddIn.VSTO
             // It is not a Word.Range, so read its Range explicitly.
             Word.Selection wordSelection = selection as Word.Selection;
             Word.Range range = wordSelection != null ? wordSelection.Range : selection as Word.Range;
-            if (_pane == null || range == null)
+            if (_pane == null || _pane.IsBusy || range == null)
             {
                 return;
             }
@@ -767,6 +767,8 @@ namespace ThesisAddIn.VSTO
 
             if (_pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
             {
+                WriteStartupLog("选择联动：story=" + range.StoryType + "; start=" + range.Start
+                    + "; end=" + range.End + "; location=" + location + "; matches=" + matchCount);
                 _pane.SetStatus(matchCount > 1
                     ? "此处有多条建议，当前关联第一条；可用上一项/下一项浏览。"
                     : "当前批注已关联到问题：" + ruleId + "。");
@@ -789,7 +791,7 @@ namespace ThesisAddIn.VSTO
                 }
 
                 EnsureTaskPaneForWindow(window);
-                if (_pane == null)
+                if (_pane == null || _pane.IsBusy)
                 {
                     ResetHoveredRange();
                     return;
@@ -813,7 +815,26 @@ namespace ThesisAddIn.VSTO
                 _lastHoveredCursorY = cursor.Y;
 
                 Word.Range range = window.RangeFromPoint(cursor.X, cursor.Y) as Word.Range;
-                if (range == null)
+                // Hover sync is for the document body only. Word can return an
+                // obscured comment-story range under our task-pane buttons.
+                // Native comment clicks are handled by WindowSelectionChange.
+                if (range == null || range.StoryType != Word.WdStoryType.wdMainTextStory)
+                {
+                    ResetHoveredRange();
+                    return;
+                }
+
+                // RangeFromPoint can return a nearby range even over a task pane.
+                // Do not let moving to navigation/repair controls replace the target.
+                Word.Range hitBounds = range.Duplicate;
+                if (hitBounds.Start == hitBounds.End)
+                {
+                    hitBounds.MoveEnd(Word.WdUnits.wdCharacter, 1);
+                }
+                int rangeLeft, rangeTop, rangeWidth, rangeHeight;
+                window.GetPoint(out rangeLeft, out rangeTop, out rangeWidth, out rangeHeight, hitBounds);
+                if (cursor.X < rangeLeft || cursor.X >= rangeLeft + Math.Max(1, rangeWidth)
+                    || cursor.Y < rangeTop || cursor.Y >= rangeTop + Math.Max(1, rangeHeight))
                 {
                     ResetHoveredRange();
                     return;
@@ -831,6 +852,8 @@ namespace ThesisAddIn.VSTO
                         && _pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
                     {
                         _lastHoveredCommentKey = commentKey;
+                        WriteStartupLog("悬停联动：story=" + range.StoryType + "; start=" + range.Start
+                            + "; end=" + range.End + "; location=" + location);
                         if (matchCount > 1)
                         {
                             _pane.SetStatus("此处有多条建议，已显示第一条；可用上一项/下一项浏览。");
@@ -882,7 +905,14 @@ namespace ThesisAddIn.VSTO
                 for (int i = 1; i <= comments.Count; i++)
                 {
                     Word.Comment comment = comments[i];
-                    Word.Range scope = comment.Scope;
+                    // Range offsets are local to a Word story. A clicked comment
+                    // must be compared with its comment text, never with body offsets.
+                    Word.Range scope = selection.StoryType == Word.WdStoryType.wdCommentsStory
+                        ? comment.Range : comment.Scope;
+                    if (selection.StoryType != scope.StoryType)
+                    {
+                        continue;
+                    }
                     bool intersects = selection.Start == selection.End
                         ? selection.Start >= scope.Start && selection.Start <= scope.End
                         : selection.Start < scope.End && scope.Start < selection.End;
@@ -891,7 +921,11 @@ namespace ThesisAddIn.VSTO
                         continue;
                     }
 
-                    string text = comment.Range.Text ?? string.Empty;
+                    // Position markers are hidden; retrieval defaults to Word's view setting.
+                    // Read them explicitly without changing ShowHiddenText or the document.
+                    Word.Range commentText = comment.Range.Duplicate;
+                    commentText.TextRetrievalMode.IncludeHiddenText = true;
+                    string text = commentText.Text ?? string.Empty;
                     Match ruleMatch = RuleIdPattern.Match(text);
                     Match expectedMatch = ExpectedValuePattern.Match(text);
                     Match actualMatch = ActualValuePattern.Match(text);
