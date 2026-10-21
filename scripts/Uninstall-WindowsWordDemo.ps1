@@ -17,6 +17,11 @@ $actualChecksumManifestHash = (Get-FileHash -LiteralPath $checksumPath -Algorith
 if (-not [string]::Equals($expectedChecksumManifestHash, $actualChecksumManifestHash, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'SHA256SUMS.txt 已被修改，拒绝更改当前用户设置或自动删除文件。'
 }
+if (Get-Process -Name WINWORD -ErrorAction SilentlyContinue) { throw '请先关闭所有 Word 窗口，再卸载插件；当前配置未更改。' }
+$existingItems = @((Get-Item -LiteralPath $installPath -Force)) + @(Get-ChildItem -LiteralPath $installPath -Recurse -Force)
+foreach ($item in $existingItems) {
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '安装目录含重解析点，拒绝更改设置或删除文件。' }
+}
 
 $registryPath = 'HKCU:\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO'
 if (Test-Path -LiteralPath $registryPath) {
@@ -60,8 +65,6 @@ foreach ($storeName in @(@{ Name = 'Root'; Added = [bool]$state.addedPublisherTo
     } finally { $store.Close() }
 }
 
-$item = Get-Item -LiteralPath $installPath -Force
-if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '安装目录是重解析点，拒绝删除。' }
 foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { continue }
     $expectedHash = $Matches[1]

@@ -18,11 +18,14 @@ $checksumPath = Join-Path $packageRoot 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw '缺少 SHA256SUMS.txt，拒绝安装不完整的演示包。' }
 $packageRootFull = [System.IO.Path]::GetFullPath($packageRoot).TrimEnd('\')
 $checksumCount = 0
+$listedFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
-    if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { continue }
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw '包校验清单格式无效，拒绝安装。' }
     $expectedHash = $Matches[1]
     $relative = $Matches[2].Replace('/', '\')
     if ($relative.Split('\') -contains '..' -or [System.IO.Path]::IsPathRooted($relative)) { throw '包校验清单含无效路径，拒绝安装。' }
+    if (-not $listedFiles.Add($relative)) { throw "包校验清单含重复文件：$relative" }
     $filePath = [System.IO.Path]::GetFullPath((Join-Path $packageRootFull $relative))
     if (-not $filePath.StartsWith($packageRootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '包校验路径越出解压目录，拒绝安装。' }
     if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "包文件缺失：$relative" }
@@ -31,6 +34,12 @@ foreach ($line in (Get-Content -LiteralPath $checksumPath)) {
     $checksumCount++
 }
 if ($checksumCount -lt 10) { throw 'SHA256SUMS.txt 内容不完整，拒绝安装。' }
+foreach ($item in (Get-ChildItem -LiteralPath $packageRootFull -Recurse -Force)) {
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '包内含重解析点，拒绝安装。' }
+    if ($item.PSIsContainer -or $item.FullName -eq $checksumPath) { continue }
+    $relative = $item.FullName.Substring($packageRootFull.Length + 1)
+    if (-not $listedFiles.Contains($relative)) { throw "包内文件未列入校验清单：$relative" }
+}
 
 $buildInfoPath = Join-Path $packageRoot 'build-info.json'
 if (-not (Test-Path -LiteralPath $buildInfoPath -PathType Leaf)) { throw '缺少 build-info.json。' }
@@ -56,6 +65,7 @@ if (-not (Test-Path -LiteralPath $preflightHost)) { $preflightHost = Join-Path $
 if (-not (Test-Path -LiteralPath $preflightHost)) { throw '无法找到 PowerShell 来运行预检。' }
 & $preflightHost -NoProfile -File (Join-Path $packageRoot 'Preflight.ps1')
 if ($LASTEXITCODE -ne 0) { throw '环境预检失败；没有安装加载项。' }
+if (Get-Process -Name WINWORD -ErrorAction SilentlyContinue) { throw '请先关闭所有 Word 窗口，再安装或更新插件；当前配置未更改。' }
 
 $statePath = Join-Path $installPath '.nku-thesis-tool-install-state.json'
 if ((Test-Path -LiteralPath $installPath) -and -not (Test-Path -LiteralPath $statePath)) {
@@ -67,6 +77,10 @@ $registryNames = @('FriendlyName', 'Description', 'LoadBehavior', 'Manifest')
 
 if (Test-Path -LiteralPath $statePath) {
     $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    if ([System.IO.Path]::GetFullPath([string]$state.installRoot).TrimEnd('\') -ne $installPath) { throw '安装记录中的路径不匹配，拒绝更新。' }
+    if (-not [string]::Equals([string]$state.publisherThumbprint, $packageCertificate.Thumbprint, [StringComparison]::OrdinalIgnoreCase)) {
+        throw '新包的签名证书与已安装版本不同。请先卸载旧版并核验新发行者，再重新安装；没有覆盖旧回滚记录。'
+    }
     $previousRegistryExisted = [bool]$state.PreviousRegistryExisted
     $previousRegistryValues = $state.PreviousRegistryValues
     $previousEngineHost = [string]$state.PreviousEngineHost
@@ -85,6 +99,13 @@ if (Test-Path -LiteralPath $statePath) {
     $previousEngineHost = [Environment]::GetEnvironmentVariable('THESIS_ENGINE_PROTOCOL_HOST', 'User')
     $addedToRoot = $false
     $addedToPublisher = $false
+}
+
+if (Test-Path -LiteralPath $installPath) {
+    $existingItems = @((Get-Item -LiteralPath $installPath -Force)) + @(Get-ChildItem -LiteralPath $installPath -Recurse -Force)
+    foreach ($item in $existingItems) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '安装目录含重解析点，拒绝复制文件。' }
+    }
 }
 
 foreach ($directory in @('vsto', 'engine', 'samples', 'docs')) {

@@ -43,12 +43,11 @@ $outDir = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $acceptancePath = Join-Path $root 'docs\demo\word-acceptance.md'
 $acceptanceIncluded = Test-Path -LiteralPath $acceptancePath -PathType Leaf
+# A checklist with no pending cells can still contain failed or unrelated results.
+# Distribution approval requires a separately reviewed release record; this developer
+# packaging path therefore always produces an explicitly labelled preview.
 $acceptanceComplete = $false
-if ($acceptanceIncluded) {
-    $acceptanceText = Get-Content -LiteralPath $acceptancePath -Raw
-    $acceptanceComplete = -not ($acceptanceText -match '\|\s*(未测|待填写)\s*\|')
-}
-$readyForDistribution = $acceptanceIncluded -and $acceptanceComplete
+$readyForDistribution = $false
 $suffix = if ($readyForDistribution) { '' } else { '-PREVIEW' }
 $zipName = "NkuThesisTool-WordDemo-$($revision.Substring(0, 12))$suffix.zip"
 $zipPath = Join-Path $outDir $zipName
@@ -72,6 +71,12 @@ try {
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Test-WindowsWordDemoEnvironment.ps1') -Destination (Join-Path $stage 'Preflight.ps1')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Install-WindowsWordDemo.ps1') -Destination (Join-Path $stage 'Install.ps1')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Uninstall-WindowsWordDemo.ps1') -Destination (Join-Path $stage 'Uninstall.ps1')
+    # Windows PowerShell 5.1 requires a BOM to decode Chinese messages as UTF-8.
+    foreach ($scriptName in @('Preflight.ps1', 'Install.ps1', 'Uninstall.ps1')) {
+        $scriptPath = Join-Path $stage $scriptName
+        $scriptText = [System.IO.File]::ReadAllText($scriptPath, [System.Text.Encoding]::UTF8)
+        [System.IO.File]::WriteAllText($scriptPath, $scriptText, [System.Text.UTF8Encoding]::new($true))
+    }
     Copy-Item -LiteralPath (Join-Path $root 'docs\demo\windows-package.md') -Destination (Join-Path $stage 'README.md')
     if ($acceptanceIncluded) {
         Copy-Item -LiteralPath $acceptancePath -Destination (Join-Path $docsStage 'word-acceptance.md')
@@ -113,5 +118,15 @@ try {
     if (-not $readyForDistribution) { Write-Warning 'Word 验收未全部记录为通过；这是 PREVIEW 包，不可作为已验收演示包分发。' }
 }
 finally {
-    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    if (Test-Path -LiteralPath $stage) {
+        $stageFull = [System.IO.Path]::GetFullPath($stage)
+        $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
+        if (-not $stageFull.StartsWith($temporaryRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
+            [System.IO.Path]::GetFileName($stageFull) -notmatch '^NkuThesisTool-Demo-[0-9a-f]{32}$') {
+            throw '临时打包目录不在预期范围内，拒绝递归清理。'
+        }
+        $stageItem = Get-Item -LiteralPath $stageFull -Force
+        if (($stageItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw '临时打包目录是重解析点，拒绝清理。' }
+        Remove-Item -LiteralPath $stageFull -Recurse -Force
+    }
 }

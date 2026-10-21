@@ -29,13 +29,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -InstallRo
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1
+# 自定义安装目录须传入相同的路径
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -InstallRoot 'D:\Apps\NkuThesisTool'
 ```
 
 卸载只在当前注册仍指向本工具时恢复原值，只在引擎环境变量仍是本工具路径时恢复原值，并移除本安装明确加入信任存储的证书。清理安装目录时逐文件校验包清单；被修改的文件及用户额外放入的文件会保留。不会改动其他 Office 加载项或全局安全设置。完成后重新启动 Word。
 
+安装、更新、卸载前必须关闭所有 Word 窗口。更新包的发行证书若发生变化，脚本会停止；须先卸载旧版、核验新发行者后重新安装，以保留正确的回滚与证书记录。
+
 ## 从源码制作包
 
-维护者应从干净、已测试的 Release 提交开始；包脚本拒绝未提交工作树。需要 Windows、桌面 Word/VSTO 开发工具链、.NET Framework targeting pack 和 .NET 10 SDK。
+维护者应在 PowerShell 7 中从干净、已测试的 Release 提交开始；包脚本拒绝未提交工作树。需要 Windows、桌面 Word/VSTO 开发工具链、.NET Framework targeting pack 和 .NET 10 SDK。包内安装脚本会写入 UTF-8 BOM，兼容 Windows PowerShell 5.1 的中文提示。
 
 ```powershell
 dotnet build .\src\ThesisAddIn.VSTO\ProtocolHost\ThesisEngine.ProtocolHost.csproj -c Release
@@ -49,4 +53,4 @@ $env:THESIS_VSTO_CERT_THUMBPRINT = '<当前用户开发证书指纹>'
 .\scripts\New-WindowsWordDemoPackage.ps1
 ```
 
-生成的 ZIP 位于 `artifacts`。包内 `vsto`、`engine`、`samples` 分开存放，省略 PDB，仅包含部署所需 Release 输出、合成稿、公开 `.cer` 和 SHA-256 清单。不会将私钥/PFX 导出或加入 Git。正式发布应使用组织正式代码签名证书及其发布流程，而非开发证书。
+生成的 ZIP 位于 `artifacts`。此开发打包流程始终标记为 PREVIEW；验收表被填写不等于已批准发布。包内 `vsto`、`engine`、`samples` 分开存放，省略 PDB，仅包含部署所需 Release 输出、合成稿、公开 `.cer` 和 SHA-256 清单。不会将私钥/PFX 导出或加入 Git。正式发布需另行核对受测提交、二进制校验值、独立环境验收和负责人批准，并使用正式代码签名发布流程。
