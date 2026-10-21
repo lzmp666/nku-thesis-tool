@@ -235,6 +235,7 @@ namespace ThesisAddIn.VSTO
                 ShowAnalysis(annotatedPane, response.Result);
                 SetStatus(annotatedPane, "分析完成：已生成并打开标注副本，共 "
                     + response.Result.Diagnostics.Count + " 条问题；原文保持不变。\n" + annotatedPath);
+                SetStatus(pane, "分析完成：已在独立窗口打开标注副本，原文保持不变。\n" + annotatedPath);
                 WriteStartupLog("已打开标注副本，批注数 " + response.Annotation.CommentCount + "，窗口 "
                     + SafeWindowHandle(annotatedDocument.ActiveWindow) + "。");
             }
@@ -626,6 +627,7 @@ namespace ThesisAddIn.VSTO
                 SetStatus(resultPane, applySummary + Environment.NewLine
                     + "修复结果已重新分析，剩余 " + refreshed.Result.Diagnostics.Count + " 条问题；批注已刷新。\n"
                     + "原文保持不变。结果文件：" + finalOutput);
+                SetStatus(pane, "修复完成：已在独立窗口打开并复查结果副本，当前文档保持不变。\n" + finalOutput);
                 WriteStartupLog("已打开修复并刷新批注的结果副本；剩余问题 "
                     + refreshed.Result.Diagnostics.Count + " 条。");
             }
