@@ -71,8 +71,10 @@ Set-ItemProperty -Path $key -Name Manifest `
   (Resolve-Path "src\ThesisAddIn.VSTO\ProtocolHost\bin\Release\net10.0\ThesisEngine.ProtocolHost.dll").Path, "User")
 ```
 
-设置环境变量后需要**重新启动 Word**（环境变量在进程启动时读取）。卸载时删除上述注册
+设置路径后需要**重新启动 Word**，以便插件重新建立引擎连接。卸载时删除上述注册
 表项、证书与环境变量即可。
+
+插件优先读取当前用户的 `THESIS_ENGINE_PROTOCOL_HOST` 设置，防止更新后启动器仍把旧进程环境传给 Word；未配置用户级路径时才使用进程环境。已配置路径无效时会报错，不会静默换用旧引擎。
 
 ## 使用
 

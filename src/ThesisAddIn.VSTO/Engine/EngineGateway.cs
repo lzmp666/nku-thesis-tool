@@ -24,7 +24,17 @@ namespace ThesisAddIn.VSTO.Engine
         public static EngineGateway Create(out string error)
         {
             error = null;
-            string hostPath = Environment.GetEnvironmentVariable(HostPathVariable);
+            string userHostPath;
+            try
+            {
+                userHostPath = Environment.GetEnvironmentVariable(HostPathVariable, EnvironmentVariableTarget.User);
+            }
+            catch (Exception exception)
+            {
+                error = "无法读取当前用户的引擎配置，已停止连接：" + exception.Message;
+                return null;
+            }
+            string hostPath = EngineHostPathResolver.Select(userHostPath, Environment.GetEnvironmentVariable(HostPathVariable));
             if (string.IsNullOrWhiteSpace(hostPath))
             {
                 error = "尚未配置引擎。请把环境变量 " + HostPathVariable
