@@ -17,7 +17,7 @@ namespace ThesisAddIn.VSTO
     /// Word 侧入口：创建中文问题侧边栏，把分析、定位、修复和批注锚点联动接到一起。
     ///
     /// 重要：Word 会锁住正在编辑的 .docx，引擎无法直接读取，因此所有分析/修复
-    /// 都基于 Document.SaveCopyAs 生成的临时副本；修复结果另存到用户指定的新文件，
+    /// 都基于 Word 当前内存内容生成的临时副本；修复结果另存到用户指定的新文件，
     /// 原始文件与当前打开中的文档都不会被覆盖。
     /// </summary>
     public partial class ThisAddIn
@@ -36,7 +36,6 @@ namespace ThesisAddIn.VSTO
         private DiagnosticsPane _pane;
         private EngineGateway _gateway;
         private string _gatewayError;
-        private string _workingCopySource = "已保存的文件内容";
         private System.Windows.Forms.Timer _documentHoverTimer;
         private CancellationTokenSource _operationCancellation;
         private int _lastHoveredWindowHandle = -1;
@@ -44,6 +43,17 @@ namespace ThesisAddIn.VSTO
         private int _lastHoveredCursorY = -1;
         private string _lastHoveredCommentKey;
         private bool _isNavigatingToDiagnostic;
+
+        private sealed class DocumentOperationContext
+        {
+            public Word.Document Document { get; set; }
+            public Word.Window Window { get; set; }
+            public int WindowHandle { get; set; }
+            public string DocumentName { get; set; }
+            public string DocumentFullName { get; set; }
+            public string SnapshotPath { get; set; }
+            public string Fingerprint { get; set; }
+        }
 
         public bool IsEngineConfigured
         {
@@ -164,8 +174,9 @@ namespace ThesisAddIn.VSTO
         private async void OnAnalyzeRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
-            DiagnosticsPane pane = _pane;
+            DiagnosticsPane pane = sender as DiagnosticsPane ?? _pane;
             string workCopy = null;
+            string annotatedPath = null;
             try
             {
                 WriteStartupLog("收到“分析当前文档”点击。");
@@ -177,21 +188,56 @@ namespace ThesisAddIn.VSTO
                 EngineGateway gateway = _gateway;
                 CancellationToken cancellationToken = GetOperationCancellationToken();
 
+                DocumentOperationContext operation;
                 string failure;
-                workCopy = CreateWorkingCopy(out failure);
-                if (workCopy == null)
+                if (!TryCreateWorkingCopy(pane, out operation, out failure))
                 {
                     WriteStartupLog("分析中止：临时副本失败 - " + failure);
                     ShowFailure(pane, failure);
                     return;
                 }
+                workCopy = operation.SnapshotPath;
+                annotatedPath = CreateAnnotatedOutputPath(operation);
 
-                WriteStartupLog("临时副本已生成，开始调用引擎。");
-                string workingCopySource = _workingCopySource;
-                SetBusy(pane, true, "正在分析文档…（基于" + workingCopySource + "的临时副本，不修改原文件）");
-                EngineResponse response = await gateway.AnalyzeAsync(workCopy, cancellationToken);
-                ShowAnalysisResult(pane, response, "分析完成：");
-                WriteStartupLog("分析调用返回。");
+                WriteStartupLog("已为 Word 窗口 " + operation.WindowHandle + " 生成当前内容快照，开始分析并创建标注副本。");
+                SetBusy(pane, true, "正在分析并生成标注副本…（读取当前 Word 内容，原文不变）");
+                EngineResponse response = await gateway.AnnotateAsync(workCopy, annotatedPath, cancellationToken);
+                if (response == null || !response.Ok || response.Result == null || response.Annotation == null
+                    || !PathsEqual(response.Annotation.OutputPath, annotatedPath)
+                    || !File.Exists(annotatedPath))
+                {
+                    string detail = response != null && response.Ok && response.Annotation != null
+                        && !PathsEqual(response.Annotation.OutputPath, annotatedPath)
+                        ? "标注引擎返回了与请求不一致的输出路径，已停止打开该文件。"
+                        : EngineGateway.DescribeError(response != null ? response.Error : null);
+                    ShowFailure(pane, detail);
+                    return;
+                }
+
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    TryDelete(annotatedPath);
+                    annotatedPath = null;
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                string openError;
+                Word.Document annotatedDocument = OpenAnnotatedCopy(annotatedPath, out openError);
+                if (annotatedDocument == null)
+                {
+                    ShowFailure(pane, "批注副本已生成，但 Word 未能打开它：" + openError
+                        + Environment.NewLine + "文件位置：" + annotatedPath);
+                    return;
+                }
+
+                DiagnosticsPane annotatedPane = GetPaneForWindow(annotatedDocument.ActiveWindow);
+                ShowAnalysis(annotatedPane, response.Result);
+                SetStatus(annotatedPane, "分析完成：已生成并打开标注副本，共 "
+                    + response.Result.Diagnostics.Count + " 条问题；原文保持不变。\n" + annotatedPath);
+                SetStatus(pane, "分析完成：已在独立窗口打开标注副本，原文保持不变。\n" + annotatedPath);
+                WriteStartupLog("已打开标注副本，批注数 " + response.Annotation.CommentCount + "，窗口 "
+                    + SafeWindowHandle(annotatedDocument.ActiveWindow) + "。");
             }
             catch (Exception exception)
             {
@@ -214,7 +260,7 @@ namespace ThesisAddIn.VSTO
                 return;
             }
 
-            string status = NavigateTo(diagnostic);
+            string status = NavigateTo(_pane, diagnostic);
             if (!string.IsNullOrEmpty(status))
             {
                 _pane.SetStatus(status);
@@ -339,6 +385,36 @@ namespace ThesisAddIn.VSTO
             }
         }
 
+        private DiagnosticsPane GetPaneForWindow(Word.Window window)
+        {
+            EnsureTaskPaneForWindow(window);
+            if (window == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                int windowHandle = window.Hwnd;
+                for (int i = 0; i < CustomTaskPanes.Count; i++)
+                {
+                    CustomTaskPane taskPane = CustomTaskPanes[i];
+                    Word.Window paneWindow = taskPane.Window as Word.Window;
+                    if (paneWindow != null && paneWindow.Hwnd == windowHandle)
+                    {
+                        taskPane.Visible = true;
+                        return taskPane.Control as DiagnosticsPane;
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("无法取得标注副本的侧边栏：" + exception.Message);
+            }
+
+            return null;
+        }
+
         private DiagnosticsPane CreateDiagnosticsPane()
         {
             var pane = new DiagnosticsPane();
@@ -377,6 +453,9 @@ namespace ThesisAddIn.VSTO
         private async Task RunRepair(DiagnosticsPane pane, EngineDiagnostic diagnostic, string scopeLabel)
         {
             string workCopy = null;
+            string applyOutput = null;
+            string finalOutput = null;
+            bool keepApplyOutput = false;
             try
             {
                 WriteStartupLog("收到修复请求：" + scopeLabel + "。");
@@ -388,14 +467,15 @@ namespace ThesisAddIn.VSTO
                 EngineGateway gateway = _gateway;
                 CancellationToken cancellationToken = GetOperationCancellationToken();
 
+                DocumentOperationContext operation;
                 string failure;
-                workCopy = CreateWorkingCopy(out failure);
-                if (workCopy == null)
+                if (!TryCreateWorkingCopy(pane, out operation, out failure))
                 {
                     WriteStartupLog("修复中止：临时副本失败 - " + failure);
                     ShowFailure(pane, failure);
                     return;
                 }
+                workCopy = operation.SnapshotPath;
 
                 SetBusy(pane, true, "正在生成修复计划…");
                 EngineResponse planResponse = await gateway.PlanAsync(workCopy, diagnostic, cancellationToken);
@@ -413,6 +493,12 @@ namespace ThesisAddIn.VSTO
                 }
 
                 WriteStartupLog("修复计划已生成：待修改 " + plan.Patches.Count + " 处，保留 " + plan.Deferred.Count + " 处。");
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
                 DialogResult previewResult = pane.InvokeOnUiThread(() =>
                 {
                     using (var preview = new FixPreviewDialog(plan, scopeLabel))
@@ -430,22 +516,43 @@ namespace ThesisAddIn.VSTO
 
                 WriteStartupLog("用户确认预览。");
 
-                string outputPath = pane.InvokeOnUiThread(() => AskOutputPath());
-                if (string.IsNullOrEmpty(outputPath))
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                finalOutput = pane.InvokeOnUiThread(() => AskOutputPath());
+                if (string.IsNullOrEmpty(finalOutput))
                 {
                     WriteStartupLog("用户未选择输出文件。");
                     SetStatus(pane, "未选择输出文件，已取消修复。");
                     return;
                 }
 
+                if (File.Exists(finalOutput))
+                {
+                    SetStatus(pane, "为避免覆盖已有文件，请重新选择一个尚不存在的输出文件名。");
+                    finalOutput = null;
+                    return;
+                }
+
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                applyOutput = CreateTemporaryDocxPath("repair");
+
                 /*
                  * The dialogs above are synchronous UI-thread calls. After they return,
                  * the engine can continue on a worker thread; DiagnosticsPane marshals
                  * subsequent status and result updates back to the same UI thread.
                  */
-                WriteStartupLog("开始写入：" + outputPath);
-                SetStatus(pane, "正在写入新文件…（原文件保持不变）");
-                EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, outputPath, diagnostic, cancellationToken);
+                WriteStartupLog("开始生成修复中间副本。");
+                SetStatus(pane, "正在写入修复副本…（原文保持不变）");
+                EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, applyOutput, diagnostic, cancellationToken);
                 if (applyResponse == null || !applyResponse.Ok || applyResponse.Apply == null)
                 {
                     string applyError = EngineGateway.DescribeError(applyResponse != null ? applyResponse.Error : null);
@@ -463,38 +570,66 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                if (string.IsNullOrWhiteSpace(applied.OutputPath) || !File.Exists(applied.OutputPath))
+                if (!PathsEqual(applied.OutputPath, applyOutput) || !File.Exists(applyOutput))
                 {
-                    const string missingOutput = "修复引擎未生成可复查的输出文件；原始文档保持不变。";
-                    WriteStartupLog(missingOutput);
-                    ShowFailure(pane, missingOutput);
+                    const string invalidOutput = "修复引擎返回的输出路径与本次请求不一致，或未生成修复文件；原始文档保持不变。";
+                    WriteStartupLog(invalidOutput);
+                    ShowFailure(pane, invalidOutput);
                     return;
                 }
 
                 string applySummary = ReportApplyResult(applied);
                 WriteStartupLog(applySummary);
 
-                // 输出文件是实际修复结果；原文仍保持打开且未修改。复查输出文件，
-                // 同时保留侧边栏与当前打开的原文对应，避免把输出问题定位到原文。
-                EngineResponse outputCheck = await gateway.AnalyzeAsync(applied.OutputPath, cancellationToken);
-                if (outputCheck != null && outputCheck.Ok && outputCheck.Result != null)
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
                 {
-                    EngineResponse sourceCheck = await gateway.AnalyzeAsync(workCopy, cancellationToken);
-                    if (sourceCheck != null && sourceCheck.Ok && sourceCheck.Result != null)
-                    {
-                        ShowAnalysis(pane, sourceCheck.Result);
-                    }
+                    ShowFailure(pane, failure);
+                    return;
+                }
 
-                    SetStatus(pane, applySummary + Environment.NewLine
-                        + "修复结果复查：输出文件剩余 " + outputCheck.Result.Diagnostics.Count + " 条问题。"
-                        + Environment.NewLine + "当前列表仍对应未修改的原始文档；修复结果已另存到上方路径。");
-                }
-                else
+                SetStatus(pane, "正在重新分析修复结果并刷新工具批注…");
+                EngineResponse refreshed = await gateway.AnnotateAsync(applied.OutputPath, finalOutput, cancellationToken);
+                if (refreshed == null || !refreshed.Ok || refreshed.Result == null || refreshed.Annotation == null
+                    || !PathsEqual(refreshed.Annotation.OutputPath, finalOutput)
+                    || !File.Exists(finalOutput))
                 {
-                    SetStatus(pane, applySummary + Environment.NewLine
-                        + "输出文件已生成，但复查未完成："
-                        + EngineGateway.DescribeError(outputCheck != null ? outputCheck.Error : null));
+                    keepApplyOutput = File.Exists(applyOutput);
+                    string refreshError = EngineGateway.DescribeError(refreshed != null ? refreshed.Error : null);
+                    if (refreshed != null && refreshed.Ok && refreshed.Annotation != null
+                        && !PathsEqual(refreshed.Annotation.OutputPath, finalOutput))
+                    {
+                        refreshError = "标注引擎返回了与请求不一致的输出路径。";
+                    }
+                    ShowFailure(pane, applySummary + Environment.NewLine + "修复已写入中间副本，但刷新批注失败："
+                        + refreshError + (keepApplyOutput ? Environment.NewLine + "可恢复的修复文件：" + applyOutput : string.Empty));
+                    return;
                 }
+
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    TryDelete(finalOutput);
+                    finalOutput = null;
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                string openError;
+                Word.Document resultDocument = OpenAnnotatedCopy(finalOutput, out openError);
+                if (resultDocument == null)
+                {
+                    ShowFailure(pane, applySummary + Environment.NewLine + "修复结果已生成，但 Word 未能打开它："
+                        + openError + Environment.NewLine + "文件位置：" + finalOutput);
+                    return;
+                }
+
+                DiagnosticsPane resultPane = GetPaneForWindow(resultDocument.ActiveWindow);
+                ShowAnalysis(resultPane, refreshed.Result);
+                SetStatus(resultPane, applySummary + Environment.NewLine
+                    + "修复结果已重新分析，剩余 " + refreshed.Result.Diagnostics.Count + " 条问题；批注已刷新。\n"
+                    + "原文保持不变。结果文件：" + finalOutput);
+                SetStatus(pane, "修复完成：已在独立窗口打开并复查结果副本，当前文档保持不变。\n" + finalOutput);
+                WriteStartupLog("已打开修复并刷新批注的结果副本；剩余问题 "
+                    + refreshed.Result.Diagnostics.Count + " 条。");
             }
             catch (Exception exception)
             {
@@ -504,6 +639,10 @@ namespace ThesisAddIn.VSTO
             {
                 SetBusy(pane, false, null);
                 TryDelete(workCopy);
+                if (!keepApplyOutput)
+                {
+                    TryDelete(applyOutput);
+                }
             }
         }
 
@@ -535,7 +674,7 @@ namespace ThesisAddIn.VSTO
             }
             else
             {
-                message.Append("。输出文件：").Append(result.OutputPath);
+                message.Append("。修复副本已生成。");
             }
             foreach (EnginePatchFailure failure in result.Failures)
             {
@@ -546,20 +685,8 @@ namespace ThesisAddIn.VSTO
             return message.ToString();
         }
 
-        private static void ShowAnalysisResult(DiagnosticsPane pane, EngineResponse response, string prefix)
-        {
-            if (response != null && response.Ok && response.Result != null)
-            {
-                ShowAnalysis(pane, response.Result);
-                SetStatus(pane, prefix + "当前剩余 " + response.Result.Diagnostics.Count + " 条问题（含未自动修复项）。");
-                return;
-            }
-
-            ShowFailure(pane, EngineGateway.DescribeError(response != null ? response.Error : null));
-        }
-
         /// <summary>把一条诊断定位到原文：选中对应段落（选中即为可见高亮，不修改文档内容）。</summary>
-        private string NavigateTo(EngineDiagnostic diagnostic)
+        private string NavigateTo(DiagnosticsPane pane, EngineDiagnostic diagnostic)
         {
             DocumentLocation location;
             string parseError;
@@ -568,7 +695,13 @@ namespace ThesisAddIn.VSTO
                 return parseError;
             }
 
-            Word.Document document = TryGetActiveDocument();
+            Word.Document document;
+            string contextError;
+            if (!TryGetDocumentForPane(pane, out document, out _, out contextError))
+            {
+                return contextError;
+            }
+
             Word.Range range;
             string rangeError;
             if (!DocumentLocator.TryGetParagraphRange(document, location, out range, out rangeError))
@@ -798,67 +931,257 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 生成供引擎读取的临时副本。
-        ///
-        /// 优先使用 Word 自己的 SaveCopyAs：它包含尚未保存的修改。部分环境会拒绝该命令
-        /// （本机实测：Office 未激活时返回 0x800A1704），此时退回文件系统复制，检查的
-        /// 是磁盘上已保存的内容——这一点会如实反映在面板状态文字里。
+        /// 为触发操作的窗格所绑定的 Word 窗口生成当前内存内容的快照。
+        /// 从 Word 当前内存内容生成 Flat OPC，再组装为独立 DOCX；绝不退回磁盘旧版本。
         /// </summary>
-        private string CreateWorkingCopy(out string error)
+        private bool TryCreateWorkingCopy(DiagnosticsPane pane, out DocumentOperationContext operation, out string error)
+        {
+            operation = null;
+            error = null;
+            Word.Document document;
+            Word.Window window;
+            if (!TryGetDocumentForPane(pane, out document, out window, out error))
+            {
+                return false;
+            }
+
+            try
+            {
+                int saveFormat = (int)document.SaveFormat;
+                if (saveFormat != 12 && saveFormat != 16 && saveFormat != 24)
+                {
+                    error = "当前仅支持 Word .docx 文档。请先另存为 .docx 后再分析或修复。";
+                    return false;
+                }
+
+                string path = CreateTemporaryDocxPath("snapshot");
+                try
+                {
+                    SaveDocumentCopy(document, path);
+                    if (!File.Exists(path) || new FileInfo(path).Length == 0)
+                    {
+                        throw new IOException("Word 没有生成有效的当前内容副本。");
+                    }
+
+                    string fingerprint = DocxSnapshotFingerprint.Compute(path);
+                    operation = new DocumentOperationContext
+                    {
+                        Document = document,
+                        Window = window,
+                        WindowHandle = window.Hwnd,
+                        DocumentName = document.Name,
+                        DocumentFullName = document.FullName,
+                        SnapshotPath = path,
+                        Fingerprint = fingerprint
+                    };
+                    return true;
+                }
+                catch
+                {
+                    TryDelete(path);
+                    throw;
+                }
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("创建 Word 内存快照失败：" + exception);
+                error = "无法可靠读取当前 Word 内容，已停止本次操作。请确认文档可另存为 .docx 后重试。详情：" + exception.Message;
+                return false;
+            }
+        }
+
+        private bool TryGetDocumentForPane(
+            DiagnosticsPane pane,
+            out Word.Document document,
+            out Word.Window window,
+            out string error)
+        {
+            document = null;
+            window = null;
+            error = null;
+            if (pane == null || pane.IsDisposed)
+            {
+                error = "当前检查面板已关闭，请重新打开后重试。";
+                return false;
+            }
+
+            for (int i = 0; i < CustomTaskPanes.Count; i++)
+            {
+                try
+                {
+                    CustomTaskPane taskPane = CustomTaskPanes[i];
+                    if (!object.ReferenceEquals(taskPane.Control, pane))
+                    {
+                        continue;
+                    }
+
+                    window = taskPane.Window as Word.Window;
+                    if (window == null)
+                    {
+                        break;
+                    }
+
+                    document = window.Document;
+                    if (document != null)
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    error = "无法读取此侧边栏对应的 Word 文档：" + exception.Message;
+                    return false;
+                }
+            }
+
+            error = "无法确认此侧边栏对应的 Word 窗口。请先激活目标文档窗口后重试。";
+            return false;
+        }
+
+        private bool TryEnsureSnapshotUnchanged(DocumentOperationContext operation, out string error)
         {
             error = null;
-            Word.Document document = TryGetActiveDocument();
-            if (document == null)
+            if (operation == null || operation.Document == null || operation.Window == null)
             {
-                error = "当前没有打开的文档，请先打开一个 .docx 文件。";
-                return null;
+                error = "无法确认原文窗口仍然打开，请重新分析后再操作。";
+                return false;
             }
 
+            string currentCopy = null;
+            try
+            {
+                if (operation.Window.Hwnd != operation.WindowHandle)
+                {
+                    error = "原文窗口已关闭或切换，请重新分析后再操作。";
+                    return false;
+                }
+
+                Word.Document windowDocument = operation.Window.Document;
+                if (!string.Equals(windowDocument.Name, operation.DocumentName, StringComparison.Ordinal)
+                    || !string.Equals(windowDocument.FullName, operation.DocumentFullName, StringComparison.OrdinalIgnoreCase))
+                {
+                    error = "原文窗口中的文档已更换，请重新分析后再操作。";
+                    return false;
+                }
+
+                currentCopy = CreateTemporaryDocxPath("verify");
+                SaveDocumentCopy(operation.Document, currentCopy);
+                string currentFingerprint = DocxSnapshotFingerprint.Compute(currentCopy);
+                if (!string.Equals(currentFingerprint, operation.Fingerprint, StringComparison.Ordinal))
+                {
+                    WriteStartupLog("快照差异部件：" + DocxSnapshotFingerprint.DescribeDifferences(operation.SnapshotPath, currentCopy));
+                    error = "分析期间原文内容发生了变化。为避免把旧结果用于新内容，请重新分析；本次修复没有写入原文。";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = "无法确认原文仍与分析快照一致，已停止以保护文档。请重新打开文档并分析。详情：" + exception.Message;
+                return false;
+            }
+            finally
+            {
+                TryDelete(currentCopy);
+            }
+        }
+
+        private static string CreateTemporaryDocxPath(string purpose)
+        {
             string directory = Path.Combine(Path.GetTempPath(), "NkuThesisTool");
-            string path = Path.Combine(directory, "work-" + Guid.NewGuid().ToString("N") + ".docx");
+            Directory.CreateDirectory(directory);
+            return Path.Combine(directory, purpose + "-" + Guid.NewGuid().ToString("N") + ".docx");
+        }
+
+        private static void SaveDocumentCopy(Word.Document document, string path)
+        {
+            string flatOpc = document.WordOpenXML;
+            FlatOpcPackageWriter.Write(flatOpc, path);
+        }
+
+        private static string CreateAnnotatedOutputPath(DocumentOperationContext operation)
+        {
+            string directory = null;
+            string fileName = "论文";
             try
             {
-                Directory.CreateDirectory(directory);
+                directory = operation.Document.Path;
+                fileName = Path.GetFileNameWithoutExtension(operation.Document.Name);
+            }
+            catch (Exception)
+            {
+                // 未保存的新文档没有稳定目录，下面会使用用户文档目录。
+            }
+
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                directory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = "论文";
+            }
+
+            return Path.Combine(directory, fileName + "-格式标注-"
+                + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".docx");
+        }
+
+        private Word.Document OpenAnnotatedCopy(string path, out string error)
+        {
+            error = null;
+            try
+            {
+                object fileName = path;
+                object confirmConversions = false;
+                object readOnly = false;
+                object addToRecentFiles = false;
+                object passwordDocument = Type.Missing;
+                object passwordTemplate = Type.Missing;
+                object revert = false;
+                object writePasswordDocument = Type.Missing;
+                object writePasswordTemplate = Type.Missing;
+                object format = Type.Missing;
+                object encoding = Type.Missing;
+                object visible = true;
+                object openAndRepair = false;
+                object documentDirection = Type.Missing;
+                object noEncodingDialog = true;
+                object xmlTransform = Type.Missing;
+                return Application.Documents.Open(
+                    ref fileName, ref confirmConversions, ref readOnly, ref addToRecentFiles,
+                    ref passwordDocument, ref passwordTemplate, ref revert, ref writePasswordDocument,
+                    ref writePasswordTemplate, ref format, ref encoding, ref visible, ref openAndRepair,
+                    ref documentDirection, ref noEncodingDialog, ref xmlTransform);
             }
             catch (Exception exception)
             {
-                error = "无法创建临时目录：" + exception.Message;
+                error = exception.Message;
+                WriteStartupLog("打开生成的 Word 副本失败：" + exception);
                 return null;
             }
+        }
 
-            try
-            {
-                document.SaveCopyAs(path);
-                if (File.Exists(path))
-                {
-                    _workingCopySource = "当前内容";
-                    return path;
-                }
+        private static int SafeWindowHandle(Word.Window window)
+        {
+            try { return window != null ? window.Hwnd : -1; }
+            catch (Exception) { return -1; }
+        }
 
-                WriteStartupLog("SaveCopyAs 未生成文件，改用文件复制。");
-            }
-            catch (Exception exception)
+        private static bool PathsEqual(string first, string second)
+        {
+            if (string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second))
             {
-                WriteStartupLog("SaveCopyAs 不可用（" + exception.Message + "），改用文件复制。");
+                return false;
             }
 
             try
             {
-                string source = document.FullName;
-                if (string.IsNullOrEmpty(source) || !File.Exists(source))
-                {
-                    error = "当前文档还没有保存到磁盘，无法生成用于检查的副本。请先保存文档。";
-                    return null;
-                }
-
-                File.Copy(source, path, true);
-                _workingCopySource = "已保存的文件内容";
-                return path;
+                return string.Equals(Path.GetFullPath(first), Path.GetFullPath(second), StringComparison.OrdinalIgnoreCase);
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                error = "无法生成用于检查的临时副本：" + exception.Message;
-                return null;
+                return false;
             }
         }
 
@@ -886,8 +1209,19 @@ namespace ThesisAddIn.VSTO
                 // 带时间戳的默认文件名：修复引擎拒绝写已存在的文件，
                 // 固定名字会让第二次修复被安全规则挡下。
                 dialog.FileName = "论文格式检查-已修复-" + DateTime.Now.ToString("MMdd-HHmmss") + ".docx";
-                dialog.OverwritePrompt = true;
-                return dialog.ShowDialog() == DialogResult.OK ? dialog.FileName : null;
+                dialog.OverwritePrompt = false;
+                while (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    if (!File.Exists(dialog.FileName))
+                    {
+                        return dialog.FileName;
+                    }
+
+                    MessageBox.Show("为保护已有文件，请选择一个尚不存在的文件名。",
+                        TaskPaneTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
+                return null;
             }
         }
 
@@ -932,18 +1266,6 @@ namespace ThesisAddIn.VSTO
             if (IsPaneAvailable(pane)) pane.SetStatus(message);
         }
 
-        private Word.Document TryGetActiveDocument()
-        {
-            try
-            {
-                return Application.ActiveDocument;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-
         /// <summary>
         /// 把启动结果写到 %LOCALAPPDATA%\NkuThesisTool\addin.log。
         /// 侧边栏或引擎加载失败时，用户可以直接把这个文件发给维护者。
@@ -967,5 +1289,6 @@ namespace ThesisAddIn.VSTO
         }
     }
 }
+
 
 

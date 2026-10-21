@@ -149,7 +149,10 @@ public static class WordPatchApplier
             var (paragraphIndex, runIndex) = ParseLocation(patch);
             if (paragraphIndex >= paragraphs.Length)
                 throw new PatchFailureException(patch, $"Patch paragraph does not exist: {patch.Location}");
-            var runs = paragraphs[paragraphIndex].Elements(W + "r").ToArray();
+            // Locations count text-bearing runs, just as the reader and annotation
+            // writer do. Comment-reference runs must never become patch targets.
+            var runs = paragraphs[paragraphIndex].Elements(W + "r")
+                .Where(run => run.Descendants(W + "t").Any()).ToArray();
             if (runIndex >= runs.Length)
                 throw new PatchFailureException(patch, $"Patch run does not exist: {patch.Location}");
             var effective = snapshot?.Paragraphs.FirstOrDefault(p => p.ParagraphIndex == paragraphIndex)?.Runs

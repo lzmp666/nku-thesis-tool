@@ -16,4 +16,10 @@
     <ProjectReference Include="../../src/ThesisAddIn.VSTO/Protocol/ThesisAddIn.Protocol.csproj" />
     <ProjectReference Include="../../src/ThesisAddIn.VSTO/ProtocolHost/ThesisEngine.ProtocolHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/DocxSnapshotFingerprint.cs" Link="Engine/DocxSnapshotFingerprint.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/EngineHostPathResolver.cs" Link="Engine/EngineHostPathResolver.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/FlatOpcPackageWriter.cs" Link="Engine/FlatOpcPackageWriter.cs" />
+  </ItemGroup>
 </Project>
+

@@ -60,6 +60,64 @@ public sealed class PatchEngineTests
     }
 
     [Fact]
+    public void RepairsEveryTextRunAfterAnnotationsInsertReferenceRuns()
+    {
+        var input = CreatePackage("黑体", "Arial", "21", "第一段");
+        var annotated = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.annotated.docx");
+        var output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.docx");
+        try
+        {
+            using (var archive = ZipFile.Open(input, ZipArchiveMode.Update))
+            {
+                var document = XDocument.Parse(ReadEntry(archive, "word/document.xml"));
+                var paragraph = document.Descendants(W + "p").Single();
+                var first = paragraph.Element(W + "r")!;
+                foreach (var text in new[] { "第二段", "第三段" })
+                {
+                    var copy = new XElement(first);
+                    copy.Element(W + "t")!.Value = text;
+                    paragraph.Add(copy);
+                }
+                archive.GetEntry("word/document.xml")!.Delete();
+                Add(archive, "word/document.xml", document.ToString());
+            }
+            var analyzer = new FontSizeAnalyzer();
+            var analysis = analyzer.Analyze(new WordFormattingReader().Read(input), DemoRuleSet.NkuDraftSample);
+            WordAnnotationWriter.WriteAnnotatedCopy(input, annotated, analysis.Diagnostics);
+            var originalBytes = File.ReadAllBytes(annotated);
+            var plan = PatchEngine.PlanPatches(analyzer.Analyze(new WordFormattingReader().Read(annotated), DemoRuleSet.NkuDraftSample));
+            Assert.Equal(6, plan.Patches.Count);
+
+            var result = PatchEngine.ApplyPatches(annotated, plan, output);
+
+            Assert.True(result.Succeeded);
+            Assert.Equal(originalBytes, File.ReadAllBytes(annotated));
+            var after = new WordFormattingReader().Read(output);
+            Assert.Equal(new[] { "第一段", "第二段", "第三段" }, after.Paragraphs.Single().Runs.Select(run => run.Text));
+            Assert.All(after.Paragraphs.Single().Runs, run =>
+            {
+                Assert.Equal("宋体", run.EastAsiaFont);
+                Assert.Equal(12, run.FontSizePt);
+                Assert.Equal("Arial", run.AsciiFont);
+            });
+            Assert.Empty(PatchEngine.PlanPatches(analyzer.Analyze(after, DemoRuleSet.NkuDraftSample)).Patches);
+            using var beforeZip = ZipFile.OpenRead(annotated);
+            using var afterZip = ZipFile.OpenRead(output);
+            Assert.Equal(ReadEntry(beforeZip, "word/comments.xml"), ReadEntry(afterZip, "word/comments.xml"));
+            var beforeDoc = XDocument.Parse(ReadEntry(beforeZip, "word/document.xml"));
+            var afterDoc = XDocument.Parse(ReadEntry(afterZip, "word/document.xml"));
+            Assert.Equal(beforeDoc.Descendants(W + "r").Where(run => !run.Descendants(W + "t").Any()).Select(run => run.ToString()),
+                afterDoc.Descendants(W + "r").Where(run => !run.Descendants(W + "t").Any()).Select(run => run.ToString()));
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(annotated);
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
     public void InsertsInheritedFontAndSizeInSchemaOrder()
     {
         var input = CreateInheritedPackage();
