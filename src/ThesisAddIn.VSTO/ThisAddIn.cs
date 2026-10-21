@@ -686,6 +686,17 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
+                // RangeFromPoint can return a nearby range even over a task pane.
+                // Do not let moving to navigation/repair controls replace the target.
+                int rangeLeft, rangeTop, rangeWidth, rangeHeight;
+                window.GetPoint(out rangeLeft, out rangeTop, out rangeWidth, out rangeHeight, range);
+                if (cursor.X < rangeLeft || cursor.X >= rangeLeft + Math.Max(1, rangeWidth)
+                    || cursor.Y < rangeTop || cursor.Y >= rangeTop + Math.Max(1, rangeHeight))
+                {
+                    ResetHoveredRange();
+                    return;
+                }
+
                 string ruleId;
                 string expected;
                 string actual;
