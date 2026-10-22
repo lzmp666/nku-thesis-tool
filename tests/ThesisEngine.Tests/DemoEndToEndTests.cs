@@ -75,7 +75,7 @@ public sealed class DemoEndToEndTests
         Assert.Contains("demo/east-asian-font", result.Output);
         Assert.Contains("demo/western-font", result.Output);
         Assert.Contains("demo/font-size", result.Output);
-        Assert.Contains("表格单元格", result.Output);
+        Assert.Contains("tables (cell formatting rules are not configured)", result.Output);
         Assert.Contains("figure/table caption", result.Output);
         Assert.Contains("images", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));

@@ -111,7 +111,7 @@ public sealed class WordFormattingReaderTests
             Assert.Null(runs[1].FontSizePt);
             Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[1].Scope);
             Assert.Contains("表格单元格", snapshot.Paragraphs[1].ScopeReason);
-            Assert.Contains("tables", snapshot.UnsupportedScopes);
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
             Assert.Contains("headers/footers", snapshot.UnsupportedScopes);
             Assert.Contains("footnotes", snapshot.UnsupportedScopes);
             Assert.Contains("endnotes", snapshot.UnsupportedScopes);

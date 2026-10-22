@@ -33,7 +33,7 @@ public sealed class PatchEngineTests
     [Fact]
     public void AppliesBatchWithoutChangingTextOrInputAndIsIdempotent()
     {
-        var input = CreatePackage("黑体", "Arial", "22", "正文内容");
+        var input = CreatePackage("黑体", "Arial", "22", "正文内容 Latin");
         var output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.docx");
         try
         {
@@ -51,7 +51,7 @@ public sealed class PatchEngineTests
             Assert.Equal(12, run.FontSizePt);
             Assert.Equal("Times New Roman", run.AsciiSlotFont);
             Assert.Equal("Times New Roman", run.HAnsiFont);
-            Assert.Equal("正文内容", run.Text);
+            Assert.Equal("正文内容 Latin", run.Text);
             var second = new FontSizeAnalyzer().Analyze(after, DemoRuleSet.NkuDraftSample);
             Assert.Empty(PatchEngine.PlanPatches(second).Patches);
             Assert.Empty(second.Diagnostics);
@@ -66,7 +66,7 @@ public sealed class PatchEngineTests
     [Fact]
     public void RepairsEveryTextRunAfterAnnotationsInsertReferenceRuns()
     {
-        var input = CreatePackage("黑体", "Arial", "21", "第一段");
+        var input = CreatePackage("黑体", "Arial", "21", "第一段 Latin");
         var annotated = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.annotated.docx");
         var output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.docx");
         try
@@ -76,7 +76,7 @@ public sealed class PatchEngineTests
                 var document = XDocument.Parse(ReadEntry(archive, "word/document.xml"));
                 var paragraph = document.Descendants(W + "p").ElementAt(1);
                 var first = paragraph.Element(W + "r")!;
-                foreach (var text in new[] { "第二段", "第三段" })
+                foreach (var text in new[] { "第二段 Latin", "第三段 Latin" })
                 {
                     var copy = new XElement(first);
                     copy.Element(W + "t")!.Value = text;
@@ -97,7 +97,7 @@ public sealed class PatchEngineTests
             Assert.True(result.Succeeded);
             Assert.Equal(originalBytes, File.ReadAllBytes(annotated));
             var after = new WordFormattingReader().Read(output);
-            Assert.Equal(new[] { "第一段", "第二段", "第三段" }, after.Paragraphs[1].Runs.Select(run => run.Text));
+            Assert.Equal(new[] { "第一段 Latin", "第二段 Latin", "第三段 Latin" }, after.Paragraphs[1].Runs.Select(run => run.Text));
             Assert.All(after.Paragraphs[1].Runs, run =>
             {
                 Assert.Equal("宋体", run.EastAsiaFont);
