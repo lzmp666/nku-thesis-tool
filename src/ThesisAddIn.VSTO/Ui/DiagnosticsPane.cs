@@ -1,18 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
+using ThesisAddIn.VSTO.Engine;
 
 namespace ThesisAddIn.VSTO.Ui
 {
     /// <summary>只显示可检索的问题列表；分析、定位和修复命令位于 Word 功能区。</summary>
     public sealed class DiagnosticsPane : UserControl
     {
-        private const string SearchPlaceholder = "搜索规则、期望值或实际值";
+        private const string SearchPlaceholder = "搜索问题（例：类型:西文字体 期望:Times New Roman）";
         private readonly TextBox _searchBox = new TextBox();
         private readonly ListBox _issueList = new ListBox();
+        private readonly Label _summary = new Label();
         private readonly Label _status = new Label();
         private readonly ToolTip _toolTip = new ToolTip();
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
@@ -29,14 +32,24 @@ namespace ThesisAddIn.VSTO.Ui
         public DiagnosticsPane()
         {
             Dock = DockStyle.Fill;
+            BackColor = Color.FromArgb(246, 248, 251);
+            ForeColor = Color.FromArgb(35, 43, 56);
             Font = new Font("Microsoft YaHei UI", 9F);
+
+            _summary.Dock = DockStyle.Fill;
+            _summary.Padding = new Padding(4, 7, 4, 2);
+            _summary.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+            _summary.Text = "格式问题";
+            _summary.AccessibleName = "问题数量";
 
             _searchBox.Name = "IssueSearchBox";
             _searchBox.Dock = DockStyle.Fill;
+            _searchBox.BorderStyle = BorderStyle.None;
+            _searchBox.Font = new Font("Microsoft YaHei UI", 9F);
             _searchBox.Margin = new Padding(0);
             _searchBox.AccessibleName = "搜索问题";
-            _searchBox.AccessibleDescription = "按规则、期望格式或实际格式筛选问题。";
-            _toolTip.SetToolTip(_searchBox, "可搜索规则名称、期望格式或实际格式");
+            _searchBox.AccessibleDescription = "按格式类别、期望值、实际值、位置、状态或来源筛选问题。";
+            _toolTip.SetToolTip(_searchBox, "支持普通关键词，以及 类型:、期望:、实际:、位置:、状态:、来源: 字段搜索");
             SetPlaceholder();
             _searchBox.GotFocus += OnSearchGotFocus;
             _searchBox.LostFocus += OnSearchLostFocus;
@@ -45,9 +58,14 @@ namespace ThesisAddIn.VSTO.Ui
             _issueList.Name = "IssueSearchResults";
             _issueList.Dock = DockStyle.Fill;
             _issueList.IntegralHeight = false;
-            _issueList.HorizontalScrollbar = true;
+            _issueList.HorizontalScrollbar = false;
+            _issueList.BorderStyle = BorderStyle.None;
+            _issueList.BackColor = BackColor;
+            _issueList.DrawMode = DrawMode.OwnerDrawVariable;
             _issueList.AccessibleName = "格式问题列表";
             _issueList.SelectedIndexChanged += OnIssueSelected;
+            _issueList.DrawItem += OnDrawIssueItem;
+            _issueList.MeasureItem += OnMeasureIssueItem;
 
             _status.Dock = DockStyle.Fill;
             _status.Padding = new Padding(4, 8, 4, 2);
@@ -59,16 +77,54 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
-                Padding = new Padding(8)
+                RowCount = 4,
+                Padding = new Padding(9, 5, 9, 8)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
-            layout.Controls.Add(_searchBox, 0, 0);
-            layout.Controls.Add(_issueList, 0, 1);
-            layout.Controls.Add(_status, 0, 2);
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+
+            var searchSurface = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.White,
+                Padding = new Padding(9, 7, 8, 5),
+                Margin = new Padding(0, 0, 0, 5)
+            };
+            searchSurface.Paint += (sender, args) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(214, 222, 233)))
+                    args.Graphics.DrawRectangle(pen, 0, 0, searchSurface.Width - 1, searchSurface.Height - 1);
+            };
+            var searchLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            searchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22F));
+            searchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            var searchIcon = new Label
+            {
+                Dock = DockStyle.Fill,
+                Text = "⌕",
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.FromArgb(105, 119, 140),
+                Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Regular),
+                Margin = new Padding(0)
+            };
+            searchLayout.Controls.Add(searchIcon, 0, 0);
+            searchLayout.Controls.Add(_searchBox, 1, 0);
+            searchSurface.Controls.Add(searchLayout);
+
+            layout.Controls.Add(_summary, 0, 0);
+            layout.Controls.Add(searchSurface, 0, 1);
+            layout.Controls.Add(_issueList, 0, 2);
+            layout.Controls.Add(_status, 0, 3);
             Controls.Add(layout);
         }
 
@@ -91,6 +147,7 @@ namespace ThesisAddIn.VSTO.Ui
         public IList<EngineDiagnostic> Diagnostics => _diagnostics;
         public bool IsBusy => _isBusy;
         public bool CanFixSelected => !_isBusy && IsFixable(SelectedDiagnostic);
+        public bool CanResolveSelected => !_isBusy && SelectedDiagnostic != null;
         public bool HasFixableDiagnostics => !_isBusy && _diagnostics.Any(IsFixable);
         public bool CanNavigateIssues => !_isBusy && _visibleIndices.Count > 0;
         public bool CanNavigateOccurrences => !_isBusy && GetOccurrenceCount(SelectedDiagnostic) > 1;
@@ -126,9 +183,25 @@ namespace ThesisAddIn.VSTO.Ui
             _selectedOccurrenceIndex = 0;
             ClearSearch();
             RebuildIssueList();
-            SetStatusCore(_diagnostics.Count == 0
-                ? "未发现格式问题。结果仅覆盖已检查范围。"
-                : "分析完成：" + _diagnostics.Count + " 个问题。可在 Word 功能区定位或修复。 ");
+            _summary.Text = "格式问题  " + _diagnostics.Count + " 项 · " +
+                _diagnostics.Sum(GetOccurrenceCount) + " 处";
+            string baseStatus = _diagnostics.Count == 0
+                ? "未发现已覆盖范围内的格式问题；未覆盖项不会被判为合规。"
+                : "悬停或点击正文黄色标记，可查看对应建议并定位原文。修复与验证操作位于顶部功能区。";
+            string[] unsupported = result?.UnsupportedScopes?.Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(DescribeUnsupportedScope).Distinct(StringComparer.CurrentCulture).ToArray()
+                ?? Array.Empty<string>();
+            string unsupportedTooltip = null;
+            if (unsupported.Length > 0)
+            {
+                string visible = string.Join("、", unsupported.Take(3));
+                if (unsupported.Length > 3) visible += "等" + unsupported.Length + "类";
+                baseStatus += Environment.NewLine + "未自动检查：" + visible + "（悬停查看范围）";
+                unsupportedTooltip = "未自动检查的范围：" + Environment.NewLine +
+                    string.Join(Environment.NewLine, unsupported.Select(value => "· " + value));
+            }
+            SetStatusCore(baseStatus);
+            if (!string.IsNullOrEmpty(unsupportedTooltip)) _toolTip.SetToolTip(_status, unsupportedTooltip);
             RaiseStateChanged();
         }
 
@@ -140,6 +213,7 @@ namespace ThesisAddIn.VSTO.Ui
                 _selectedIndex = -1;
                 _selectedOccurrenceIndex = 0;
                 RebuildIssueList();
+                _summary.Text = "格式问题";
                 SetStatusCore("分析或修复未完成：" + (string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim()));
                 RaiseStateChanged();
             });
@@ -317,30 +391,220 @@ namespace ThesisAddIn.VSTO.Ui
         private static bool Matches(EngineDiagnostic diagnostic, string query)
         {
             if (string.IsNullOrEmpty(query)) return true;
-            string searchable = string.Join(" ", new[]
+            string type = DescribeRule(diagnostic.RuleId);
+            string location = GetLocations(diagnostic);
+            string status = DescribeFixLevel(diagnostic.FixLevel) + " " + DescribeSeverity(diagnostic.Severity);
+            string source = GetSource(diagnostic);
+            string[] terms = query.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string term in terms)
             {
-                diagnostic.RuleId, GetRuleName(diagnostic.RuleId), diagnostic.Expected, diagnostic.Actual,
-                diagnostic.Message, diagnostic.FixLevel
-            }.Where(value => !string.IsNullOrEmpty(value)));
-            return searchable.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0;
+                int separator = term.IndexOfAny(new[] { ':', '：' });
+                string field = separator < 0 ? string.Empty : term.Substring(0, separator).Trim();
+                string value = separator < 0 ? term : term.Substring(separator + 1).Trim();
+                if (value.Length == 0) return false;
+                string haystack;
+                switch (field)
+                {
+                    case "类型": haystack = type; break;
+                    case "期望": haystack = diagnostic.Expected; break;
+                    case "实际": haystack = GetActualValues(diagnostic); break;
+                    case "位置": haystack = location; break;
+                    case "状态": haystack = status; break;
+                    case "来源": haystack = source; break;
+                    default:
+                        haystack = string.Join(" ", new[] { type, diagnostic.Expected,
+                            GetActualValues(diagnostic), location, status, source, diagnostic.Message });
+                        value = term;
+                        break;
+                }
+                if ((haystack ?? string.Empty).IndexOf(value, StringComparison.CurrentCultureIgnoreCase) < 0)
+                    return false;
+            }
+            return true;
         }
 
         private static string BuildIssueLabel(EngineDiagnostic diagnostic)
         {
             int count = GetOccurrenceCount(diagnostic);
-            return GetRuleName(diagnostic.RuleId) + " → " + (diagnostic.Expected ?? "（未提供）")
-                + (count > 1 ? "（" + count + "处）" : string.Empty);
+            return DescribeRule(diagnostic.RuleId) + "　期望 " + (diagnostic.Expected ?? "（未提供）")
+                + (count > 1 ? "　" + count + "处" : string.Empty);
         }
 
-        private static string GetRuleName(string ruleId)
+        public static string DescribeRule(string ruleId)
         {
             switch (ruleId ?? string.Empty)
             {
                 case "demo/east-asian-font": return "中文字体";
+                case "NKU-REQ-042": return "中文字体";
                 case "demo/western-font": return "西文字体";
+                case "NKU-REQ-043": return "西文字体";
                 case "demo/font-size": return "字号";
-                default: return ruleId ?? "未命名问题";
+                case "NKU-REQ-044": return "字号";
+                default:
+                    if (!string.IsNullOrWhiteSpace(ruleId) && ruleId.IndexOf("caption", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "图表题注";
+                    return "其他格式";
             }
+        }
+
+        private void OnMeasureIssueItem(object sender, MeasureItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= _visibleIndices.Count)
+            {
+                e.ItemHeight = 100;
+                return;
+            }
+            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
+            int width = Math.Max(160, _issueList.ClientSize.Width - 8);
+            using (Graphics graphics = _issueList.CreateGraphics())
+            {
+                float textWidth = Math.Max(120, width - 86);
+                int lines = 0;
+                lines += MeasureWrappedLines(graphics, diagnostic.Expected, Font, textWidth);
+                lines += MeasureWrappedLines(graphics, GetActualValues(diagnostic), Font, textWidth);
+                lines += MeasureWrappedLines(graphics, GetLocations(diagnostic), Font, textWidth);
+                lines += MeasureWrappedLines(graphics, BuildRecommendation(diagnostic), Font, textWidth);
+                lines += MeasureWrappedLines(graphics, GetSource(diagnostic), Font, textWidth);
+                e.ItemHeight = Math.Max(174, 64 + Math.Min(lines, 11) * 17 +
+                    (GetOccurrenceCount(diagnostic) > 1 ? 15 : 0));
+            }
+        }
+
+        private void OnDrawIssueItem(object sender, DrawItemEventArgs e)
+        {
+            e.DrawBackground();
+            if (e.Index < 0 || e.Index >= _visibleIndices.Count) return;
+            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Rectangle card = Rectangle.Inflate(e.Bounds, -3, -3);
+            card.Width = Math.Max(1, card.Width);
+            card.Height = Math.Max(1, card.Height);
+            Color fill = selected ? Color.FromArgb(255, 253, 225) : Color.White;
+            Color border = selected ? Color.FromArgb(37, 112, 226) : Color.FromArgb(218, 225, 234);
+            using (GraphicsPath path = RoundedRectangle(card, 7))
+            using (var brush = new SolidBrush(fill))
+            using (var pen = new Pen(border, selected ? 1.5F : 1F))
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                e.Graphics.FillPath(brush, path);
+                e.Graphics.DrawPath(pen, path);
+            }
+
+            int left = card.Left + 12;
+            int right = card.Right - 12;
+            float y = card.Top + 10;
+            using (var titleFont = new Font(Font, FontStyle.Bold))
+            using (var smallFont = new Font(Font.FontFamily, 8.2F, FontStyle.Regular))
+            using (var bodyFont = new Font(Font.FontFamily, 9F, FontStyle.Regular))
+            using (var mutedBrush = new SolidBrush(Color.FromArgb(98, 111, 131)))
+            using (var textBrush = new SolidBrush(ForeColor))
+            using (var accentBrush = new SolidBrush(Color.FromArgb(39, 101, 191)))
+            {
+                string title = DescribeRule(diagnostic.RuleId);
+                string count = GetOccurrenceCount(diagnostic) > 1 ? "共 " + GetOccurrenceCount(diagnostic) + " 处" : "1 处";
+                e.Graphics.DrawString(title, titleFont, textBrush, left, y);
+                SizeF countSize = e.Graphics.MeasureString(count, smallFont);
+                e.Graphics.DrawString(count, smallFont, mutedBrush, Math.Max(left, right - countSize.Width), y + 2);
+                y += 23;
+
+                DrawCardLine(e.Graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
+                DrawCardLine(e.Graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
+                DrawCardLine(e.Graphics, "位置", GetLocations(diagnostic), left, ref y, right, smallFont, mutedBrush);
+                DrawCardLine(e.Graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
+                DrawCardLine(e.Graphics, "依据", GetSource(diagnostic), left, ref y, right, smallFont, mutedBrush);
+                y += 3;
+            }
+            e.DrawFocusRectangle();
+        }
+
+        private static void DrawCardLine(Graphics graphics, string label, string value, int left,
+            ref float y, int right, Font font, Brush valueBrush)
+        {
+            using (var labelFont = new Font(font.FontFamily, font.Size, FontStyle.Bold))
+            using (var labelBrush = new SolidBrush(Color.FromArgb(88, 101, 120)))
+            {
+                graphics.DrawString(label, labelFont, labelBrush, left, y);
+                int labelWidth = (int)Math.Ceiling(graphics.MeasureString(label + "：", labelFont).Width) + 2;
+                int textWidth = Math.Max(40, right - left - labelWidth);
+                SizeF measured = graphics.MeasureString(value ?? "—", font, textWidth);
+                Rectangle text = new Rectangle(left + labelWidth, (int)y, textWidth,
+                    Math.Max(20, (int)Math.Ceiling(measured.Height) + 2));
+                graphics.DrawString(value ?? "—", font, valueBrush, text);
+                y += Math.Max(19, text.Height);
+            }
+        }
+
+        private static int MeasureWrappedLines(Graphics graphics, string value, Font font, float width)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 1;
+            SizeF size = graphics.MeasureString(value, font, (int)width);
+            return Math.Max(1, (int)Math.Ceiling(size.Height / Math.Max(1F, font.GetHeight(graphics))));
+        }
+
+        private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
+        {
+            int diameter = radius * 2;
+            var path = new GraphicsPath();
+            path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+            path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static string GetActualValues(EngineDiagnostic diagnostic)
+        {
+            if (diagnostic?.Occurrences == null || diagnostic.Occurrences.Count == 0)
+                return diagnostic?.Actual ?? "未知";
+            string[] actuals = diagnostic.Occurrences.Select(item => item?.Actual)
+                .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.CurrentCulture).ToArray();
+            return actuals.Length == 0 ? diagnostic?.Actual ?? "未知" : string.Join("；", actuals);
+        }
+
+        private static string GetLocations(EngineDiagnostic diagnostic)
+        {
+            string[] locations = diagnostic?.Occurrences?.Select(item => item?.Location)
+                .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToArray();
+            if (locations == null || locations.Length == 0) locations = new[] { diagnostic?.Location };
+            return string.Join("、", locations.Select(location =>
+            {
+                DocumentLocation parsed;
+                string error;
+                return DocumentLocator.TryParse(location, out parsed, out error)
+                    ? DocumentLocator.Describe(parsed) : location;
+            }));
+        }
+
+        private static string GetSource(EngineDiagnostic diagnostic)
+        {
+            string message = diagnostic?.Message ?? string.Empty;
+            int separator = message.IndexOf('：');
+            if (separator > 0 && (diagnostic?.RuleId ?? string.Empty).StartsWith("NKU-REQ-", StringComparison.Ordinal))
+                return message.Substring(0, separator);
+            return "演示规则（仅用于验证插件流程，不代表正式标准）";
+        }
+
+        private static string BuildRecommendation(EngineDiagnostic diagnostic)
+        {
+            if (IsFixable(diagnostic))
+                return "将所选格式改为「" + (diagnostic.Expected ?? "") + "」；修复前会先预览。";
+            return "当前值无法安全自动修改，请依据规范核对后手动处理。";
+        }
+
+        private static string DescribeUnsupportedScope(string value)
+        {
+            string scope = value ?? string.Empty;
+            if (scope.IndexOf("tables", StringComparison.OrdinalIgnoreCase) >= 0) return "表格单元格专属格式";
+            if (scope.IndexOf("caption", StringComparison.OrdinalIgnoreCase) >= 0) return "图题/表题格式";
+            if (scope.IndexOf("images", StringComparison.OrdinalIgnoreCase) >= 0) return "图片清晰度与版式";
+            if (scope.IndexOf("equation", StringComparison.OrdinalIgnoreCase) >= 0) return "公式内容及排版例外";
+            if (scope.IndexOf("footnote", StringComparison.OrdinalIgnoreCase) >= 0) return "脚注格式";
+            if (scope.IndexOf("endnote", StringComparison.OrdinalIgnoreCase) >= 0) return "尾注格式";
+            if (scope.IndexOf("header", StringComparison.OrdinalIgnoreCase) >= 0) return "页眉页脚";
+            if (scope.IndexOf("textbox", StringComparison.OrdinalIgnoreCase) >= 0) return "文本框内容";
+            if (scope.IndexOf("tracked changes", StringComparison.OrdinalIgnoreCase) >= 0) return "修订内容";
+            return scope;
         }
 
         private void ClearSearch()

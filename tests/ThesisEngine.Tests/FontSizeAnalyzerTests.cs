@@ -7,6 +7,9 @@ public sealed class FontSizeAnalyzerTests
 {
     private static readonly DemoRuleSet DefaultProfile = DemoRuleSet.NkuDraftSample;
 
+    private static ParagraphSnapshot Body(int paragraphIndex, IReadOnlyList<TextRunSnapshot> runs) =>
+        new(paragraphIndex, runs, ParagraphScopeClassification.ConfirmedBodyProse);
+
     [Fact]
     public void AllCorrectProducesNoDiagnostics()
     {
@@ -14,7 +17,7 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, "宋体", "Times New Roman", 12.0, "正确字体字号的文本"),
                 }),
@@ -36,7 +39,7 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, "黑体", "Times New Roman", 12.0, "黑体文本"),
                 }),
@@ -62,9 +65,9 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
-                    new(0, "宋体", "Arial", 12.0, "Arial文本"),
+                    new(0, "宋体", "Arial", 12.0, "Arial text"),
                 }),
             },
             UnsupportedScopes: Array.Empty<string>());
@@ -85,7 +88,7 @@ public sealed class FontSizeAnalyzerTests
             "word/document.xml",
             new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, "宋体", "Times New Roman", 12.0, "Latin text",
                         AsciiSlotFont: "Times New Roman", HAnsiFont: "Arial")
@@ -108,7 +111,7 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, "宋体", "Times New Roman", 14.0, "14pt文本"),
                 }),
@@ -131,7 +134,7 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, null, null, null, "未知格式文本"),
                 }),
@@ -141,7 +144,8 @@ public sealed class FontSizeAnalyzerTests
         var analyzer = new FontSizeAnalyzer();
         var result = analyzer.Analyze(snapshot, DefaultProfile);
 
-        Assert.Equal(3, result.Diagnostics.Count);
+        Assert.Equal(2, result.Diagnostics.Count);
+        Assert.DoesNotContain(result.Diagnostics, d => d.RuleId == FontSizeAnalyzer.RuleIdAsciiFont);
         Assert.All(result.Diagnostics, d => Assert.Equal("(unknown)", d.Actual));
     }
 
@@ -152,12 +156,12 @@ public sealed class FontSizeAnalyzerTests
             PartName: "word/document.xml",
             Paragraphs: new List<ParagraphSnapshot>
             {
-                new(0, new List<TextRunSnapshot>
+                Body(0, new List<TextRunSnapshot>
                 {
                     new(0, "宋体", "Times New Roman", 12.0, "正确"),
-                    new(1, "黑体", "Arial", 14.0, "全错"),
+                    new(1, "黑体", "Arial", 14.0, "全错 English"),
                 }),
-                new(1, new List<TextRunSnapshot>
+                Body(1, new List<TextRunSnapshot>
                 {
                     new(0, "宋体", "Times New Roman", 12.0, "正确"),
                 }),
@@ -186,6 +190,49 @@ public sealed class FontSizeAnalyzerTests
 
         Assert.Empty(result.Diagnostics);
         Assert.Equal(unsupported, result.UnsupportedScopes);
+    }
+
+    [Fact]
+    public void HanOnlyTextDoesNotProduceAFalseWesternFontIssue()
+    {
+        var snapshot = new DocumentSnapshot("word/document.xml",
+            new[] { new ParagraphSnapshot(0, new[]
+            {
+                new TextRunSnapshot(0, "宋体", "Arial", 12, "纯中文正文"),
+            }) }, Array.Empty<string>());
+
+        var result = new FontSizeAnalyzer().Analyze(snapshot, DefaultProfile);
+
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void KnownCaptionAndTableScopesAreNotCheckedWithBodyFontRules()
+    {
+        var snapshot = new DocumentSnapshot("word/document.xml", new[]
+        {
+            new ParagraphSnapshot(0, new[] { new TextRunSnapshot(0, "黑体", "Arial", 10.5, "表1-1 English") },
+                ParagraphScopeClassification.Excluded, "表格单元格；正文规则不适用"),
+            new ParagraphSnapshot(1, new[] { new TextRunSnapshot(0, "黑体", "Arial", 10.5, "图1-1 系统结构") },
+                ParagraphScopeClassification.Excluded, "图表题注应使用题注专属规则"),
+        }, Array.Empty<string>());
+
+        Assert.Empty(new FontSizeAnalyzer().Analyze(snapshot, DefaultProfile).Diagnostics);
+    }
+
+    [Fact]
+    public void UnknownParagraphScopeIsReportedAsUnsupportedInsteadOfUsingBodyRules()
+    {
+        var snapshot = new DocumentSnapshot("word/document.xml", new[]
+        {
+            new ParagraphSnapshot(0, new[] { new TextRunSnapshot(0, "黑体", "Arial", 10.5, "边界未确认") }),
+        }, Array.Empty<string>());
+
+        var result = new FontSizeAnalyzer().Analyze(snapshot, DefaultProfile);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains(result.UnsupportedScopes, value => value.Contains("正文范围未确认", StringComparison.Ordinal));
+        Assert.Contains("已检查 0 个正文文本片段", result.Coverage);
     }
 
     [Fact]

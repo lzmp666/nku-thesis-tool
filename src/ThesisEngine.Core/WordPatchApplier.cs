@@ -145,7 +145,9 @@ public static class WordPatchApplier
 
     private static IReadOnlyList<PatchTarget> ResolveTargets(XElement body, IReadOnlyList<Patch> patches, DocumentSnapshot? snapshot)
     {
-        var paragraphs = body.Elements(W + "p").ToArray();
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var result = new List<PatchTarget>(patches.Count);
         foreach (var patch in patches)
         {

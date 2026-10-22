@@ -1,0 +1,45 @@
+{
+  "file": "synthetic_complete_thesis.docx",
+  "syntheticOnly": true,
+  "observedWordPages": 14,
+  "observedWordCharacters": 6154,
+  "sha256": "9512908B420197BE35443E37D99E7BC14BF7292A3E36CBFA2E63DB33F8272537",
+  "plannedDiagnostics": [
+    {
+      "marker": "【中文格式测试点】",
+      "rule": "east-asian-font",
+      "expected": "宋体",
+      "actual": "黑体"
+    },
+    {
+      "marker": "【字号格式测试点】",
+      "rule": "font-size",
+      "expected": "12pt",
+      "actual": "10.5pt"
+    },
+    {
+      "marker": "SYNTHETIC ENGLISH FORMAT CHECK",
+      "rule": "western-font",
+      "expected": "Times New Roman",
+      "actual": "Arial"
+    }
+  ],
+  "content": [
+    "Chinese and English abstracts",
+    "contents",
+    "six chapters",
+    "figures",
+    "tables",
+    "equation",
+    "references",
+    "appendices",
+    "acknowledgments"
+  ],
+  "knownUnsupportedScopes": [
+    "table cell formatting",
+    "figure and table caption formatting",
+    "image quality and layout",
+    "equation formatting",
+    "headers and footers"
+  ]
+}

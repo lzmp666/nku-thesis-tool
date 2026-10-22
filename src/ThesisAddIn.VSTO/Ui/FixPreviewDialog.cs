@@ -39,20 +39,20 @@ namespace ThesisAddIn.VSTO.Ui
                 FullRowSelect = true,
                 MultiSelect = false
             };
-            list.Columns.Add("规则", 150);
+            list.Columns.Add("格式项目", 120);
             list.Columns.Add("位置", 170);
             list.Columns.Add("改前", 110);
             list.Columns.Add("改为", 110);
             list.Columns.Add("依据", 200);
             foreach (var group in plan.Patches.GroupBy(patch => new
                      {
-                         patch.RuleId,
+                patch.RuleId,
                          patch.DesiredAfter,
                          patch.Reason
                      }))
             {
                 EnginePatch patch = group.First();
-                var item = new ListViewItem(patch.RuleId);
+                var item = new ListViewItem(DiagnosticsPane.DescribeRule(patch.RuleId));
                 item.SubItems.Add(group.Count() == 1
                     ? patch.Location
                     : group.Count() + " 处（" + patch.Location + " 等）");
@@ -104,7 +104,7 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 int occurrenceCount = diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0
                     ? diagnostic.Occurrences.Count : 1;
-                lines.Add("· " + diagnostic.RuleId + " @ "
+                lines.Add("· " + DiagnosticsPane.DescribeRule(diagnostic.RuleId) + " @ "
                     + (occurrenceCount > 1 ? occurrenceCount + " 处（" + diagnostic.Location + " 等）" : diagnostic.Location)
                     + "（处理方式：" + DiagnosticsPane.DescribeFixLevel(diagnostic.FixLevel)
                     + "；期望 " + diagnostic.Expected + "，实际 " + diagnostic.Actual + "）");

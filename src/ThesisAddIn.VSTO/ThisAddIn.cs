@@ -70,11 +70,13 @@ namespace ThesisAddIn.VSTO
                 OnRibbonAnalyze,
                 OnRibbonFixCurrent,
                 OnRibbonFixAll,
+                OnRibbonVerifyResolved,
                 OnRibbonNavigateIssue,
                 OnRibbonNavigateOccurrence,
                 OpenDiagnosticsPane,
                 () => TryGetPaneForActiveWindow()?.CanFixSelected == true,
                 () => TryGetPaneForActiveWindow()?.HasFixableDiagnostics == true,
+                () => TryGetPaneForActiveWindow()?.CanResolveSelected == true,
                 () => TryGetPaneForActiveWindow()?.CanNavigateIssues == true,
                 () => TryGetPaneForActiveWindow()?.CanNavigateOccurrences == true);
             return _ribbon;
@@ -119,6 +121,12 @@ namespace ThesisAddIn.VSTO
         {
             DiagnosticsPane pane = GetPaneForRibbonCommand();
             if (pane != null) OnFixAllRequested(pane, EventArgs.Empty);
+        }
+
+        private void OnRibbonVerifyResolved()
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            if (pane != null) OnVerifyResolvedRequested(pane, EventArgs.Empty);
         }
 
         private void OnRibbonNavigateIssue(int direction)
@@ -309,7 +317,7 @@ namespace ThesisAddIn.VSTO
                 pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, operation.Document,
                     operation.SnapshotPath, response.Result));
                 SetStatus(pane, "分析完成：当前文档共 " + response.Result.Diagnostics.Count
-                    + " 项问题，批注与高亮已在本窗口更新。可用 Ctrl+Z 撤销标注；完成后自行保存。");
+                    + " 项问题，原文黄色标记已在本窗口更新。可用 Ctrl+Z 撤销标记；完成后自行保存。");
                 WriteStartupLog("已在当前 Word 文档刷新标注，问题数 " + response.Result.Diagnostics.Count
                     + "，窗口 " + operation.WindowHandle + "；未打开或保存其他文档。");
             }
@@ -359,7 +367,7 @@ namespace ThesisAddIn.VSTO
                 return;
             }
 
-            await RunRepair(pane, diagnostic, "当前选中项 " + diagnostic.RuleId);
+            await RunRepair(pane, diagnostic, "当前选中项 " + DiagnosticsPane.DescribeRule(diagnostic.RuleId));
         }
 
         private async void OnFixAllRequested(object sender, EventArgs e)
@@ -367,6 +375,96 @@ namespace ThesisAddIn.VSTO
             ActivatePaneFromSender(sender);
             WriteStartupLog("收到“预览并修复全部”点击。");
             await RunRepair(_pane, null, "全部可自动修复项");
+        }
+
+        private async void OnVerifyResolvedRequested(object sender, EventArgs e)
+        {
+            ActivatePaneFromSender(sender);
+            DiagnosticsPane pane = sender as DiagnosticsPane ?? _pane;
+            EngineDiagnostic selected = pane?.SelectedDiagnostic;
+            string location = pane?.SelectedLocation;
+            if (selected == null || string.IsNullOrWhiteSpace(location))
+            {
+                SetStatus(pane, "请先从问题列表选择一处，再验证是否已解决。");
+                return;
+            }
+
+            string snapshotPath = null;
+            try
+            {
+                if (!EnsureGateway(pane)) return;
+                DocumentOperationContext operation;
+                string failure;
+                if (!TryCreateSnapshot(pane, out operation, out failure))
+                {
+                    ShowFailure(pane, failure);
+                    return;
+                }
+                snapshotPath = operation.SnapshotPath;
+                SetBusy(pane, true, "正在重新检查所选位置…");
+                EngineResponse response = await _gateway.AnalyzeAsync(snapshotPath, GetOperationCancellationToken());
+                if (response == null || !response.Ok || response.Result == null)
+                {
+                    ShowFailure(pane, EngineGateway.DescribeError(response?.Error));
+                    return;
+                }
+                if (!TryEnsureSnapshotUnchanged(operation, out failure))
+                {
+                    ShowFailure(pane, failure);
+                    return;
+                }
+
+                string syncError = null;
+                bool synchronized = pane.InvokeOnUiThread(() => WordDocumentSynchronizer.RefreshAnnotations(
+                    operation.Document, operation.SnapshotPath, response.Result, out syncError));
+                if (!synchronized)
+                {
+                    ShowFailure(pane, "无法刷新当前文档标记：" + syncError);
+                    return;
+                }
+
+                bool remains = response.Result.Diagnostics.Any(item =>
+                    string.Equals(item.RuleId, selected.RuleId, StringComparison.Ordinal) &&
+                    string.Equals(item.Expected, selected.Expected, StringComparison.Ordinal) &&
+                    HasOccurrence(item, location));
+                ShowAnalysis(pane, response.Result);
+                pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, operation.Document,
+                    operation.SnapshotPath, response.Result));
+                if (remains)
+                {
+                    pane.SelectByOccurrenceLocation(location, navigateToSource: false);
+                    SetStatus(pane, "重新检查后，该位置仍不符合要求，问题和黄色标记已保留。修改后可再次验证。");
+                }
+                else
+                {
+                    SetStatus(pane, "已重新检查：所选位置不再触发该项规则，黄色标记已清除。改动仍在当前文档中，请由你决定是否保存。");
+                }
+            }
+            catch (Exception exception)
+            {
+                ShowFailure(pane, "验证解决状态失败：" + exception.Message);
+            }
+            finally
+            {
+                SetBusy(pane, false, null);
+                TryDelete(snapshotPath);
+            }
+        }
+
+        private static bool HasOccurrence(EngineDiagnostic diagnostic, string location)
+        {
+            if (diagnostic == null) return false;
+            if (diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0)
+                return diagnostic.Occurrences.Any(item => string.Equals(item?.Location, location, StringComparison.Ordinal));
+            return string.Equals(diagnostic.Location, location, StringComparison.Ordinal);
+        }
+
+        private static string DescribeLocation(string location)
+        {
+            DocumentLocation parsed;
+            string error;
+            return DocumentLocator.TryParse(location, out parsed, out error)
+                ? DocumentLocator.Describe(parsed) : location;
         }
 
         /// <summary>
@@ -737,8 +835,8 @@ namespace ThesisAddIn.VSTO
             }
             foreach (EnginePatchFailure failure in result.Failures)
             {
-                message.Append(Environment.NewLine).Append("· 失败：").Append(failure.Patch.RuleId)
-                    .Append(" @ ").Append(failure.Patch.Location).Append(" — ").Append(failure.Reason);
+                message.Append(Environment.NewLine).Append("· 失败：").Append(DiagnosticsPane.DescribeRule(failure.Patch.RuleId))
+                    .Append(" @ ").Append(DescribeLocation(failure.Patch.Location)).Append(" — ").Append(failure.Reason);
             }
 
             return message.ToString();
@@ -774,7 +872,7 @@ namespace ThesisAddIn.VSTO
                 // 唯一辨认，忽略这一次回调，避免导航到后续问题时又切回第一条批注。
                 _isNavigatingToDiagnostic = true;
                 range.Select();
-                return "已定位到" + DocumentLocator.Describe(location) + "：" + diagnostic.RuleId + "。";
+                return "已定位到" + DocumentLocator.Describe(location) + "：" + DiagnosticsPane.DescribeRule(diagnostic.RuleId) + "。";
             }
             catch (Exception exception)
             {
@@ -831,7 +929,7 @@ namespace ThesisAddIn.VSTO
                     + "; end=" + range.End + "; location=" + location + "; matches=" + matchCount);
                 _pane.SetStatus(matchCount > 1
                     ? "此处有多条批注，当前关联第一项；可用功能区上一项/下一项浏览。"
-                    : "当前批注已关联到问题：" + ruleId + "。");
+                    : "当前批注已关联到问题：" + DiagnosticsPane.DescribeRule(ruleId) + "。");
             }
         }
 
@@ -928,7 +1026,7 @@ namespace ThesisAddIn.VSTO
                     {
                         _lastHoveredCommentKey = occurrenceKey;
                         WriteStartupLog("合并问题悬停联动：window=" + windowHandle + "; location=" + location);
-                        _pane.SetStatus("当前合并问题位置：" + location + "。可用功能区上一处/下一处浏览同一要求的其他位置。");
+                        _pane.SetStatus("当前合并问题位置：" + DescribeLocation(location) + "。可用功能区上一处/下一处浏览同一要求的其他位置。");
                     }
                 }
                 else

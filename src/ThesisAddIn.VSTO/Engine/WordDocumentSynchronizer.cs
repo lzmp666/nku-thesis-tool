@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -13,7 +14,7 @@ using Word = Microsoft.Office.Interop.Word;
 namespace ThesisAddIn.VSTO.Engine
 {
     /// <summary>
-    /// Applies engine patches and refreshes NKU-owned comments in the open Word document.
+    /// Applies engine patches and refreshes yellow source marks in the open Word document.
     /// No document is saved or reopened here, so Word keeps the edits in its normal undo stack
     /// and the author decides when to save the current document.
     /// </summary>
@@ -21,6 +22,7 @@ namespace ThesisAddIn.VSTO.Engine
     {
         private const string ToolAuthor = "NKU Thesis Tool";
         private const string ToolMarker = "[NKU-TOOL-ANNOTATION:v1]";
+        private const string ToolBookmarkPrefix = "_NKU_MARK_";
         private const string WorkingCopyVariable = "NKUThesisToolWorkingCopy";
         private const string WordNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
         private static readonly XNamespace W = WordNamespace;
@@ -41,6 +43,13 @@ namespace ThesisAddIn.VSTO.Engine
         {
             public int Index { get; set; }
             public Dictionary<string, string> OriginalHighlights { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        private sealed class HighlightBookmarkRecord
+        {
+            public string Name { get; set; }
+            public int OriginalHighlight { get; set; }
+            public Word.Range Range { get; set; }
         }
 
         private sealed class XmlRun
@@ -219,6 +228,7 @@ namespace ThesisAddIn.VSTO.Engine
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
 
             List<AnnotationRecord> existing = ReadOwnedAnnotations(document);
+            List<HighlightBookmarkRecord> existingMarks = ReadOwnedHighlightBookmarks(document);
             var locations = new HashSet<string>(StringComparer.Ordinal);
             foreach (AnnotationRecord record in existing)
                 foreach (string location in record.OriginalHighlights.Keys)
@@ -246,6 +256,16 @@ namespace ThesisAddIn.VSTO.Engine
                 markMutation();
             }
 
+            foreach (HighlightBookmarkRecord mark in existingMarks)
+            {
+                if (mark.Range == null) continue;
+                if ((int)mark.Range.HighlightColorIndex != mark.OriginalHighlight)
+                {
+                    mark.Range.HighlightColorIndex = (Word.WdColorIndex)mark.OriginalHighlight;
+                    markMutation();
+                }
+            }
+
             // Delete in reverse order so the 1-based collection indexes remain valid.
             foreach (int index in existing.Select(record => record.Index).OrderByDescending(index => index))
             {
@@ -253,29 +273,39 @@ namespace ThesisAddIn.VSTO.Engine
                 markMutation();
             }
 
+            foreach (HighlightBookmarkRecord mark in existingMarks)
+            {
+                if (!document.Bookmarks.Exists(mark.Name)) continue;
+                document.Bookmarks[mark.Name].Delete();
+                markMutation();
+            }
+
             // Comment removal can shift story ranges. Rebuild all targets against the same
             // text snapshot before writing new highlights and anchors.
             string[] newLocations = GetDiagnosticLocations(analysis).ToArray();
             ranges = BuildRanges(document, snapshotPath, newLocations);
-            var freshOriginalHighlights = new Dictionary<string, string>(StringComparer.Ordinal);
+            var freshOriginalHighlights = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (string location in newLocations.Distinct(StringComparer.Ordinal))
-                freshOriginalHighlights[location] = GetHighlight(ranges[location]);
+            {
+                _ = GetHighlight(ranges[location]); // fail closed for mixed or unsupported highlights
+                freshOriginalHighlights[location] = (int)ranges[location].HighlightColorIndex;
+            }
 
+            var markedLocations = new HashSet<string>(StringComparer.Ordinal);
             foreach (EngineDiagnostic diagnostic in analysis.Diagnostics ?? new List<EngineDiagnostic>())
             {
                 string[] occurrences = GetOccurrences(diagnostic).ToArray();
                 foreach (string location in occurrences)
                 {
-                    if (ranges[location].HighlightColorIndex == Word.WdColorIndex.wdYellow) continue;
-                    ranges[location].HighlightColorIndex = Word.WdColorIndex.wdYellow;
-                    markMutation();
+                    if (markedLocations.Add(location))
+                        AddHighlightBookmark(document, location, ranges[location],
+                            freshOriginalHighlights[location], markMutation);
+                    if (ranges[location].HighlightColorIndex != Word.WdColorIndex.wdYellow)
+                    {
+                        ranges[location].HighlightColorIndex = Word.WdColorIndex.wdYellow;
+                        markMutation();
+                    }
                 }
-
-                string visibleText = "要求参考来源：2026版第4.7节表4.6；规则：" + diagnostic.RuleId
-                    + "；期望值：" + diagnostic.Expected + "；实际值：" + diagnostic.Actual + "。";
-                string hiddenText = BuildHiddenMetadata(diagnostic.Location, freshOriginalHighlights[diagnostic.Location],
-                    occurrences, freshOriginalHighlights);
-                AddOwnedComment(document, ranges[diagnostic.Location], visibleText, hiddenText, markMutation);
             }
             // This legacy marker identifies an analyzed document, not a separate copy.
             // Write it last; document variables do not create Word undo entries.
@@ -316,12 +346,55 @@ namespace ThesisAddIn.VSTO.Engine
             return records;
         }
 
+        private static List<HighlightBookmarkRecord> ReadOwnedHighlightBookmarks(Word.Document document)
+        {
+            var records = new List<HighlightBookmarkRecord>();
+            for (int index = document.Bookmarks.Count; index >= 1; index--)
+            {
+                Word.Bookmark bookmark = document.Bookmarks[index];
+                string name = bookmark.Name ?? string.Empty;
+                if (!name.StartsWith(ToolBookmarkPrefix, StringComparison.Ordinal)) continue;
+                int separator = name.LastIndexOf('_');
+                if (separator <= ToolBookmarkPrefix.Length ||
+                    !int.TryParse(name.Substring(separator + 1), NumberStyles.HexNumber,
+                        CultureInfo.InvariantCulture, out int originalHighlight))
+                    throw new InvalidDataException("插件的高亮恢复标记无效；为避免改动文档，已停止刷新。");
+                try { _ = GetHighlightName((Word.WdColorIndex)originalHighlight); }
+                catch (InvalidDataException)
+                {
+                    throw new InvalidDataException("插件的高亮恢复颜色无效；为避免改动文档，已停止刷新。");
+                }
+                records.Add(new HighlightBookmarkRecord
+                {
+                    Name = name,
+                    OriginalHighlight = originalHighlight,
+                    Range = bookmark.Range.Duplicate
+                });
+            }
+            return records;
+        }
+
+        private static void AddHighlightBookmark(Word.Document document, string location, Word.Range range,
+            int originalHighlight, Action markMutation)
+        {
+            string locationHash;
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(location));
+                locationHash = BitConverter.ToString(bytes).Replace("-", string.Empty).Substring(0, 16);
+            }
+            string name = ToolBookmarkPrefix + locationHash + "_" +
+                originalHighlight.ToString("X8", CultureInfo.InvariantCulture);
+            if (document.Bookmarks.Exists(name))
+                throw new InvalidDataException("插件的高亮恢复标记已存在；请重新分析后再操作。");
+            object bookmarkRange = range.Duplicate;
+            document.Bookmarks.Add(name, ref bookmarkRange);
+            markMutation();
+        }
+
         private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
             IEnumerable<string> requestedLocations)
         {
-            if (document.Tables.Count > 0)
-                throw new NotSupportedException("当前定位器不支持含表格的文档，未修改内容。");
-
             Dictionary<int, List<XmlRun>> runsByParagraph = ReadXmlRuns(snapshotPath);
             int paragraphCount = document.Paragraphs.Count;
             int xmlParagraphCount = runsByParagraph.Count == 0 ? 0 : runsByParagraph.Keys.Max() + 1;
@@ -427,7 +500,9 @@ namespace ThesisAddIn.VSTO.Engine
                     XElement body = document.Root?.Element(W + "body");
                     if (body == null) throw new InvalidDataException("当前快照缺少 Word 正文。");
                     var result = new Dictionary<int, List<XmlRun>>();
-                    XElement[] paragraphs = body.Elements(W + "p").ToArray();
+                    XElement[] paragraphs = body.Descendants(W + "p")
+                        .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+                        .ToArray();
                     for (int paragraphIndex = 0; paragraphIndex < paragraphs.Length; paragraphIndex++)
                     {
                         var runs = new List<XmlRun>();
@@ -502,39 +577,13 @@ namespace ThesisAddIn.VSTO.Engine
             return new[] { diagnostic.Location };
         }
 
-        private static string BuildHiddenMetadata(string primaryLocation, string primaryHighlight,
-            IEnumerable<string> occurrences, IDictionary<string, string> originalHighlights)
-        {
-            var text = new StringBuilder(ToolMarker)
-                .Append("[NKU-LOCATION:").Append(primaryLocation).Append(']')
-                .Append("[NKU-HIGHLIGHT:").Append(primaryHighlight).Append(']');
-            foreach (string location in occurrences.Distinct(StringComparer.Ordinal))
-                text.Append("[NKU-OCCURRENCE:").Append(location).Append('|')
-                    .Append(originalHighlights[location]).Append(']');
-            return text.ToString();
-        }
-
-        private static void AddOwnedComment(Word.Document document, Word.Range anchor, string visibleText, string hiddenText,
-            Action markMutation)
-        {
-            object text = visibleText;
-            Word.Comment comment = document.Comments.Add(anchor, ref text);
-            markMutation();
-            // Signed-in Word can ignore Application.UserName when creating a comment.
-            // Set the comment itself so both Word and the engine recognize its ownership.
-            comment.Author = ToolAuthor;
-            comment.Initial = "NKU";
-            Word.Range metadata = comment.Range.Duplicate;
-            metadata.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-            int start = metadata.End;
-            metadata.InsertAfter(hiddenText);
-            metadata.SetRange(start, start + hiddenText.Length);
-            metadata.Font.Hidden = -1;
-        }
-
         private static string GetHighlight(Word.Range range)
         {
-            var value = (Word.WdColorIndex)range.HighlightColorIndex;
+            return GetHighlightName((Word.WdColorIndex)range.HighlightColorIndex);
+        }
+
+        private static string GetHighlightName(Word.WdColorIndex value)
+        {
             switch (value)
             {
                 case Word.WdColorIndex.wdNoHighlight: return "absent";

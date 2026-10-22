@@ -185,7 +185,14 @@ public sealed class NkuGraduate2026BodyAnalysisService
     }
 }
 
-internal sealed record BodyScopeInput(int ParagraphIndex, string Text, bool IsHeading, bool HasUnsupportedInlineContent);
+internal sealed record BodyScopeInput(
+    int ParagraphIndex,
+    string Text,
+    bool IsHeading,
+    bool HasUnsupportedInlineContent,
+    bool IsTableCell = false,
+    bool IsCaption = false,
+    bool HasEquation = false);
 
 internal sealed record BodyScopeDecision(ParagraphScopeClassification Classification, string? Reason);
 
@@ -206,6 +213,10 @@ internal static class NkuGraduate2026BodyScopeClassifier
     private static readonly System.Text.RegularExpressions.Regex KnownExcludedHeading = new(
         @"^(摘要|中文摘要|英文摘要|Abstract|ABSTRACT|目录|Contents|CONTENTS|图目录|表目录|封面|声明|授权书)\s*$",
         System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static readonly System.Text.RegularExpressions.Regex CaptionText = new(
+        @"^\s*(图|表)\s*[0-9一二三四五六七八九十]+([.\-—][0-9一二三四五六七八九十]+)*\s*",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     public static IReadOnlyList<BodyScopeDecision> Classify(IReadOnlyList<BodyScopeInput> paragraphs)
     {
@@ -230,7 +241,19 @@ internal static class NkuGraduate2026BodyScopeClassifier
         for (var i = 0; i < paragraphs.Count; i++)
         {
             var paragraph = paragraphs[i];
-            if (string.IsNullOrWhiteSpace(paragraph.Text) ||
+            if (paragraph.IsTableCell)
+            {
+                decisions[i] = new(ParagraphScopeClassification.Excluded, "表格单元格；正文规则不适用，表格专属规则尚未启用");
+            }
+            else if (paragraph.IsCaption || CaptionText.IsMatch(paragraph.Text.Trim()))
+            {
+                decisions[i] = new(ParagraphScopeClassification.Excluded, "图表题注应使用题注专属规则");
+            }
+            else if (paragraph.HasEquation)
+            {
+                decisions[i] = new(ParagraphScopeClassification.Unknown, "含公式对象；公式段落有单独的行距例外，需人工核验");
+            }
+            else if (string.IsNullOrWhiteSpace(paragraph.Text) ||
                 paragraph.IsHeading && KnownExcludedHeading.IsMatch(paragraph.Text.Trim()) ||
                 boundariesKnown && paragraph.IsHeading && (i == chapterStart || i == bodyEnd || i > chapterStart && i < bodyEnd))
             {

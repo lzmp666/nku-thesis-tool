@@ -10,3 +10,4 @@ TestResults/
 *.docm
 /src/ThesisAddIn.VSTO/*.pfx
 !tests/fixtures/synthetic/*.docx
+!tests/fixtures/synthetic/full-thesis/*.docx

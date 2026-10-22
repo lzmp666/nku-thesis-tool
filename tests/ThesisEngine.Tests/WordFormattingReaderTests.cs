@@ -245,6 +245,35 @@ public sealed class WordFormattingReaderTests
     }
 
     [Fact]
+    public void FlattensTableParagraphsForStableLocationsButExcludesThemFromBodyRules()
+    {
+        var body =
+            "<w:p><w:r><w:t>正文段落</w:t></w:r></w:p>" +
+            "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>表格单元格</w:t></w:r></w:p></w:tc></w:tr></w:tbl>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Caption\"/></w:pPr><w:r><w:t>表1-1 样本统计</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:drawing/></w:r></w:p>";
+        var path = CreatePackage(Document(body));
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+
+            Assert.Equal(4, snapshot.Paragraphs.Count);
+            Assert.Equal(0, snapshot.Paragraphs[0].ParagraphIndex);
+            Assert.Equal(1, snapshot.Paragraphs[1].ParagraphIndex);
+            Assert.Equal(2, snapshot.Paragraphs[2].ParagraphIndex);
+            Assert.Equal(3, snapshot.Paragraphs[3].ParagraphIndex);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[1].Scope);
+            Assert.Contains("表格单元格", snapshot.Paragraphs[1].ScopeReason);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[2].Scope);
+            Assert.Contains("题注专属规则", snapshot.Paragraphs[2].ScopeReason);
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("figure/table caption", StringComparison.Ordinal));
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("images", StringComparison.Ordinal));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void KeepsAsciiAndHAnsiSlotsIndependentForThe2026Profile()
     {
         var path = CreatePackage(Document(

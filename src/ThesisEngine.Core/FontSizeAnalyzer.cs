@@ -22,26 +22,45 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
         ArgumentNullException.ThrowIfNull(profile);
 
         var diagnostics = new List<Diagnostic>();
+        var unsupported = new List<string>(snapshot.UnsupportedScopes);
+        var checkedRuns = 0;
+        var checkedParagraphs = 0;
 
         foreach (var paragraph in snapshot.Paragraphs)
         {
+            // Known headings, table cells, and figure/table captions have separate
+            // requirements. Never apply body-prose demo values to them.
+            if (paragraph.Scope == ParagraphScopeClassification.Excluded)
+                continue;
+            if (paragraph.Scope != ParagraphScopeClassification.ConfirmedBodyProse)
+            {
+                unsupported.Add("正文范围未确认：" + (paragraph.ScopeReason ?? "缺少可靠章节边界"));
+                continue;
+            }
+
+            checkedParagraphs++;
+
             foreach (var run in paragraph.Runs)
             {
+                if (string.IsNullOrWhiteSpace(run.Text)) continue;
+                checkedRuns++;
                 var location = $"{snapshot.PartName}#paragraph[{paragraph.ParagraphIndex}]/run[{run.RunIndex}]";
 
-                CheckEastAsiaFont(run, location, profile, diagnostics);
-                CheckAsciiFont(run, location, profile, diagnostics);
+                if (ContainsHan(run.Text))
+                    CheckEastAsiaFont(run, location, profile, diagnostics);
+                if (ContainsLatinLetter(run.Text))
+                    CheckAsciiFont(run, location, profile, diagnostics);
                 CheckFontSize(run, location, profile, diagnostics);
             }
         }
 
-        var coverage = ComputeCoverage(snapshot);
+        var coverage = $"已检查 {checkedRuns} 个正文文本片段，涉及 {checkedParagraphs} 个确认正文段落";
 
         return new AnalysisResult(
             Diagnostics: DiagnosticGrouper.Group(diagnostics),
             RuleVersion: profile.RuleVersion,
             Coverage: coverage,
-            UnsupportedScopes: snapshot.UnsupportedScopes);
+            UnsupportedScopes: unsupported.Distinct(StringComparer.Ordinal).ToArray());
     }
 
     private static void CheckEastAsiaFont(
@@ -160,9 +179,18 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
         }
     }
 
-    private static string ComputeCoverage(DocumentSnapshot snapshot)
+    private static bool ContainsHan(string text) => text.EnumerateRunes().Any(r =>
     {
-        var totalRuns = snapshot.Paragraphs.Sum(p => p.Runs.Count);
-        return $"已检查 {totalRuns} 个文本片段，涉及 {snapshot.Paragraphs.Count} 个段落";
-    }
+        var value = r.Value;
+        return value is >= 0x3400 and <= 0x4DBF or
+               >= 0x4E00 and <= 0x9FFF or
+               >= 0x20000 and <= 0x2FA1F;
+    });
+
+    private static bool ContainsLatinLetter(string text) => text.EnumerateRunes().Any(r =>
+        System.Text.Rune.IsLetter(r) && (r.Value is >= 0x0041 and <= 0x024F or
+                                         >= 0x1E00 and <= 0x1EFF or
+                                         >= 0x2C60 and <= 0x2C7F or
+                                         >= 0xA720 and <= 0xA7FF or
+                                         >= 0xAB30 and <= 0xAB6F));
 }

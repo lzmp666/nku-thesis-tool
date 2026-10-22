@@ -38,7 +38,21 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             unsupported.Add("footnotes");
         if (archive.Entries.Any(e => e.FullName.StartsWith("word/endnotes", StringComparison.Ordinal)))
             unsupported.Add("endnotes");
-        if (body.Descendants(W + "tbl").Any()) unsupported.Add("tables");
+        if (body.Descendants(W + "tbl").Any())
+        {
+            unsupported.Add("tables (cell formatting rules are not configured)");
+        }
+        if (body.Descendants(W + "p").Any(p =>
+                string.Equals(p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value,
+                    "Caption", StringComparison.OrdinalIgnoreCase) ||
+                System.Text.RegularExpressions.Regex.IsMatch(string.Concat(p.Descendants(W + "t").Select(t => t.Value)).Trim(),
+                    @"^(图|表)\s*[0-9一二三四五六七八九十]+([.\-—][0-9一二三四五六七八九十]+)*\s*",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant)))
+        {
+            unsupported.Add("figure/table caption formatting (caption-specific rules are not configured)");
+        }
+        if (body.Descendants(W + "drawing").Any() || body.Descendants(W + "pict").Any())
+            unsupported.Add("images (visual quality and layout are not analyzed)");
         if (document.Descendants(W + "txbxContent").Any()) unsupported.Add("textboxes");
         if (body.Descendants(W + "sdt").Any()) unsupported.Add("content controls");
         if (body.Descendants(W + "customXml").Any()) unsupported.Add("custom XML content");
@@ -54,10 +68,16 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         if (body.Descendants(W + "p").Any(p => p.Parent != body && !p.Ancestors(W + "tbl").Any()))
             unsupported.Add("nested body paragraphs");
 
+        // Paragraph positions are flattened in document order, including table cells.
+        // This keeps engine locations aligned with Word.Document.Paragraphs in documents
+        // that contain tables. Text boxes are separate Word stories and remain unsupported.
+        var sourceParagraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var paragraphs = new List<ParagraphSnapshot>();
         var scopeInputs = new List<BodyScopeInput>();
         var paragraphIndex = 0;
-        foreach (var paragraph in body.Elements(W + "p"))
+        foreach (var paragraph in sourceParagraphs)
         {
             var paragraphProperties = paragraph.Element(W + "pPr");
             var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
@@ -67,6 +87,13 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 IsHeadingStyleId(paragraphStyle) ||
                 (paragraphStyle is not null && styleMap.TryGetValue(paragraphStyle, out var paragraphStyleDefinition) && paragraphStyleDefinition.IsHeading);
             var paragraphText = string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value));
+            var isTableCell = paragraph.Ancestors(W + "tc").Any();
+            var isCaption = string.Equals(paragraphStyle, "Caption", StringComparison.OrdinalIgnoreCase) ||
+                System.Text.RegularExpressions.Regex.IsMatch(paragraphText.Trim(),
+                    @"^(圖|表)\s*[0-9一二三四五六七八九十]+([.\-—][0-9一二三四五六七八九十]+)*\s*",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            var hasEquation = paragraph.Descendants(XName.Get("oMath", MathNamespace)).Any() ||
+                paragraph.Descendants(XName.Get("oMathPara", MathNamespace)).Any();
             var hasUnsupportedInlineContent = paragraph.Descendants().Any(element =>
                 element.Name == W + "hyperlink" || element.Name == W + "sdt" || element.Name == W + "customXml" ||
                 element.Name == W + "altChunk" || element.Name == W + "smartTag" || element.Name == W + "fldSimple" ||
@@ -93,7 +120,8 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                     !paragraphResolution.IsResolved || !characterResolution.IsResolved));
             }
             paragraphs.Add(new ParagraphSnapshot(paragraphIndex, runs));
-            scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading, hasUnsupportedInlineContent));
+            scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading,
+                hasUnsupportedInlineContent, isTableCell, isCaption, hasEquation));
             paragraphIndex++;
         }
 

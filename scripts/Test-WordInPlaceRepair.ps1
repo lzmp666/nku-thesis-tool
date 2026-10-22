@@ -42,6 +42,27 @@ function Get-SharedFileHash([string]$Path) {
     try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '') }
     finally { $algorithm.Dispose(); $stream.Dispose() }
 }
+function Get-ToolMarkCount($Document) {
+    $count = 0
+    for ($index = 1; $index -le $Document.Bookmarks.Count; $index++) {
+        if ($Document.Bookmarks.Item($index).Name.StartsWith('_NKU_MARK_', [StringComparison]::Ordinal)) { $count++ }
+    }
+    return $count
+}
+function Get-ExpectedToolMarkCount($Analysis) {
+    $count = 0
+    foreach ($diagnostic in $Analysis.Diagnostics) {
+        if ($diagnostic.Occurrences.Count -gt 0) { $count += $diagnostic.Occurrences.Count }
+        else { $count++ }
+    }
+    return $count
+}
+function Assert-ToolMarks($Document, $Analysis, [string]$Operation) {
+    $expected = Get-ExpectedToolMarkCount $Analysis
+    $actual = Get-ToolMarkCount $Document
+    Assert-Condition ($actual -eq $expected) ($Operation + ': expected ' + $expected + ' source marks, found ' + $actual + '.')
+    Assert-Condition ($Document.Comments.Count -eq 0) ($Operation + ': the tool must not create duplicate reply/resolve comments.')
+}
 function Write-Snapshot($Document, [string]$Name) {
     $path = Join-Path $outputDirectory ($Name + '.docx')
     [ThesisAddIn.VSTO.Engine.FlatOpcPackageWriter]::Write($Document.WordOpenXML, $path)
@@ -74,10 +95,7 @@ function Apply-ToOpenDocument($Document, [string]$Snapshot, $Diagnostic, [string
     $synchronized = [WordSmokeInterop]::Apply(
         $Document, $Snapshot, $applied.Apply.Applied, $refreshed.Result, [ref]$syncError)
     Assert-Condition $synchronized ('In-place repair failed: ' + $syncError)
-    Assert-Condition ($Document.Comments.Count -eq $refreshed.Result.Diagnostics.Count) 'Stale or duplicate tool comments remain.'
-    for ($index = 1; $index -le $Document.Comments.Count; $index++) {
-        Assert-Condition ($Document.Comments.Item($index).Author -eq 'NKU Thesis Tool') 'Word changed a tool comment author.'
-    }
+    Assert-ToolMarks $Document $refreshed.Result ($Name + ' in-place repair')
     return $applied.Apply.Applied.Count
 }
 
@@ -85,6 +103,11 @@ $interop = Get-ChildItem 'C:\Windows\assembly\GAC_MSIL\Microsoft.Office.Interop.
     Sort-Object FullName -Descending | Select-Object -First 1
 Assert-Condition ($null -ne $interop) 'The Word primary interop assembly is required.'
 $addInDirectory = Join-Path $repository ('src\ThesisAddIn.VSTO\bin\' + $Configuration)
+$addInAssembly = Join-Path $repository ('src\ThesisAddIn.VSTO\obj\' + $Configuration + '\ThesisAddIn.VSTO.dll')
+if (-not (Test-Path -LiteralPath $addInAssembly -PathType Leaf)) {
+    $addInAssembly = Join-Path $addInDirectory 'ThesisAddIn.VSTO.dll'
+}
+Assert-Condition (Test-Path -LiteralPath $addInAssembly -PathType Leaf) 'The VSTO assembly is missing; compile the add-in before running Word acceptance.'
 # Windows PowerShell does not read the add-in's binding redirects. Resolve its
 # bundled dependencies in this test process without changing PowerShell/Office settings.
 Add-Type -TypeDefinition @'
@@ -109,14 +132,14 @@ public static class WordSmokeDependencies
 [WordSmokeDependencies]::Attach($addInDirectory)
 Add-Type -Path $interop.FullName
 Add-Type -Path (Join-Path $addInDirectory 'ThesisAddIn.Protocol.dll')
-Add-Type -Path (Join-Path $addInDirectory 'ThesisAddIn.VSTO.dll')
+Add-Type -Path $addInAssembly
 $netstandardFacade = [Reflection.Assembly]::Load('netstandard, Version=2.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51').Location
 # PowerShell's conversion binder cannot cast Word's coclass interface. Let the
 # CLR perform COM QueryInterface inside this narrow test adapter instead.
 Add-Type -ReferencedAssemblies @($interop.FullName,
     $netstandardFacade,
     (Join-Path $addInDirectory 'ThesisAddIn.Protocol.dll'),
-    (Join-Path $addInDirectory 'ThesisAddIn.VSTO.dll')) -TypeDefinition @'
+    $addInAssembly) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using ThesisAddIn.Protocol;
@@ -183,6 +206,7 @@ $workingHash = Get-SharedFileHash $workingCopy
 
 $word = $null
 $document = $null
+$fullThesisDocument = $null
 $repairedDocument = $null
 $ownsApplication = $false
 $oldAlerts = $null
@@ -195,25 +219,55 @@ try {
     $oldAlerts = $word.DisplayAlerts
     $word.DisplayAlerts = 0
     if ($ownsApplication) { $word.Visible = $false }
+
+    # Exercise the complete synthetic thesis in real Word, including paragraphs
+    # before and after tables. This verifies flattened OOXML locations without
+    # saving or replacing the source file.
+    $fullThesis = Join-Path $repository 'tests\fixtures\synthetic\full-thesis\synthetic_complete_thesis.docx'
+    $fullThesisHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullThesis).Hash
+    $fullThesisDocument = $word.Documents.Open($fullThesis)
+    $fullThesisPath = $fullThesisDocument.FullName
+    $fullThesisWindowCount = $word.Windows.Count
+    $fullThesisSnapshot = Write-Snapshot $fullThesisDocument 'full-thesis-before-analysis'
+    $fullThesisAnalysis = $client.Analyze($fullThesisSnapshot)
+    Assert-Response $fullThesisAnalysis 'Full synthetic thesis analysis'
+    Assert-Condition ($fullThesisAnalysis.Result.Diagnostics.Count -eq 3) 'The full thesis should contain exactly three planned formatting defects.'
+    Assert-Condition (@($fullThesisAnalysis.Result.UnsupportedScopes | Where-Object { $_ -like '*tables*' }).Count -gt 0) 'Table-specific formatting must be disclosed as unsupported.'
+    Assert-Condition (@($fullThesisAnalysis.Result.UnsupportedScopes | Where-Object { $_ -like '*caption*' }).Count -gt 0) 'Caption formatting must be disclosed as unsupported.'
+    Assert-Condition (@($fullThesisAnalysis.Result.UnsupportedScopes | Where-Object { $_ -like '*images*' }).Count -gt 0) 'Image quality must be disclosed as unsupported.'
+    $syncError = $null
+    Assert-Condition ([WordSmokeInterop]::Refresh($fullThesisDocument, $fullThesisSnapshot, $fullThesisAnalysis.Result, [ref]$syncError)) ('Full thesis range synchronization failed: ' + $syncError)
+    Assert-ToolMarks $fullThesisDocument $fullThesisAnalysis.Result 'Full synthetic thesis analysis'
+    foreach ($diagnostic in $fullThesisAnalysis.Result.Diagnostics) {
+        foreach ($occurrence in $diagnostic.Occurrences) {
+            $range = Get-Run $fullThesisDocument $fullThesisSnapshot $occurrence.Location
+            Assert-Condition (-not [string]::IsNullOrWhiteSpace($range.Text)) ('Full thesis location resolved to empty text: ' + $occurrence.Location)
+        }
+    }
+    Assert-Condition ($fullThesisDocument.FullName -eq $fullThesisPath -and $word.Windows.Count -eq $fullThesisWindowCount) 'Full thesis analysis changed or replaced the open document.'
+    Assert-Condition ((Get-FileHash -Algorithm SHA256 -LiteralPath $fullThesis).Hash -eq $fullThesisHash) 'Full thesis analysis saved or overwrote the source file.'
+    $fullThesisDocument.Close([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges)
+    $fullThesisDocument = $null
+
     $document = $word.Documents.Open($workingCopy)
     $pathBefore = $document.FullName
     $countBefore = $word.Documents.Count
     $windowsBefore = $word.Windows.Count
-    Assert-Condition ($document.Comments.Count -eq 0) 'The initial synthetic document must be unannotated.'
+    Assert-Condition ($document.Comments.Count -eq 0 -and (Get-ToolMarkCount $document) -eq 0) 'The initial synthetic document must be unannotated.'
     $snapshot = Write-Snapshot $document 'before-first-analysis'
     $initial = $client.Analyze($snapshot)
     Assert-Response $initial 'First analysis'
     $syncError = $null
     Assert-Condition ([WordSmokeInterop]::Refresh($document, $snapshot, $initial.Result, [ref]$syncError)) ('First in-place analysis failed: ' + $syncError)
     Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore -and $word.Windows.Count -eq $windowsBefore) 'Initial analysis changed the open document or opened a new window.'
-    Assert-Condition ($document.Comments.Count -eq $initial.Result.Diagnostics.Count) 'Initial analysis did not write grouped comments into the same document.'
+    Assert-ToolMarks $document $initial.Result 'First analysis'
     Assert-Condition ((Get-SharedFileHash $workingCopy) -eq $workingHash) 'Initial analysis saved the document automatically.'
     $snapshot = Write-Snapshot $document 'before-repeat-analysis'
     $repeated = $client.Analyze($snapshot)
     Assert-Response $repeated 'Repeat analysis'
     Assert-Condition ([WordSmokeInterop]::Refresh($document, $snapshot, $repeated.Result, [ref]$syncError)) ('Repeat in-place analysis failed: ' + $syncError)
     Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore -and $word.Windows.Count -eq $windowsBefore) 'Repeated analysis changed the open document or opened a new window.'
-    Assert-Condition ($document.Comments.Count -eq $repeated.Result.Diagnostics.Count) 'Repeated analysis duplicated comments.'
+    Assert-ToolMarks $document $repeated.Result 'Repeated analysis'
     Assert-Condition ((Get-SharedFileHash $workingCopy) -eq $workingHash) 'Repeated analysis saved the document automatically.'
     # Rejected positioning must not undo the author's preceding edit. An empty
     # custom undo record is absent from Word's stack, so Undo would affect it.
@@ -227,7 +281,7 @@ try {
     })
     Assert-Condition (-not [WordSmokeInterop]::Refresh($document, $snapshot, $invalid, [ref]$syncError)) 'Invalid positioning was accepted.'
     Assert-Condition ($probeRange.Font.Bold -eq $probeBold) 'Failed validation undid the author edit.'
-    Assert-Condition ($document.Comments.Count -eq $repeated.Result.Diagnostics.Count) 'Failed validation changed existing comments.'
+    Assert-ToolMarks $document $repeated.Result 'Rejected-position validation'
     Assert-Condition ([bool]$document.Undo()) 'The author edit could not be undone after validation failed.'
     Assert-Condition ($probeRange.Font.Bold -eq $oldBold) 'Validation failure changed the undo stack.'
     $snapshot = Write-Snapshot $document 'before-single'
@@ -239,8 +293,9 @@ try {
     foreach ($occurrence in $group.Occurrences) {
         $originalFonts[$occurrence.Location] = (Get-Run $document $snapshot $occurrence.Location).Font.NameFarEast
     }
-    $commentsBefore = $document.Comments.Count
+    $marksBeforeSingle = Get-ToolMarkCount $document
     $singlePatchCount = Apply-ToOpenDocument $document $snapshot $group 'single'
+    $marksAfterSingle = Get-ToolMarkCount $document
     Assert-Condition ($singlePatchCount -eq $group.Occurrences.Count) 'Single-item repair did not cover every grouped occurrence.'
     foreach ($occurrence in $group.Occurrences) {
         Assert-Condition ((Get-Run $document $snapshot $occurrence.Location).Font.NameFarEast -eq '宋体') 'A grouped font target was not repaired.'
@@ -249,8 +304,9 @@ try {
     foreach ($occurrence in $group.Occurrences) {
         Assert-Condition ((Get-Run $document $snapshot $occurrence.Location).Font.NameFarEast -eq $originalFonts[$occurrence.Location]) 'One undo did not restore all grouped fonts.'
     }
-    Assert-Condition ($document.Comments.Count -eq $commentsBefore) 'One undo did not restore the comments.'
+    Assert-Condition ((Get-ToolMarkCount $document) -eq $marksBeforeSingle) 'One undo did not restore source marks.'
     Assert-Condition ([bool]$document.Redo()) 'Word could not redo the repair.'
+    Assert-Condition ((Get-ToolMarkCount $document) -eq $marksAfterSingle) 'One redo did not restore source marks.'
     foreach ($occurrence in $group.Occurrences) {
         Assert-Condition ((Get-Run $document $snapshot $occurrence.Location).Font.NameFarEast -eq '宋体') 'One redo did not restore the grouped repair.'
     }
@@ -261,13 +317,15 @@ try {
     Assert-Condition ($bulkPlan.Plan.Patches.Count -eq 1 -and $bulkPlan.Plan.Patches[0].RuleId -eq 'demo/font-size') 'The synthetic bulk plan has unexpected patches.'
     $sizeLocation = $bulkPlan.Plan.Patches[0].Location
     $sizeBefore = (Get-Run $document $bulkSnapshot $sizeLocation).Font.Size
-    $commentsBeforeBulk = $document.Comments.Count
+    $marksBeforeBulk = Get-ToolMarkCount $document
     $bulkPatchCount = Apply-ToOpenDocument $document $bulkSnapshot $null 'bulk'
+    $marksAfterBulk = Get-ToolMarkCount $document
     Assert-Condition ((Get-Run $document $bulkSnapshot $sizeLocation).Font.Size -eq 12) 'Bulk repair did not change the font size.'
     Assert-Condition ([bool]$document.Undo()) 'Word could not undo the bulk repair.'
     Assert-Condition ((Get-Run $document $bulkSnapshot $sizeLocation).Font.Size -eq $sizeBefore) 'One undo did not restore the bulk formatting.'
-    Assert-Condition ($document.Comments.Count -eq $commentsBeforeBulk) 'One undo did not restore the bulk comments.'
+    Assert-Condition ((Get-ToolMarkCount $document) -eq $marksBeforeBulk) 'One undo did not restore bulk source marks.'
     Assert-Condition ([bool]$document.Redo()) 'Word could not redo the bulk repair.'
+    Assert-Condition ((Get-ToolMarkCount $document) -eq $marksAfterBulk) 'One redo did not restore bulk source marks.'
     Assert-Condition ((Get-Run $document $bulkSnapshot $sizeLocation).Font.Size -eq 12) 'One redo did not restore the bulk repair.'
     Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore) 'Repair opened or replaced a document.'
     Assert-Condition (-not $document.Saved) 'Word did not retain unsaved edits.'
@@ -282,7 +340,7 @@ try {
     # controlled Word instance may shut down when its last document is closed.
     $repairedDocument = $document
 
-    # A clean work copy has no comments. Its identity must survive save/reopen.
+    # A clean work copy has no source marks. Its identity must survive save/reopen.
     $cleanInput = Join-Path $repository 'tests\fixtures\synthetic\demo\clean_sample.docx'
     $cleanCopy = Join-Path $outputDirectory 'synthetic-clean-working-copy.docx'
     $clean = $client.Annotate($cleanInput, $cleanCopy)
@@ -293,7 +351,7 @@ try {
     $document.Close([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges)
     $document = $word.Documents.Open($cleanCopy)
     Assert-Condition ([WordSmokeInterop]::IsWorkingCopy($document)) 'Clean working-copy identity did not persist.'
-    Assert-Condition ($document.Comments.Count -eq 0) 'Clean document has tool comments.'
+    Assert-Condition ($document.Comments.Count -eq 0 -and (Get-ToolMarkCount $document) -eq 0) 'Clean document has tool annotations.'
     $syncError = $null
     Assert-Condition ([WordSmokeInterop]::Refresh(
         $document, (Write-Snapshot $document 'clean-reopened'), $clean.Result, [ref]$syncError)) ('Clean reanalysis failed: ' + $syncError)
@@ -301,10 +359,13 @@ try {
     Assert-Condition ((Get-FileHash -Algorithm SHA256 -LiteralPath $fixture).Hash -eq $fixtureHash) 'Repository fixture was overwritten.'
     [ordered]@{
         status = 'passed'
+        fullThesisWordMapping = 'passed'
+        fullThesisDiagnostics = $fullThesisAnalysis.Result.Diagnostics.Count
         initialAndRepeatedAnalysisInSameWindow = 'passed'
         groupedOccurrences = $group.Occurrences.Count
         singleRepairPatches = $singlePatchCount
         bulkRepairPatches = $bulkPatchCount
+        sourceMarkBookmarks = Get-ToolMarkCount $repairedDocument
         remainingManualOrSuggestIssues = $remaining
         undoRedo = 'passed'
         sameOpenDocument = 'passed'
@@ -316,6 +377,9 @@ try {
     Write-Output $_.ScriptStackTrace
     throw
 } finally {
+    if ($null -ne $fullThesisDocument) {
+        try { $fullThesisDocument.Close([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges) } catch { }
+    }
     if ($null -ne $document) {
         try { $document.Close([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges) } catch { }
     }
