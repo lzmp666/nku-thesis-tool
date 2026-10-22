@@ -277,11 +277,11 @@ public sealed class EngineProtocolTests
         Assert.Equal("plan-1", response.RequestId);
         Assert.Null(response.Result);
         Assert.NotNull(response.Plan);
-        Assert.Equal(2, response.Plan!.Patches.Count);
+        Assert.Equal(3, response.Plan!.Patches.Count);
         Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/east-asian-font");
+        Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/western-font");
         Assert.Contains(response.Plan.Patches, patch => patch.RuleId == "demo/font-size");
-        var deferred = Assert.Single(response.Plan.Deferred);
-        Assert.Equal("demo/western-font", deferred.RuleId);
+        Assert.Empty(response.Plan.Deferred);
     }
 
     [Fact]
@@ -305,7 +305,7 @@ public sealed class EngineProtocolTests
 
             Assert.True(apply.Ok, apply.Error?.Message);
             Assert.NotNull(apply.Apply);
-            Assert.Equal(2, apply.Apply!.Applied.Count);
+            Assert.Equal(3, apply.Apply!.Applied.Count);
             Assert.Empty(apply.Apply.Failures);
             Assert.Equal(Path.GetFullPath(output), apply.Apply.OutputPath);
             Assert.True(File.Exists(output));
@@ -313,8 +313,7 @@ public sealed class EngineProtocolTests
 
             var recheck = await RunHost(host, new EngineRequest { RequestId = "recheck-1", InputPath = output });
             Assert.True(recheck.Ok, recheck.Error?.Message);
-            var remaining = Assert.Single(recheck.Result!.Diagnostics);
-            Assert.Equal("demo/western-font", remaining.RuleId);
+            Assert.Empty(recheck.Result!.Diagnostics);
 
             var replan = await RunHost(host, new EngineRequest
             {
@@ -347,13 +346,13 @@ public sealed class EngineProtocolTests
             var plan = await client.PlanAsync(input, null, null);
             Assert.True(plan.Ok, plan.Error?.Message);
             Assert.NotNull(plan.Plan);
-            Assert.Equal(2, plan.Plan!.Patches.Count);
+            Assert.Equal(3, plan.Plan!.Patches.Count);
 
             var filtered = await client.PlanAsync(input, "demo/font-size", "word/document.xml#paragraph[2]/run[0]");
             Assert.True(filtered.Ok, filtered.Error?.Message);
             var single = Assert.Single(filtered.Plan!.Patches);
             Assert.Equal("demo/font-size", single.RuleId);
-            // 过滤后保留的应是：本身不可自动修复的西文字体，以及被过滤掉的东亚字体 auto 项。
+            // 过滤后保留被排除的中文/西文字体修复项，当前字号项只计划一次。
             Assert.Equal(2, filtered.Plan.Deferred.Count);
             Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/western-font");
             Assert.Contains(filtered.Plan.Deferred, item => item.RuleId == "demo/east-asian-font");
@@ -361,7 +360,7 @@ public sealed class EngineProtocolTests
             var apply = await client.ApplyAsync(input, output, null, null);
             Assert.True(apply.Ok, apply.Error?.Message);
             Assert.NotNull(apply.Apply);
-            Assert.Equal(2, apply.Apply!.Applied.Count);
+            Assert.Equal(3, apply.Apply!.Applied.Count);
         }
         finally
         {

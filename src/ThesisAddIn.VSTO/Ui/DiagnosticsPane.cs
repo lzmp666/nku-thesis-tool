@@ -1,164 +1,79 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
 
 namespace ThesisAddIn.VSTO.Ui
 {
-    /// <summary>紧凑的中文任务窗格：联动原文批注、定位诊断并提供修复操作。</summary>
+    /// <summary>只显示可检索的问题列表；分析、定位和修复命令位于 Word 功能区。</summary>
     public sealed class DiagnosticsPane : UserControl
     {
-        private readonly Button _analyzeButton = new Button();
-        private readonly Button _fixOneButton = new Button();
-        private readonly Button _fixAllButton = new Button();
-        private readonly Button _previousButton = new Button();
-        private readonly Button _nextButton = new Button();
-        private readonly Button _previousOccurrenceButton = new Button();
-        private readonly Button _nextOccurrenceButton = new Button();
-        private readonly Button _toggleListButton = new Button();
-        private readonly FlowLayoutPanel _diagnosticList = new FlowLayoutPanel();
-        private readonly Panel _resultsHost = new Panel();
-        private readonly Label _emptyState = new Label();
-        private readonly Label _issueSummary = new Label();
+        private const string SearchPlaceholder = "搜索规则、期望值或实际值";
+        private readonly TextBox _searchBox = new TextBox();
+        private readonly ListBox _issueList = new ListBox();
         private readonly Label _status = new Label();
-        private readonly Label _coverage = new Label();
+        private readonly ToolTip _toolTip = new ToolTip();
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
-        private readonly List<Panel> _diagnosticCards = new List<Panel>();
+        private readonly List<int> _visibleIndices = new List<int>();
         private int _selectedIndex = -1;
         private int _selectedOccurrenceIndex;
         private bool _isBusy;
-        private bool _showDiagnosticList;
+        private bool _isShowingPlaceholder;
+        private bool _updatingList;
 
-        // 当前演示规则集依据南开大学 2026 版规范第 4.7 节表 4.6。
-        private const string DemoRequirementSource = "2026版第4.7节表4.6";
-
-        public event EventHandler AnalyzeRequested;
-        public event EventHandler FixCurrentRequested;
-        public event EventHandler FixAllRequested;
         public event EventHandler DiagnosticSelected;
+        public event EventHandler StateChanged;
 
         public DiagnosticsPane()
         {
             Dock = DockStyle.Fill;
             Font = new Font("Microsoft YaHei UI", 9F);
 
-            var buttons = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                WrapContents = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoScroll = true,
-                Padding = new Padding(0, 2, 0, 0)
-            };
-            ConfigureButton(_analyzeButton, "分析当前文档");
-            ConfigureButton(_fixOneButton, "修复此项");
-            ConfigureButton(_fixAllButton, "预览并修复全部");
-            _fixOneButton.Enabled = false;
-            _fixAllButton.Enabled = false;
-            _previousButton.Enabled = false;
-            _nextButton.Enabled = false;
-            _previousOccurrenceButton.Enabled = false;
-            _nextOccurrenceButton.Enabled = false;
-            _toggleListButton.Enabled = false;
-            _analyzeButton.Click += (s, e) => OnEvent(AnalyzeRequested);
-            _fixOneButton.Click += (s, e) => OnEvent(FixCurrentRequested);
-            _fixAllButton.Click += (s, e) => OnEvent(FixAllRequested);
-            _previousButton.Click += (s, e) => NavigateSelection(-1);
-            _nextButton.Click += (s, e) => NavigateSelection(1);
-            _previousOccurrenceButton.Click += (s, e) => NavigateOccurrence(-1);
-            _nextOccurrenceButton.Click += (s, e) => NavigateOccurrence(1);
-            _toggleListButton.Click += (s, e) => ToggleDiagnosticList();
-            buttons.Controls.Add(_analyzeButton);
-            buttons.Controls.Add(_fixOneButton);
-            buttons.Controls.Add(_fixAllButton);
+            _searchBox.Name = "IssueSearchBox";
+            _searchBox.Dock = DockStyle.Fill;
+            _searchBox.Margin = new Padding(0);
+            _searchBox.AccessibleName = "搜索问题";
+            _searchBox.AccessibleDescription = "按规则、期望格式或实际格式筛选问题。";
+            _toolTip.SetToolTip(_searchBox, "可搜索规则名称、期望格式或实际格式");
+            SetPlaceholder();
+            _searchBox.GotFocus += OnSearchGotFocus;
+            _searchBox.LostFocus += OnSearchLostFocus;
+            _searchBox.TextChanged += OnSearchTextChanged;
 
-            _coverage.Dock = DockStyle.Fill;
-            _coverage.Padding = new Padding(2, 2, 2, 2);
-            _coverage.AutoEllipsis = true;
-            _coverage.Text = "尚未分析。";
-
-            // Word 任务窗格通常只有较窄的宽度。卡片将关键信息分行显示，
-            // 避免固定多列表格把期望值和实际值挤到横向滚动区域之外。
-            _diagnosticList.Dock = DockStyle.Fill;
-            _diagnosticList.FlowDirection = FlowDirection.TopDown;
-            _diagnosticList.WrapContents = false;
-            _diagnosticList.AutoScroll = true;
-            _diagnosticList.Padding = new Padding(2);
-            _diagnosticList.SizeChanged += (s, e) => ResizeDiagnosticCards();
-
-            _emptyState.Dock = DockStyle.Fill;
-            _emptyState.TextAlign = ContentAlignment.MiddleCenter;
-            _emptyState.ForeColor = SystemColors.GrayText;
-            _emptyState.Padding = new Padding(12);
-            _emptyState.Text = "点击“分析当前文档”开始检查。";
-
-            _issueSummary.Dock = DockStyle.Fill;
-            _issueSummary.Padding = new Padding(2, 6, 2, 2);
-            _issueSummary.AutoEllipsis = true;
-            _issueSummary.Text = "分析后可展开问题列表；已有工具批注与原文保持联动。";
-
-            var navigation = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                WrapContents = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoScroll = true,
-                Padding = new Padding(0, 2, 0, 0)
-            };
-            ConfigureButton(_previousButton, "上一项");
-            ConfigureButton(_nextButton, "下一项");
-            ConfigureButton(_previousOccurrenceButton, "上一处");
-            ConfigureButton(_nextOccurrenceButton, "下一处");
-            ConfigureButton(_toggleListButton, "展开问题列表");
-            navigation.Controls.Add(_previousButton);
-            navigation.Controls.Add(_nextButton);
-            navigation.Controls.Add(_previousOccurrenceButton);
-            navigation.Controls.Add(_nextOccurrenceButton);
-            navigation.Controls.Add(_toggleListButton);
-
-            _resultsHost.Dock = DockStyle.Fill;
-            _resultsHost.Controls.Add(_diagnosticList);
-            _resultsHost.Controls.Add(_emptyState);
-            _emptyState.BringToFront();
+            _issueList.Name = "IssueSearchResults";
+            _issueList.Dock = DockStyle.Fill;
+            _issueList.IntegralHeight = false;
+            _issueList.HorizontalScrollbar = true;
+            _issueList.AccessibleName = "格式问题列表";
+            _issueList.SelectedIndexChanged += OnIssueSelected;
 
             _status.Dock = DockStyle.Fill;
-            _status.Padding = new Padding(2);
-            _status.Text = "准备就绪。";
+            _status.Padding = new Padding(4, 8, 4, 2);
+            _status.AutoEllipsis = true;
+            _status.ForeColor = SystemColors.GrayText;
+            _status.AccessibleName = "操作状态";
 
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 6,
+                RowCount = 3,
                 Padding = new Padding(8)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            // 操作按钮紧凑置顶；问题详情优先由原文旁的 Word 批注呈现。
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
-            layout.Controls.Add(buttons, 0, 0);
-            layout.Controls.Add(_coverage, 0, 1);
-            layout.Controls.Add(navigation, 0, 2);
-            layout.Controls.Add(_issueSummary, 0, 3);
-            layout.Controls.Add(_resultsHost, 0, 4);
-            layout.Controls.Add(_status, 0, 5);
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            layout.Controls.Add(_searchBox, 0, 0);
+            layout.Controls.Add(_issueList, 0, 1);
+            layout.Controls.Add(_status, 0, 2);
             Controls.Add(layout);
         }
 
-        public EngineDiagnostic SelectedDiagnostic
-        {
-            get
-            {
-                return _selectedIndex >= 0 && _selectedIndex < _diagnostics.Count
-                    ? _diagnostics[_selectedIndex]
-                    : null;
-            }
-        }
+        public EngineDiagnostic SelectedDiagnostic =>
+            _selectedIndex >= 0 && _selectedIndex < _diagnostics.Count ? _diagnostics[_selectedIndex] : null;
 
         public string SelectedLocation
         {
@@ -166,45 +81,35 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 EngineDiagnostic diagnostic = SelectedDiagnostic;
                 if (diagnostic == null) return null;
-                if (diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0
-                    && _selectedOccurrenceIndex >= 0 && _selectedOccurrenceIndex < diagnostic.Occurrences.Count)
+                if (diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0 &&
+                    _selectedOccurrenceIndex >= 0 && _selectedOccurrenceIndex < diagnostic.Occurrences.Count)
                     return diagnostic.Occurrences[_selectedOccurrenceIndex].Location;
                 return diagnostic.Location;
             }
         }
 
-        public IList<EngineDiagnostic> Diagnostics
-        {
-            get { return _diagnostics; }
-        }
-
-        public bool IsBusy { get { return _isBusy; } }
+        public IList<EngineDiagnostic> Diagnostics => _diagnostics;
+        public bool IsBusy => _isBusy;
+        public bool CanFixSelected => !_isBusy && IsFixable(SelectedDiagnostic);
+        public bool HasFixableDiagnostics => !_isBusy && _diagnostics.Any(IsFixable);
+        public bool CanNavigateIssues => !_isBusy && _visibleIndices.Count > 0;
+        public bool CanNavigateOccurrences => !_isBusy && GetOccurrenceCount(SelectedDiagnostic) > 1;
 
         public void SetBusy(bool busy, string message)
         {
             InvokeOnUiThread(() =>
             {
                 _isBusy = busy;
-                _analyzeButton.Enabled = !busy;
-                _fixOneButton.Enabled = !busy && CanFixSelected;
-                _fixAllButton.Enabled = !busy && HasAutoDiagnostics;
-                _previousButton.Enabled = !busy && _diagnostics.Count > 0;
-                _nextButton.Enabled = !busy && _diagnostics.Count > 0;
-                UpdateOccurrenceNavigation();
-                _toggleListButton.Enabled = !busy && _diagnostics.Count > 0;
-                if (!string.IsNullOrEmpty(message))
-                {
-                    _status.Text = message;
-                }
+                _searchBox.Enabled = !busy;
+                _issueList.Enabled = !busy;
+                if (!string.IsNullOrEmpty(message)) SetStatusCore(message);
+                RaiseStateChanged();
             });
         }
 
         public void SetStatus(string message)
         {
-            InvokeOnUiThread(() =>
-            {
-                _status.Text = message;
-            });
+            InvokeOnUiThread(() => SetStatusCore(message));
         }
 
         public void ShowAnalysis(EngineAnalysisResult result)
@@ -215,97 +120,40 @@ namespace ThesisAddIn.VSTO.Ui
         private void ShowAnalysisCore(EngineAnalysisResult result)
         {
             _diagnostics.Clear();
-            _diagnosticList.Controls.Clear();
-            _diagnosticCards.Clear();
+            if (result?.Diagnostics != null)
+                _diagnostics.AddRange(result.Diagnostics.Where(diagnostic => diagnostic != null));
             _selectedIndex = -1;
             _selectedOccurrenceIndex = 0;
-            _showDiagnosticList = false;
-            if (result != null && result.Diagnostics != null)
-            {
-                foreach (EngineDiagnostic diagnostic in result.Diagnostics)
-                {
-                    _diagnostics.Add(diagnostic);
-                }
-            }
-
-            for (int i = 0; i < _diagnostics.Count; i++)
-            {
-                AddDiagnosticCard(i, _diagnostics[i]);
-            }
-            bool hasDiagnostics = _diagnostics.Count > 0;
-            _diagnosticList.Visible = hasDiagnostics && _showDiagnosticList;
-            _emptyState.Visible = !hasDiagnostics;
-            if (!hasDiagnostics)
-            {
-                _emptyState.Text = "未发现问题。\n结果仅覆盖已检查范围。";
-            }
-            _previousButton.Enabled = hasDiagnostics;
-            _nextButton.Enabled = hasDiagnostics;
-            UpdateOccurrenceNavigation();
-            _toggleListButton.Enabled = hasDiagnostics;
-            _toggleListButton.Text = "展开问题列表";
-            _issueSummary.Text = hasDiagnostics
-                ? "检测到 " + _diagnostics.Count + " 条问题。可用上一项/下一项浏览，或展开问题列表查看详情。"
-                : "没有待处理问题。结果仅覆盖已检查范围。";
-            string ruleVersion = result != null ? result.RuleVersion : string.Empty;
-            string coverage = result != null ? result.Coverage : string.Empty;
-            _coverage.Text = "规则版本：" + (string.IsNullOrEmpty(ruleVersion) ? "（未提供）" : ruleVersion)
-                + "；已检查：" + (string.IsNullOrEmpty(coverage) ? "（未提供）" : coverage);
-
-            string uncovered = (result == null || result.UnsupportedScopes == null || result.UnsupportedScopes.Count == 0)
-                ? "未覆盖：引擎未报告；本演示只覆盖少量规则，不代表论文合规。"
-                : "未覆盖范围：" + string.Join("、", result.UnsupportedScopes.ToArray());
-            _coverage.Text += Environment.NewLine + uncovered;
-            SetStatus("分析完成，共 " + _diagnostics.Count + " 条问题。悬停正文高亮可联动建议。");
-
-            _fixOneButton.Enabled = CanFixSelected;
-            _fixAllButton.Enabled = HasAutoDiagnostics;
+            ClearSearch();
+            RebuildIssueList();
+            SetStatusCore(_diagnostics.Count == 0
+                ? "未发现格式问题。结果仅覆盖已检查范围。"
+                : "分析完成：" + _diagnostics.Count + " 个问题。可在 Word 功能区定位或修复。 ");
+            RaiseStateChanged();
         }
 
         public void ShowFailure(string message)
         {
-            InvokeOnUiThread(() => ShowFailureCore(message));
-        }
-
-        private void ShowFailureCore(string message)
-        {
-            _diagnostics.Clear();
-            _diagnosticList.Controls.Clear();
-            _diagnosticCards.Clear();
-            _diagnosticList.Visible = false;
-            _selectedIndex = -1;
-            _selectedOccurrenceIndex = 0;
-            _showDiagnosticList = false;
-            _emptyState.Visible = true;
-            string detail = string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim();
-            _emptyState.Text = "本次分析未完成。" + Environment.NewLine + Environment.NewLine + detail;
-            _fixOneButton.Enabled = false;
-            _fixAllButton.Enabled = false;
-            _previousButton.Enabled = false;
-            _nextButton.Enabled = false;
-            _previousOccurrenceButton.Enabled = false;
-            _nextOccurrenceButton.Enabled = false;
-            _toggleListButton.Enabled = false;
-            _toggleListButton.Text = "展开问题列表";
-            _issueSummary.Text = "分析失败；请查看下方错误说明。";
-            _coverage.Text = "本次分析未完成。";
-            _status.Text = "本次分析未完成，错误详情见结果区域。";
+            InvokeOnUiThread(() =>
+            {
+                _diagnostics.Clear();
+                _selectedIndex = -1;
+                _selectedOccurrenceIndex = 0;
+                RebuildIssueList();
+                SetStatusCore("分析或修复未完成：" + (string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim()));
+                RaiseStateChanged();
+            });
         }
 
         /// <summary>
-        /// Engine protocol calls use ConfigureAwait(false), so their callers may resume
-        /// on a worker thread. Keep all WinForms control access on the pane's UI thread.
-        /// Invoke is synchronous so the async operation observes UI exceptions and keeps
-        /// updates ordered with the following status changes.
+        /// Engine protocol calls can resume on a worker thread. Keep every WinForms
+        /// control access on the Word UI thread and surface exceptions to the caller.
         /// </summary>
         public T InvokeOnUiThread<T>(Func<T> action)
         {
             if (action == null) throw new ArgumentNullException(nameof(action));
             if (IsDisposed || Disposing || !IsHandleCreated)
-            {
-                throw new InvalidOperationException("论文格式检查面板已关闭，无法更新界面。");
-            }
-
+                throw new InvalidOperationException("问题检索列表已关闭，无法更新界面。");
             return InvokeRequired ? (T)Invoke(action) : action();
         }
 
@@ -319,24 +167,13 @@ namespace ThesisAddIn.VSTO.Ui
             });
         }
 
-        /// <summary>
-        /// 按批注中的规则、期望值和实际值选中唯一的问题。
-        /// 多条诊断无法唯一对应时不激活卡片，避免跳到错误问题。
-        /// </summary>
+        /// <summary>Selects the unique grouped issue described by a Word comment.</summary>
         public bool SelectByComment(string ruleId, string expected, string actual, string location, bool navigateToSource)
         {
-            if (string.IsNullOrWhiteSpace(ruleId))
-            {
-                return false;
-            }
-
+            if (string.IsNullOrWhiteSpace(ruleId)) return false;
             int matchIndex = CommentDiagnosticMatcher.FindUniqueMatchIndex(
                 _diagnostics, ruleId, expected, actual, location);
-            if (matchIndex < 0)
-            {
-                return false;
-            }
-
+            if (matchIndex < 0) return false;
             SelectDiagnostic(matchIndex, navigateToSource, location);
             return true;
         }
@@ -347,336 +184,202 @@ namespace ThesisAddIn.VSTO.Ui
             for (int index = 0; index < _diagnostics.Count; index++)
             {
                 EngineDiagnostic diagnostic = _diagnostics[index];
-                if (diagnostic == null || diagnostic.Occurrences == null) continue;
-                foreach (EngineDiagnosticOccurrence occurrence in diagnostic.Occurrences)
+                if (diagnostic?.Occurrences == null) continue;
+                if (diagnostic.Occurrences.Any(occurrence => occurrence != null &&
+                    string.Equals(occurrence.Location, location, StringComparison.Ordinal)))
                 {
-                    if (occurrence != null && string.Equals(occurrence.Location, location, StringComparison.Ordinal))
-                    {
-                        SelectDiagnostic(index, navigateToSource, location);
-                        return true;
-                    }
+                    SelectDiagnostic(index, navigateToSource, location);
+                    return true;
                 }
             }
             return false;
         }
 
-        private void AddDiagnosticCard(int index, EngineDiagnostic diagnostic)
+        public void NavigateIssue(int direction)
         {
-            var card = new Panel
-            {
-                Height = 120,
-                Padding = new Padding(0),
-                BackColor = SystemColors.Window,
-                BorderStyle = BorderStyle.FixedSingle,
-                AccessibleRole = AccessibleRole.ListItem,
-                AccessibleName = BuildDiagnosticCardText(diagnostic),
-                Tag = index,
-                Margin = new Padding(0, 0, 0, 8),
-                Cursor = Cursors.Hand
-            };
-
-            var avatar = new Panel
-            {
-                Name = "Avatar",
-                Left = 10,
-                Top = 12,
-                Width = 36,
-                Height = 36,
-                BackColor = SystemColors.Window,
-                Cursor = Cursors.Hand
-            };
-            avatar.Paint += (sender, args) =>
-            {
-                args.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                using (var brush = new SolidBrush(Color.FromArgb(211, 50, 57)))
-                using (var font = new Font("Microsoft YaHei UI", 8F, FontStyle.Bold))
-                using (var format = new StringFormat
-                {
-                    Alignment = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center
-                })
-                {
-                    args.Graphics.FillEllipse(brush, 1, 1, avatar.Width - 2, avatar.Height - 2);
-                    args.Graphics.DrawString("NT", font, Brushes.White,
-                        new RectangleF(1, 1, avatar.Width - 2, avatar.Height - 2), format);
-                }
-            };
-
-            var author = new Label
-            {
-                Name = "Author",
-                Text = "NKU Thesis Tool",
-                Left = 56,
-                Top = 10,
-                Height = 22,
-                Font = new Font(Font, FontStyle.Bold),
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
-                AutoEllipsis = true,
-                Cursor = Cursors.Hand
-            };
-
-            var body = new Label
-            {
-                Name = "Body",
-                Text = BuildDiagnosticCardText(diagnostic),
-                Left = 56,
-                Top = 34,
-                AutoSize = false,
-                Font = new Font("Microsoft YaHei UI", 9F),
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
-                UseMnemonic = false,
-                Cursor = Cursors.Hand
-            };
-
-            card.Controls.Add(avatar);
-            card.Controls.Add(author);
-            card.Controls.Add(body);
-            AttachCardClickHandlers(card);
-            _diagnosticCards.Add(card);
-            _diagnosticList.Controls.Add(card);
-            ResizeDiagnosticCards();
+            if (_isBusy || direction == 0 || _visibleIndices.Count == 0) return;
+            int currentVisibleIndex = _visibleIndices.IndexOf(_selectedIndex);
+            int nextVisibleIndex = currentVisibleIndex < 0
+                ? (direction > 0 ? 0 : _visibleIndices.Count - 1)
+                : (currentVisibleIndex + direction + _visibleIndices.Count) % _visibleIndices.Count;
+            SelectDiagnostic(_visibleIndices[nextVisibleIndex], navigateToSource: true);
         }
 
-        private static string BuildDiagnosticCardText(EngineDiagnostic diagnostic)
+        public void NavigateOccurrence(int direction)
         {
-            string actual = diagnostic.Actual ?? "（未提供）";
-            int occurrenceCount = diagnostic.Occurrences == null || diagnostic.Occurrences.Count == 0
-                ? 1
-                : diagnostic.Occurrences.Count;
-            if (occurrenceCount > 1)
-            {
-                actual += "（" + occurrenceCount + "处）";
-            }
-
-            return "要求参考来源：" + DemoRequirementSource
-                + Environment.NewLine + "规则：" + (diagnostic.RuleId ?? "（未提供）")
-                + Environment.NewLine + "期望值：" + (diagnostic.Expected ?? "（未提供）")
-                + Environment.NewLine + "实际值：" + actual;
-        }
-
-        private void ResizeDiagnosticCards()
-        {
-            int width = Math.Max(120, _diagnosticList.ClientSize.Width - _diagnosticList.Padding.Horizontal - 4);
-            foreach (Panel card in _diagnosticCards)
-            {
-                card.Width = width;
-                Label author = card.Controls["Author"] as Label;
-                Label body = card.Controls["Body"] as Label;
-                if (author == null || body == null)
-                {
-                    continue;
-                }
-
-                int textWidth = Math.Max(80, width - body.Left - 12);
-                author.Width = textWidth;
-                body.Width = textWidth;
-                Size textSize = TextRenderer.MeasureText(
-                    body.Text,
-                    body.Font,
-                    new Size(textWidth, int.MaxValue),
-                    TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
-                // TextRenderer can measure wrapped Chinese text one line shorter than
-                // the WinForms Label paints it at the pane's DPI. Reserve one extra
-                // line so the final “实际值” row is never clipped by the card border.
-                body.Height = textSize.Height + body.Font.Height + 2;
-                card.Height = Math.Max(82, body.Top + body.Height + 12);
-            }
-        }
-
-        private void AttachCardClickHandlers(Control control)
-        {
-            control.Click += OnDiagnosticCardClick;
-            foreach (Control child in control.Controls)
-            {
-                AttachCardClickHandlers(child);
-            }
-        }
-
-        private void OnDiagnosticCardClick(object sender, EventArgs e)
-        {
-            Control control = sender as Control;
-            while (control != null && !(control.Tag is int))
-            {
-                control = control.Parent;
-            }
-
-            if (control is Panel card && card.Tag is int)
-            {
-                SelectDiagnostic((int)card.Tag);
-            }
-        }
-
-        private void SelectDiagnostic(int index)
-        {
-            SelectDiagnostic(index, navigateToSource: true);
+            if (_isBusy || direction == 0 || SelectedDiagnostic == null) return;
+            int count = GetOccurrenceCount(SelectedDiagnostic);
+            if (count <= 1) return;
+            _selectedOccurrenceIndex = (_selectedOccurrenceIndex + direction + count) % count;
+            RaiseStateChanged();
+            OnEvent(DiagnosticSelected);
         }
 
         private void SelectDiagnostic(int index, bool navigateToSource, string location = null)
         {
-            if (index < 0 || index >= _diagnostics.Count)
-            {
-                return;
-            }
-
-            bool changedDiagnostic = _selectedIndex != index;
+            if (index < 0 || index >= _diagnostics.Count) return;
             _selectedIndex = index;
-            EngineDiagnostic selectedDiagnostic = _diagnostics[index];
-            if (changedDiagnostic) _selectedOccurrenceIndex = 0;
-            if (!string.IsNullOrWhiteSpace(location) && selectedDiagnostic.Occurrences != null)
+            EngineDiagnostic selected = _diagnostics[index];
+            _selectedOccurrenceIndex = 0;
+            if (!string.IsNullOrWhiteSpace(location) && selected.Occurrences != null)
             {
-                for (int i = 0; i < selectedDiagnostic.Occurrences.Count; i++)
+                for (int i = 0; i < selected.Occurrences.Count; i++)
                 {
-                    if (string.Equals(selectedDiagnostic.Occurrences[i].Location, location, StringComparison.Ordinal))
+                    if (string.Equals(selected.Occurrences[i].Location, location, StringComparison.Ordinal))
                     {
                         _selectedOccurrenceIndex = i;
                         break;
                     }
                 }
             }
-            _issueSummary.Text = "当前 " + (index + 1) + "/" + _diagnostics.Count + "："
-                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + DescribeOccurrenceSelection(selectedDiagnostic)
-                + "。可用上一处/下一处定位此项的其他位置。";
-            for (int i = 0; i < _diagnosticCards.Count; i++)
-            {
-                Panel card = _diagnosticCards[i];
-                bool selected = i == index;
-                card.BackColor = selected ? SystemColors.Info : SystemColors.Window;
-                card.BorderStyle = BorderStyle.FixedSingle;
-                card.AccessibleDescription = selected ? "当前选中" : string.Empty;
-            }
 
-            _fixOneButton.Enabled = !_isBusy && CanFixSelected;
-            UpdateOccurrenceNavigation();
-            if (_showDiagnosticList && index < _diagnosticCards.Count)
+            int visibleIndex = _visibleIndices.IndexOf(index);
+            if (visibleIndex >= 0)
             {
-                _diagnosticList.ScrollControlIntoView(_diagnosticCards[index]);
+                _updatingList = true;
+                try
+                {
+                    _issueList.SelectedIndex = visibleIndex;
+                    _issueList.TopIndex = Math.Max(0, visibleIndex);
+                }
+                finally { _updatingList = false; }
             }
-            if (navigateToSource)
-            {
-                OnEvent(DiagnosticSelected);
-            }
+            RaiseStateChanged();
+            if (navigateToSource) OnEvent(DiagnosticSelected);
         }
 
-        private void NavigateSelection(int direction)
+        private void OnIssueSelected(object sender, EventArgs e)
         {
-            if (_isBusy || _diagnostics.Count == 0 || direction == 0)
-            {
-                return;
-            }
+            if (_updatingList || _issueList.SelectedIndex < 0 || _issueList.SelectedIndex >= _visibleIndices.Count) return;
+            SelectDiagnostic(_visibleIndices[_issueList.SelectedIndex], navigateToSource: true);
+        }
 
-            int nextIndex;
-            if (_selectedIndex < 0)
+        private void OnSearchGotFocus(object sender, EventArgs e)
+        {
+            if (!_isShowingPlaceholder) return;
+            _isShowingPlaceholder = false;
+            _searchBox.Text = string.Empty;
+            _searchBox.ForeColor = SystemColors.WindowText;
+        }
+
+        private void OnSearchLostFocus(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_searchBox.Text)) SetPlaceholder();
+        }
+
+        private void OnSearchTextChanged(object sender, EventArgs e)
+        {
+            if (_isShowingPlaceholder || _updatingList) return;
+            int priorSelection = _selectedIndex;
+            RebuildIssueList();
+            if (!_visibleIndices.Contains(priorSelection))
             {
-                nextIndex = direction > 0 ? 0 : _diagnostics.Count - 1;
+                _selectedIndex = -1;
+                _selectedOccurrenceIndex = 0;
             }
             else
             {
-                nextIndex = (_selectedIndex + direction + _diagnostics.Count) % _diagnostics.Count;
+                int visibleIndex = _visibleIndices.IndexOf(priorSelection);
+                _updatingList = true;
+                try { _issueList.SelectedIndex = visibleIndex; }
+                finally { _updatingList = false; }
             }
-
-            SelectDiagnostic(nextIndex);
+            RaiseStateChanged();
         }
 
-        private void NavigateOccurrence(int direction)
+        private void RebuildIssueList()
         {
-            if (_isBusy || direction == 0 || SelectedDiagnostic == null)
-                return;
-            int count = GetOccurrenceCount(SelectedDiagnostic);
-            if (count <= 1)
-                return;
-            _selectedOccurrenceIndex = (_selectedOccurrenceIndex + direction + count) % count;
-            UpdateSelectionSummary();
-            OnEvent(DiagnosticSelected);
+            string query = _isShowingPlaceholder ? string.Empty : (_searchBox.Text ?? string.Empty).Trim();
+            _visibleIndices.Clear();
+            _issueList.BeginUpdate();
+            try
+            {
+                _issueList.Items.Clear();
+                for (int index = 0; index < _diagnostics.Count; index++)
+                {
+                    EngineDiagnostic diagnostic = _diagnostics[index];
+                    if (!Matches(diagnostic, query)) continue;
+                    _visibleIndices.Add(index);
+                    _issueList.Items.Add(BuildIssueLabel(diagnostic));
+                }
+            }
+            finally { _issueList.EndUpdate(); }
+
+            int selectedVisibleIndex = _visibleIndices.IndexOf(_selectedIndex);
+            if (selectedVisibleIndex >= 0)
+            {
+                _updatingList = true;
+                try { _issueList.SelectedIndex = selectedVisibleIndex; }
+                finally { _updatingList = false; }
+            }
         }
 
-        private void UpdateSelectionSummary()
+        private static bool Matches(EngineDiagnostic diagnostic, string query)
         {
-            EngineDiagnostic diagnostic = SelectedDiagnostic;
-            if (diagnostic == null) return;
-            _issueSummary.Text = "当前 " + (_selectedIndex + 1) + "/" + _diagnostics.Count + "："
-                + (diagnostic.RuleId ?? "（未提供规则）") + DescribeOccurrenceSelection(diagnostic)
-                + "。可用上一处/下一处定位此项的其他位置。";
+            if (string.IsNullOrEmpty(query)) return true;
+            string searchable = string.Join(" ", new[]
+            {
+                diagnostic.RuleId, GetRuleName(diagnostic.RuleId), diagnostic.Expected, diagnostic.Actual,
+                diagnostic.Message, diagnostic.FixLevel
+            }.Where(value => !string.IsNullOrEmpty(value)));
+            return searchable.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0;
         }
 
-        private void UpdateOccurrenceNavigation()
-        {
-            bool enabled = !_isBusy && SelectedDiagnostic != null && GetOccurrenceCount(SelectedDiagnostic) > 1;
-            _previousOccurrenceButton.Enabled = enabled;
-            _nextOccurrenceButton.Enabled = enabled;
-        }
-
-        private string DescribeOccurrenceSelection(EngineDiagnostic diagnostic)
+        private static string BuildIssueLabel(EngineDiagnostic diagnostic)
         {
             int count = GetOccurrenceCount(diagnostic);
-            return count > 1 ? "（第 " + (_selectedOccurrenceIndex + 1) + "/" + count + " 处）" : string.Empty;
+            return GetRuleName(diagnostic.RuleId) + " → " + (diagnostic.Expected ?? "（未提供）")
+                + (count > 1 ? "（" + count + "处）" : string.Empty);
         }
 
-        private static int GetOccurrenceCount(EngineDiagnostic diagnostic)
+        private static string GetRuleName(string ruleId)
         {
-            return diagnostic == null || diagnostic.Occurrences == null || diagnostic.Occurrences.Count == 0
-                ? 1 : diagnostic.Occurrences.Count;
-        }
-
-        private void ToggleDiagnosticList()
-        {
-            if (_isBusy || _diagnostics.Count == 0)
+            switch (ruleId ?? string.Empty)
             {
-                return;
-            }
-
-            _showDiagnosticList = !_showDiagnosticList;
-            _diagnosticList.Visible = _showDiagnosticList;
-            _emptyState.Visible = false;
-            _toggleListButton.Text = _showDiagnosticList ? "收起问题列表" : "展开问题列表";
-            if (_showDiagnosticList && _selectedIndex >= 0 && _selectedIndex < _diagnosticCards.Count)
-            {
-                _diagnosticList.ScrollControlIntoView(_diagnosticCards[_selectedIndex]);
+                case "demo/east-asian-font": return "中文字体";
+                case "demo/western-font": return "西文字体";
+                case "demo/font-size": return "字号";
+                default: return ruleId ?? "未命名问题";
             }
         }
 
-        private bool HasAutoDiagnostics
+        private void ClearSearch()
         {
-            get
+            _updatingList = true;
+            try
             {
-                foreach (EngineDiagnostic diagnostic in _diagnostics)
-                {
-                    if (string.Equals(diagnostic.FixLevel, "auto", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
+                _searchBox.Text = string.Empty;
+                _searchBox.ForeColor = SystemColors.WindowText;
+                _isShowingPlaceholder = false;
             }
+            finally { _updatingList = false; }
         }
 
-        private bool CanFixSelected
+        private void SetPlaceholder()
         {
-            get
-            {
-                EngineDiagnostic diagnostic = SelectedDiagnostic;
-                return diagnostic != null
-                    && string.Equals(diagnostic.FixLevel, "auto", StringComparison.OrdinalIgnoreCase);
-            }
+            _isShowingPlaceholder = true;
+            _searchBox.ForeColor = SystemColors.GrayText;
+            _searchBox.Text = SearchPlaceholder;
         }
 
-        private static void ConfigureButton(Button button, string text)
+        private void SetStatusCore(string message)
         {
-            button.Text = text;
-            button.AutoSize = true;
-            button.Height = 30;
-            button.Margin = new Padding(0, 0, 6, 4);
+            _status.Text = message ?? string.Empty;
+            _toolTip.SetToolTip(_status, _status.Text);
         }
+
+        private void RaiseStateChanged() => OnEvent(StateChanged);
 
         private void OnEvent(EventHandler handler)
         {
-            if (handler != null)
-            {
-                handler(this, EventArgs.Empty);
-            }
+            if (handler != null) handler(this, EventArgs.Empty);
         }
+
+        private static int GetOccurrenceCount(EngineDiagnostic diagnostic) =>
+            diagnostic?.Occurrences != null && diagnostic.Occurrences.Count > 0 ? diagnostic.Occurrences.Count : 1;
+
+        private static bool IsFixable(EngineDiagnostic diagnostic) =>
+            diagnostic != null && string.Equals(diagnostic.FixLevel, "auto", StringComparison.OrdinalIgnoreCase);
 
         public static string DescribeSeverity(string severity)
         {
@@ -701,6 +404,3 @@ namespace ThesisAddIn.VSTO.Ui
         }
     }
 }
-
-
-

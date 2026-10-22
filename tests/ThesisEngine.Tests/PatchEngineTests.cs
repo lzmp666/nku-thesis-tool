@@ -15,17 +15,19 @@ public sealed class PatchEngineTests
         var result = new AnalysisResult(
             [
                 new Diagnostic(FontSizeAnalyzer.RuleIdEastAsiaFont, "warning", "word/document.xml#paragraph[0]/run[0]", "宋体", "黑体", "auto", "font"),
-                new Diagnostic(FontSizeAnalyzer.RuleIdAsciiFont, "warning", "word/document.xml#paragraph[0]/run[0]", "Times New Roman", "Arial", "suggest", "font"),
+                new Diagnostic(FontSizeAnalyzer.RuleIdAsciiFont, "warning", "word/document.xml#paragraph[0]/run[0]", "Times New Roman", "Arial", "auto", "font"),
                 new Diagnostic(FontSizeAnalyzer.RuleIdFontSize, "warning", "word/document.xml#paragraph[0]/run[0]", "12pt", "(unknown)", "manual", "size")
             ],
             "demo-0.1.0", "covered", []);
 
         var plan = PatchEngine.PlanPatches(result);
 
-        var patch = Assert.Single(plan.Patches);
-        Assert.Equal("黑体", patch.ExpectedBefore);
-        Assert.Equal("宋体", patch.DesiredAfter);
-        Assert.Equal(2, plan.DeferredDiagnostics.Count);
+        Assert.Equal(2, plan.Patches.Count);
+        Assert.Contains(plan.Patches, patch => patch.RuleId == FontSizeAnalyzer.RuleIdEastAsiaFont
+            && patch.ExpectedBefore == "黑体" && patch.DesiredAfter == "宋体");
+        Assert.Contains(plan.Patches, patch => patch.RuleId == FontSizeAnalyzer.RuleIdAsciiFont
+            && patch.ExpectedBefore == "Arial" && patch.DesiredAfter == "Times New Roman");
+        Assert.Single(plan.DeferredDiagnostics);
     }
 
     [Fact]
@@ -47,10 +49,12 @@ public sealed class PatchEngineTests
             var run = Assert.Single(after.Paragraphs).Runs.Single();
             Assert.Equal("宋体", run.EastAsiaFont);
             Assert.Equal(12, run.FontSizePt);
+            Assert.Equal("Times New Roman", run.AsciiSlotFont);
+            Assert.Equal("Times New Roman", run.HAnsiFont);
             Assert.Equal("正文内容", run.Text);
             var second = new FontSizeAnalyzer().Analyze(after, DemoRuleSet.NkuDraftSample);
             Assert.Empty(PatchEngine.PlanPatches(second).Patches);
-            Assert.Single(second.Diagnostics); // western font remains suggest
+            Assert.Empty(second.Diagnostics);
         }
         finally
         {
@@ -86,7 +90,7 @@ public sealed class PatchEngineTests
             WordAnnotationWriter.WriteAnnotatedCopy(input, annotated, analysis.Diagnostics);
             var originalBytes = File.ReadAllBytes(annotated);
             var plan = PatchEngine.PlanPatches(analyzer.Analyze(new WordFormattingReader().Read(annotated), DemoRuleSet.NkuDraftSample));
-            Assert.Equal(6, plan.Patches.Count);
+            Assert.Equal(9, plan.Patches.Count);
 
             var result = PatchEngine.ApplyPatches(annotated, plan, output);
 
@@ -98,9 +102,11 @@ public sealed class PatchEngineTests
             {
                 Assert.Equal("宋体", run.EastAsiaFont);
                 Assert.Equal(12, run.FontSizePt);
-                Assert.Equal("Arial", run.AsciiFont);
+                Assert.Equal("Times New Roman", run.AsciiFont);
+                Assert.Equal("Times New Roman", run.AsciiSlotFont);
+                Assert.Equal("Times New Roman", run.HAnsiFont);
             });
-            Assert.Empty(PatchEngine.PlanPatches(analyzer.Analyze(after, DemoRuleSet.NkuDraftSample)).Patches);
+            Assert.Empty(analyzer.Analyze(after, DemoRuleSet.NkuDraftSample).Diagnostics);
             using var beforeZip = ZipFile.OpenRead(annotated);
             using var afterZip = ZipFile.OpenRead(output);
             Assert.Equal(ReadEntry(beforeZip, "word/comments.xml"), ReadEntry(afterZip, "word/comments.xml"));
@@ -166,6 +172,45 @@ public sealed class PatchEngineTests
             Assert.False(result.Succeeded);
             Assert.Single(result.Failures);
             Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            File.Delete(input);
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public void WesternFontRepairSetsAsciiAndHAnsiSlotsAndRemovesThemeOverrides()
+    {
+        var input = CreatePackageWithFontSlots("宋体", "Arial", "Calibri", "24", "Latin text",
+            "w:asciiTheme=\"minorHAnsi\" w:hAnsiTheme=\"minorHAnsi\"");
+        var output = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.fixed.docx");
+        try
+        {
+            var analysis = new FontSizeAnalyzer().Analyze(new WordFormattingReader().Read(input), DemoRuleSet.NkuDraftSample);
+            var western = Assert.Single(analysis.Diagnostics, diagnostic => diagnostic.RuleId == FontSizeAnalyzer.RuleIdAsciiFont);
+            Assert.Equal("ASCII=Arial; HAnsi=Calibri", western.Actual);
+
+            var plan = PatchEngine.PlanPatches(analysis);
+            var patch = Assert.Single(plan.Patches, candidate => candidate.RuleId == FontSizeAnalyzer.RuleIdAsciiFont);
+            Assert.Equal("ASCII=Arial; HAnsi=Calibri", patch.ExpectedBefore);
+            Assert.Equal("Times New Roman", patch.DesiredAfter);
+
+            var applied = PatchEngine.ApplyPatches(input, plan, output);
+
+            Assert.True(applied.Succeeded);
+            var repaired = new WordFormattingReader().Read(output);
+            var run = Assert.Single(Assert.Single(repaired.Paragraphs).Runs);
+            Assert.Equal("Times New Roman", run.AsciiSlotFont);
+            Assert.Equal("Times New Roman", run.HAnsiFont);
+            using var archive = ZipFile.OpenRead(output);
+            var document = XDocument.Parse(ReadEntry(archive, "word/document.xml"));
+            var fonts = Assert.Single(document.Descendants(W + "rFonts"));
+            Assert.Equal("Times New Roman", (string?)fonts.Attribute(W + "ascii"));
+            Assert.Equal("Times New Roman", (string?)fonts.Attribute(W + "hAnsi"));
+            Assert.Null(fonts.Attribute(W + "asciiTheme"));
+            Assert.Null(fonts.Attribute(W + "hAnsiTheme"));
         }
         finally
         {
@@ -246,12 +291,16 @@ public sealed class PatchEngineTests
     }
 
     private static string CreatePackage(string eastAsia, string ascii, string size, string text)
+        => CreatePackageWithFontSlots(eastAsia, ascii, ascii, size, text);
+
+    private static string CreatePackageWithFontSlots(string eastAsia, string ascii, string hAnsi,
+        string size, string text, string additionalFontAttributes = "")
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.docx");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
         Add(archive, "[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>");
         Add(archive, "_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>");
-        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"{eastAsia}\" w:ascii=\"{ascii}\"/><w:sz w:val=\"{size}\"/></w:rPr><w:t>{text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
+        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"{eastAsia}\" w:ascii=\"{ascii}\" w:hAnsi=\"{hAnsi}\" {additionalFontAttributes}/><w:sz w:val=\"{size}\"/></w:rPr><w:t>{text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
         return path;
     }
 

@@ -112,6 +112,10 @@ public static class WordPatchApplier
             {
                 EnsureExpected(patch, actual.EastAsiaFont, patch.ExpectedBefore);
             }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
+            {
+                EnsureExpected(patch, DescribeWesternFonts(actual), patch.ExpectedBefore);
+            }
             else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal))
             {
                 EnsureExpected(patch, actual.FontSizePt is null ? null : $"{actual.FontSizePt.Value.ToString(CultureInfo.InvariantCulture)}pt", patch.ExpectedBefore);
@@ -189,16 +193,18 @@ public static class WordPatchApplier
 
         if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
         {
-            var fonts = properties.Element(W + "rFonts");
-            if (fonts is null)
-            {
-                fonts = new XElement(W + "rFonts");
-                var style = properties.Element(W + "rStyle");
-                if (style is null) properties.AddFirst(fonts);
-                else style.AddAfterSelf(fonts);
-            }
+            var fonts = GetOrCreateRunFonts(properties);
             fonts.SetAttributeValue(W + "eastAsia", target.Patch.DesiredAfter);
             fonts.Attribute(W + "eastAsiaTheme")?.Remove();
+        }
+        else if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
+        {
+            var fonts = GetOrCreateRunFonts(properties);
+            fonts.SetAttributeValue(W + "ascii", target.Patch.DesiredAfter);
+            fonts.SetAttributeValue(W + "hAnsi", target.Patch.DesiredAfter);
+            // Explicit values must win over a theme slot after the repair.
+            fonts.Attribute(W + "asciiTheme")?.Remove();
+            fonts.Attribute(W + "hAnsiTheme")?.Remove();
         }
         else if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal))
         {
@@ -214,6 +220,29 @@ public static class WordPatchApplier
             }
             size.SetAttributeValue(W + "val", halfPoints.ToString(CultureInfo.InvariantCulture));
         }
+    }
+
+    private static XElement GetOrCreateRunFonts(XElement properties)
+    {
+        var fonts = properties.Element(W + "rFonts");
+        if (fonts is not null) return fonts;
+
+        fonts = new XElement(W + "rFonts");
+        var style = properties.Element(W + "rStyle");
+        if (style is null) properties.AddFirst(fonts);
+        else style.AddAfterSelf(fonts);
+        return fonts;
+    }
+
+    private static string DescribeWesternFonts(TextRunSnapshot snapshot)
+    {
+        var ascii = snapshot.AsciiSlotFont ?? snapshot.AsciiFont;
+        var hAnsi = snapshot.HAnsiFont ?? snapshot.AsciiFont;
+        var normalizedAscii = string.IsNullOrWhiteSpace(ascii) ? "(unknown)" : ascii;
+        var normalizedHAnsi = string.IsNullOrWhiteSpace(hAnsi) ? "(unknown)" : hAnsi;
+        return string.Equals(normalizedAscii, normalizedHAnsi, StringComparison.Ordinal)
+            ? normalizedAscii
+            : $"ASCII={normalizedAscii}; HAnsi={normalizedHAnsi}";
     }
 
     private static bool IsAfterFontSize(XName name) =>

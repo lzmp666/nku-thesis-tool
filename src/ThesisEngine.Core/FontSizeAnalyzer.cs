@@ -14,7 +14,6 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
 
     private const string SeverityWarning = "warning";
     private const string FixLevelAuto = "auto";
-    private const string FixLevelSuggest = "suggest";
     private const string FixLevelManual = "manual";
 
     public AnalysisResult Analyze(DocumentSnapshot snapshot, DemoRuleSet profile)
@@ -85,7 +84,12 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
         DemoRuleSet profile,
         List<Diagnostic> diagnostics)
     {
-        if (string.IsNullOrWhiteSpace(run.AsciiFont))
+        // ASCII (0-127) and HAnsi (128-255) are separate OOXML slots. A run
+        // can look correct in one slot while still carrying the wrong font in
+        // the other, so compare both effective values before allowing repair.
+        var ascii = run.AsciiSlotFont ?? run.AsciiFont;
+        var hAnsi = run.HAnsiFont ?? run.AsciiFont;
+        if (string.IsNullOrWhiteSpace(ascii) && string.IsNullOrWhiteSpace(hAnsi))
         {
             diagnostics.Add(new Diagnostic(
                 RuleId: RuleIdAsciiFont,
@@ -98,17 +102,30 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
             return;
         }
 
-        if (!string.Equals(run.AsciiFont, profile.AsciiFontExpected, StringComparison.Ordinal))
+        var actual = DescribeWesternFont(ascii, hAnsi);
+        if (!string.Equals(ascii, profile.AsciiFontExpected, StringComparison.Ordinal) ||
+            !string.Equals(hAnsi, profile.AsciiFontExpected, StringComparison.Ordinal))
         {
             diagnostics.Add(new Diagnostic(
                 RuleId: RuleIdAsciiFont,
                 Severity: SeverityWarning,
                 Location: location,
                 Expected: profile.AsciiFontExpected,
-                Actual: run.AsciiFont,
-                FixLevel: FixLevelSuggest,
-                Message: $"ASCII/HAnsi 字体应为「{profile.AsciiFontExpected}」，实际为「{run.AsciiFont}」。"));
+                Actual: actual,
+                // The Word add-in always shows a before/after preview and
+                // requires explicit confirmation before applying this patch.
+                FixLevel: FixLevelAuto,
+                Message: $"ASCII/HAnsi 西文字体应统一为「{profile.AsciiFontExpected}」，实际为「{actual}」。"));
         }
+    }
+
+    private static string DescribeWesternFont(string? ascii, string? hAnsi)
+    {
+        var normalizedAscii = string.IsNullOrWhiteSpace(ascii) ? "(unknown)" : ascii;
+        var normalizedHAnsi = string.IsNullOrWhiteSpace(hAnsi) ? "(unknown)" : hAnsi;
+        return string.Equals(normalizedAscii, normalizedHAnsi, StringComparison.Ordinal)
+            ? normalizedAscii
+            : $"ASCII={normalizedAscii}; HAnsi={normalizedHAnsi}";
     }
 
     private static void CheckFontSize(

@@ -75,6 +75,30 @@ public sealed class FontSizeAnalyzerTests
         var diag = Assert.Single(result.Diagnostics);
         Assert.Equal(FontSizeAnalyzer.RuleIdAsciiFont, diag.RuleId);
         Assert.Equal("Arial", diag.Actual);
+        Assert.Equal("auto", diag.FixLevel);
+    }
+
+    [Fact]
+    public void WrongHAnsiFontIsDetectedEvenWhenAsciiSlotIsCorrect()
+    {
+        var snapshot = new DocumentSnapshot(
+            "word/document.xml",
+            new List<ParagraphSnapshot>
+            {
+                new(0, new List<TextRunSnapshot>
+                {
+                    new(0, "宋体", "Times New Roman", 12.0, "Latin text",
+                        AsciiSlotFont: "Times New Roman", HAnsiFont: "Arial")
+                })
+            },
+            Array.Empty<string>());
+
+        var result = new FontSizeAnalyzer().Analyze(snapshot, DefaultProfile);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(FontSizeAnalyzer.RuleIdAsciiFont, diagnostic.RuleId);
+        Assert.Equal("ASCII=Times New Roman; HAnsi=Arial", diagnostic.Actual);
+        Assert.Equal("auto", diagnostic.FixLevel);
     }
 
     [Fact]

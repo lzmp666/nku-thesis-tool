@@ -15,7 +15,7 @@ using ThesisAddIn.VSTO.Ui;
 namespace ThesisAddIn.VSTO
 {
     /// <summary>
-    /// Word 侧入口：创建中文问题侧边栏，把分析、定位、修复和批注锚点联动接到一起。
+    /// Word 侧入口：功能区承载操作命令，右侧问题检索列表与正文批注联动。
     ///
     /// 重要：Word 会锁住正在编辑的 .docx，引擎无法直接读取，因此所有分析/修复
     /// 都基于 Word 当前内存内容生成的临时快照。分析与修复直接更新当前打开的文档，
@@ -23,7 +23,7 @@ namespace ThesisAddIn.VSTO
     /// </summary>
     public partial class ThisAddIn
     {
-        internal const string TaskPaneTitle = "论文格式检查";
+        internal const string TaskPaneTitle = "问题检索";
 
         /// <summary>批注正文里用于回填规则编号的片段，例如“规则：demo/east-asian-font。”。</summary>
         private static readonly Regex RuleIdPattern = new Regex(@"规则[:：]\s*(?<id>[A-Za-z0-9_\-/]+)", RegexOptions.Compiled);
@@ -36,6 +36,7 @@ namespace ThesisAddIn.VSTO
         private CustomTaskPane _taskPane;
         private DiagnosticsPane _pane;
         private EngineGateway _gateway;
+        private ThesisRibbon _ribbon;
         private string _gatewayError;
         private System.Windows.Forms.Timer _documentHoverTimer;
         private CancellationTokenSource _operationCancellation;
@@ -65,15 +66,26 @@ namespace ThesisAddIn.VSTO
 
         protected override Microsoft.Office.Core.IRibbonExtensibility CreateRibbonExtensibilityObject()
         {
-            return new ThesisRibbon(OpenDiagnosticsPane);
+            _ribbon = new ThesisRibbon(
+                OnRibbonAnalyze,
+                OnRibbonFixCurrent,
+                OnRibbonFixAll,
+                OnRibbonNavigateIssue,
+                OnRibbonNavigateOccurrence,
+                OpenDiagnosticsPane,
+                () => TryGetPaneForActiveWindow()?.CanFixSelected == true,
+                () => TryGetPaneForActiveWindow()?.HasFixableDiagnostics == true,
+                () => TryGetPaneForActiveWindow()?.CanNavigateIssues == true,
+                () => TryGetPaneForActiveWindow()?.CanNavigateOccurrences == true);
+            return _ribbon;
         }
 
         private void OpenDiagnosticsPane()
         {
             try
             {
-                EnsureTaskPaneForWindow(Application.ActiveWindow);
-                if (_taskPane == null)
+                DiagnosticsPane pane = GetPaneForWindow(Application.ActiveWindow);
+                if (pane == null || _taskPane == null)
                 {
                     throw new InvalidOperationException("当前 Word 窗口没有可用的检查面板。");
                 }
@@ -89,6 +101,76 @@ namespace ThesisAddIn.VSTO
                 MessageBox.Show("未能打开检查面板。请先打开 Word 文档，再重试。",
                     TaskPaneTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private void OnRibbonAnalyze()
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            if (pane != null) OnAnalyzeRequested(pane, EventArgs.Empty);
+        }
+
+        private void OnRibbonFixCurrent()
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            if (pane != null) OnFixCurrentRequested(pane, EventArgs.Empty);
+        }
+
+        private void OnRibbonFixAll()
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            if (pane != null) OnFixAllRequested(pane, EventArgs.Empty);
+        }
+
+        private void OnRibbonNavigateIssue(int direction)
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            pane?.NavigateIssue(direction);
+        }
+
+        private void OnRibbonNavigateOccurrence(int direction)
+        {
+            DiagnosticsPane pane = GetPaneForRibbonCommand();
+            pane?.NavigateOccurrence(direction);
+        }
+
+        private DiagnosticsPane GetPaneForRibbonCommand()
+        {
+            try
+            {
+                return GetPaneForWindow(Application.ActiveWindow);
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("功能区命令未执行：当前没有可用的 Word 文档窗口。" + exception.Message);
+                return null;
+            }
+        }
+
+        private DiagnosticsPane TryGetPaneForActiveWindow()
+        {
+            try
+            {
+                Word.Window activeWindow = Application.ActiveWindow;
+                if (activeWindow == null) return null;
+                int windowHandle = activeWindow.Hwnd;
+                for (int i = 0; i < CustomTaskPanes.Count; i++)
+                {
+                    CustomTaskPane taskPane = CustomTaskPanes[i];
+                    Word.Window paneWindow = taskPane.Window as Word.Window;
+                    if (paneWindow != null && paneWindow.Hwnd == windowHandle)
+                        return taskPane.Control as DiagnosticsPane;
+                }
+            }
+            catch (Exception)
+            {
+                // Word's backstage page and closing-window transitions have no active pane.
+            }
+            return null;
+        }
+
+        private void OnPaneStateChanged(object sender, EventArgs e)
+        {
+            _ribbon?.Invalidate();
         }
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
@@ -107,7 +189,7 @@ namespace ThesisAddIn.VSTO
             Application.WindowSelectionChange += OnWindowSelectionChange;
 
             // Word 没有文档正文的鼠标悬停事件。用 UI 计时器查询鼠标下的
-            // Word.Range，再通过批注锚点切换建议卡片；COM 调用仍在 Word UI 线程执行。
+            // Word.Range，再通过批注锚点选择问题列表项；COM 调用仍在 Word UI 线程执行。
             _documentHoverTimer = new System.Windows.Forms.Timer { Interval = 250 };
             _documentHoverTimer.Tick += OnDocumentHoverTimerTick;
             _documentHoverTimer.Start();
@@ -132,7 +214,7 @@ namespace ThesisAddIn.VSTO
             }
 
             WriteStartupLog("插件启动完成；引擎已配置：" + (IsEngineConfigured ? "是" : "否")
-                + "；侧边栏：" + (_taskPane != null ? "已创建" : "创建失败"));
+                + "；问题检索列表：" + (_taskPane != null ? "已创建" : "等待文档窗口"));
         }
 
         private void ThisAddIn_Shutdown(object sender, EventArgs e)
@@ -266,7 +348,7 @@ namespace ThesisAddIn.VSTO
             EngineDiagnostic diagnostic = pane != null ? pane.SelectedDiagnostic : null;
             if (diagnostic == null)
             {
-                SetStatus(pane, "请先悬停原文标注，或用上一项/下一项选择问题，再执行“修复此项”。");
+                SetStatus(pane, "请先从右侧问题列表或 Word 批注选择一个问题，再执行“修复当前问题”。");
                 return;
             }
 
@@ -345,16 +427,15 @@ namespace ThesisAddIn.VSTO
             try
             {
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
-                // Keep the Chinese diagnostic cards readable and make all three actions
-                // visible without relying on a very wide monitor or a second task pane.
-                taskPane.Width = 520;
+                // The right pane is only a searchable issue index; all actions live on the ribbon.
+                taskPane.Width = 360;
                 taskPane.Visible = true;
                 _taskPane = taskPane;
                 _pane = pane;
                 pane.SetStatus(string.IsNullOrEmpty(_gatewayError)
-                    ? "准备就绪。点击“分析当前文档”开始检查。"
+                    ? "点击功能区“分析当前文档”开始检查。"
                     : _gatewayError);
-                WriteStartupLog("已为 Word 窗口 " + windowHandle + " 创建中文侧边栏。");
+                WriteStartupLog("已为 Word 窗口 " + windowHandle + " 创建问题检索列表。");
             }
             catch (Exception exception)
             {
@@ -410,10 +491,8 @@ namespace ThesisAddIn.VSTO
         private DiagnosticsPane CreateDiagnosticsPane()
         {
             var pane = new DiagnosticsPane();
-            pane.AnalyzeRequested += OnAnalyzeRequested;
-            pane.FixCurrentRequested += OnFixCurrentRequested;
-            pane.FixAllRequested += OnFixAllRequested;
             pane.DiagnosticSelected += OnDiagnosticSelected;
+            pane.StateChanged += OnPaneStateChanged;
             return pane;
         }
 
@@ -709,7 +788,7 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 批注锚点到建议卡片的选择联动。
+        /// 批注锚点到问题检索项的选择联动。
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
@@ -751,7 +830,7 @@ namespace ThesisAddIn.VSTO
                 WriteStartupLog("选择联动：story=" + range.StoryType + "; start=" + range.Start
                     + "; end=" + range.End + "; location=" + location + "; matches=" + matchCount);
                 _pane.SetStatus(matchCount > 1
-                    ? "此处有多条建议，当前关联第一条；可用上一项/下一项浏览。"
+                    ? "此处有多条批注，当前关联第一项；可用功能区上一项/下一项浏览。"
                     : "当前批注已关联到问题：" + ruleId + "。");
             }
         }
@@ -837,7 +916,7 @@ namespace ThesisAddIn.VSTO
                             + "; end=" + range.End + "; location=" + location);
                         if (matchCount > 1)
                         {
-                            _pane.SetStatus("此处有多条建议，已显示第一条；可用上一项/下一项浏览。");
+                            _pane.SetStatus("此处有多条批注，已关联第一项；可用功能区上一项/下一项浏览。");
                         }
                     }
                 }
@@ -849,7 +928,7 @@ namespace ThesisAddIn.VSTO
                     {
                         _lastHoveredCommentKey = occurrenceKey;
                         WriteStartupLog("合并问题悬停联动：window=" + windowHandle + "; location=" + location);
-                        _pane.SetStatus("当前合并问题位置：" + location + "。可用上一处/下一处浏览同一要求的其他位置。");
+                        _pane.SetStatus("当前合并问题位置：" + location + "。可用功能区上一处/下一处浏览同一要求的其他位置。");
                     }
                 }
                 else

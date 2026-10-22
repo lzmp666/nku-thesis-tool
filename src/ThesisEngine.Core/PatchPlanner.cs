@@ -70,6 +70,13 @@ public static class PatchPlanner
             return true;
         }
 
+        if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
+        {
+            patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
+                diagnostic.Expected, "将正文 run 的 ASCII 与 HAnsi 西文字体统一改为规则目标值。");
+            return true;
+        }
+
         if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal) &&
             TryParsePoints(diagnostic.Expected, out _))
         {
@@ -78,8 +85,6 @@ public static class PatchPlanner
             return true;
         }
 
-        // ASCII font remains suggest/manual until its safety and scope are
-        // explicitly approved; auto plans must not silently broaden scope.
         return false;
     }
 

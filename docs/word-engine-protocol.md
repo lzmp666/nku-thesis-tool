@@ -56,13 +56,15 @@ requestId 必须原样回显，插件据此拒绝过期或串线的响应。prot
 通过 `locations` 提交该项的所有位置；旧式单位置请求仍受支持。过滤位置为空时计划全部
 可自动修复项。
 
+对当前演示规则，能从文档中解析出实际值的东亚字体、西文字体和字号不匹配都会生成补丁。西文字体补丁同时设置 ASCII 与 HAnsi 字体槽；插件先展示预览，只有用户确认后才应用。未解析值、未知规则或无法安全定位的范围仍放在 `deferred` 中。
+
 成功响应：
 
 ~~~json
-{"protocolVersion":"1.2","requestId":"p1","ok":true,"plan":{"patches":[{"ruleId":"demo/east-asian-font","location":"word/document.xml#paragraph[0]/run[0]","expectedBefore":"黑体","desiredAfter":"宋体","reason":"将正文 run 的东亚字体改为规则目标值。"}],"deferred":[{"ruleId":"demo/western-font","severity":"warning","location":"word/document.xml#paragraph[1]/run[0]","expected":"Times New Roman","actual":"Arial","fixLevel":"suggest","message":"…","occurrences":[{"location":"word/document.xml#paragraph[1]/run[0]","actual":"Arial"}]}],"ruleVersion":"demo-0.1.0","coverage":"…","unsupportedScopes":[]}}
+{"protocolVersion":"1.2","requestId":"p1","ok":true,"plan":{"patches":[{"ruleId":"demo/east-asian-font","location":"word/document.xml#paragraph[0]/run[0]","expectedBefore":"黑体","desiredAfter":"宋体","reason":"将正文 run 的东亚字体改为规则目标值。"},{"ruleId":"demo/western-font","location":"word/document.xml#paragraph[1]/run[0]","expectedBefore":"Arial","desiredAfter":"Times New Roman","reason":"将正文 run 的 ASCII 与 HAnsi 西文字体统一改为规则目标值。"}],"deferred":[{"ruleId":"demo/east-asian-font","severity":"warning","location":"word/document.xml#paragraph[2]/run[0]","expected":"宋体","actual":"(unknown)","fixLevel":"manual","message":"字体未设置或无法解析。","occurrences":[{"location":"word/document.xml#paragraph[2]/run[0]","actual":"(unknown)"}]}],"ruleVersion":"demo-0.1.0","coverage":"…","unsupportedScopes":[]}}
 ~~~
 
-`patches` 按每个受影响的位置展开；`patches` 只包含处理分类为 auto 的项目；`deferred`
+`patches` 按每个受影响的位置展开；`patches` 只包含能安全定位且有明确期望值的可修复项目；`deferred`
 是留给用户的合并诊断，既包括引擎判定不能自动修复的，也包括被
 `ruleId`/`location(s)` 过滤掉的 auto 项。插件必须先展示计划并
 取得用户确认，再调用 apply。

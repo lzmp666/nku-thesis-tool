@@ -452,6 +452,12 @@ namespace ThesisAddIn.VSTO.Engine
                     throw new InvalidDataException("字体修复缺少目标字体。");
                 return;
             }
+            if (string.Equals(patch.RuleId, "demo/western-font", StringComparison.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(patch.DesiredAfter))
+                    throw new InvalidDataException("西文字体修复缺少目标字体。");
+                return;
+            }
             if (string.Equals(patch.RuleId, "demo/font-size", StringComparison.Ordinal))
             {
                 if (!TryParsePoints(patch.DesiredAfter, out _))
@@ -465,6 +471,11 @@ namespace ThesisAddIn.VSTO.Engine
         {
             if (string.Equals(patch.RuleId, "demo/east-asian-font", StringComparison.Ordinal))
                 range.Font.NameFarEast = patch.DesiredAfter;
+            else if (string.Equals(patch.RuleId, "demo/western-font", StringComparison.Ordinal))
+            {
+                range.Font.NameAscii = patch.DesiredAfter;
+                range.Font.NameOther = patch.DesiredAfter;
+            }
             else if (string.Equals(patch.RuleId, "demo/font-size", StringComparison.Ordinal) && TryParsePoints(patch.DesiredAfter, out double points))
                 range.Font.Size = (float)points;
         }
