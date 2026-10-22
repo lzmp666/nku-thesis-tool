@@ -66,14 +66,14 @@ public static class PatchPlanner
         if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
         {
             patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
-                diagnostic.Expected, "将正文 run 的东亚字体改为规则目标值。");
+                diagnostic.Expected, "将正文中的中文字符字体改为目标值；仅供演示规则验证。");
             return true;
         }
 
         if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
         {
             patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
-                diagnostic.Expected, "将正文 run 的 ASCII 与 HAnsi 西文字体统一改为规则目标值。");
+                diagnostic.Expected, "将正文中的西文字符字体改为目标值；仅供演示规则验证。");
             return true;
         }
 
@@ -81,7 +81,7 @@ public static class PatchPlanner
             TryParsePoints(diagnostic.Expected, out _))
         {
             patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
-                diagnostic.Expected, "将正文 run 的字号改为规则目标值。");
+                diagnostic.Expected, "将正文中的文字字号改为目标值；仅供演示规则验证。");
             return true;
         }
 

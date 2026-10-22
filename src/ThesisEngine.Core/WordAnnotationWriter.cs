@@ -208,7 +208,7 @@ public static class WordAnnotationWriter
     private static XElement CreateComment(int id, string timestamp, Diagnostic diagnostic, string? originalHighlight,
         IReadOnlyList<AnnotationHighlight> occurrenceHighlights)
     {
-        var text = $"要求参考来源：2026版第4.7节表4.6；规则：{diagnostic.RuleId}；期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。";
+        var text = $"要求参考来源：{GetSourceReference(diagnostic)}；规则：{DescribeRule(diagnostic.RuleId)}；期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。";
         return new XElement(W + "comment",
             new XAttribute(W + "id", id),
             new XAttribute(W + "author", "NKU Thesis Tool"),
@@ -217,13 +217,32 @@ public static class WordAnnotationWriter
             new XElement(W + "p",
                 new XElement(W + "r",
                     new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text)),
-                // Hidden metadata keeps the visible Word comment to the agreed four fields.
+                // Hidden metadata keeps the visible Word comment to four concise, user-facing fields.
                 CreateHiddenMetadata(ToolAnnotationMarker),
                 CreateHiddenMetadata("[NKU-LOCATION:" + diagnostic.Location + "]"),
                 CreateHiddenMetadata("[NKU-HIGHLIGHT:" + (originalHighlight ?? "absent") + "]"),
                 occurrenceHighlights.Select(occurrence => CreateHiddenMetadata(
                     "[NKU-OCCURRENCE:" + occurrence.Location + "|" + occurrence.Highlight + "]"))));
     }
+
+    private static string GetSourceReference(Diagnostic diagnostic)
+    {
+        if (diagnostic.RuleId.StartsWith("NKU-REQ-", StringComparison.Ordinal))
+        {
+            var separator = diagnostic.Message?.IndexOf('：') ?? -1;
+            if (separator > 0) return diagnostic.Message![..separator];
+        }
+
+        return "演示规则（仅用于验证插件流程，不代表正式标准）";
+    }
+
+    private static string DescribeRule(string ruleId) => ruleId switch
+    {
+        "demo/east-asian-font" or "NKU-REQ-042" => "中文字体",
+        "demo/western-font" or "NKU-REQ-043" => "西文字体",
+        "demo/font-size" or "NKU-REQ-044" => "字号",
+        _ => "格式项目"
+    };
 
     private static XElement CreateHiddenMetadata(string value) =>
         new(W + "r",

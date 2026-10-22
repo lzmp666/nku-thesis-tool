@@ -14,8 +14,11 @@ namespace ThesisAddIn.VSTO.Ui
     {
         private const string SearchPlaceholder = "搜索问题（例：类型:西文字体 期望:Times New Roman）";
         private readonly TextBox _searchBox = new TextBox();
+        private readonly Button _clearSearchButton = new Button();
         private readonly ListBox _issueList = new ListBox();
+        private readonly Label _emptyResults = new Label();
         private readonly Label _summary = new Label();
+        private readonly Label _ruleNotice = new Label();
         private readonly Label _status = new Label();
         private readonly ToolTip _toolTip = new ToolTip();
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
@@ -25,6 +28,7 @@ namespace ThesisAddIn.VSTO.Ui
         private bool _isBusy;
         private bool _isShowingPlaceholder;
         private bool _updatingList;
+        private bool _analysisSucceeded;
 
         public event EventHandler DiagnosticSelected;
         public event EventHandler StateChanged;
@@ -42,6 +46,22 @@ namespace ThesisAddIn.VSTO.Ui
             _summary.Text = "格式问题";
             _summary.AccessibleName = "问题数量";
 
+            _ruleNotice.Dock = DockStyle.Fill;
+            _ruleNotice.Text = "演示规则 · 用于验证功能，不代表正式合规结论";
+            _ruleNotice.TextAlign = ContentAlignment.MiddleLeft;
+            _ruleNotice.Padding = new Padding(8, 0, 5, 0);
+            _ruleNotice.Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
+            _ruleNotice.ForeColor = Color.FromArgb(125, 78, 0);
+            _ruleNotice.BackColor = Color.FromArgb(255, 247, 220);
+            _ruleNotice.AccessibleName = "规则状态：演示规则，不代表正式合规结论";
+            _toolTip.SetToolTip(_ruleNotice,
+                "当前 Word 插件连接的是 demo-0.1.0 演示规则，用于检查界面和修复流程；不是南开大学正式规则集，不能据此认定论文合规。");
+            _ruleNotice.Paint += (sender, args) =>
+            {
+                using (var pen = new Pen(Color.FromArgb(242, 216, 155)))
+                    args.Graphics.DrawRectangle(pen, 0, 0, _ruleNotice.Width - 1, _ruleNotice.Height - 1);
+            };
+
             _searchBox.Name = "IssueSearchBox";
             _searchBox.Dock = DockStyle.Fill;
             _searchBox.BorderStyle = BorderStyle.None;
@@ -54,6 +74,21 @@ namespace ThesisAddIn.VSTO.Ui
             _searchBox.GotFocus += OnSearchGotFocus;
             _searchBox.LostFocus += OnSearchLostFocus;
             _searchBox.TextChanged += OnSearchTextChanged;
+            _searchBox.KeyDown += OnSearchKeyDown;
+
+            _clearSearchButton.Name = "ClearIssueSearch";
+            _clearSearchButton.Dock = DockStyle.Fill;
+            _clearSearchButton.Text = "×";
+            _clearSearchButton.FlatStyle = FlatStyle.Flat;
+            _clearSearchButton.FlatAppearance.BorderSize = 0;
+            _clearSearchButton.BackColor = Color.Transparent;
+            _clearSearchButton.ForeColor = Color.FromArgb(105, 119, 140);
+            _clearSearchButton.Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Regular);
+            _clearSearchButton.Margin = new Padding(0);
+            _clearSearchButton.TabStop = false;
+            _clearSearchButton.Visible = false;
+            _clearSearchButton.AccessibleName = "清除问题搜索";
+            _clearSearchButton.Click += OnClearSearchClicked;
 
             _issueList.Name = "IssueSearchResults";
             _issueList.Dock = DockStyle.Fill;
@@ -66,6 +101,19 @@ namespace ThesisAddIn.VSTO.Ui
             _issueList.SelectedIndexChanged += OnIssueSelected;
             _issueList.DrawItem += OnDrawIssueItem;
             _issueList.MeasureItem += OnMeasureIssueItem;
+            _issueList.KeyDown += OnIssueListKeyDown;
+
+            _emptyResults.Dock = DockStyle.Fill;
+            _emptyResults.Text = "没有匹配的问题\r\n调整关键词或清除搜索条件";
+            _emptyResults.TextAlign = ContentAlignment.MiddleCenter;
+            _emptyResults.ForeColor = Color.FromArgb(115, 126, 143);
+            _emptyResults.BackColor = BackColor;
+            _emptyResults.Visible = false;
+            _emptyResults.AccessibleName = "没有匹配的问题";
+
+            var resultsSurface = new Panel { Dock = DockStyle.Fill, BackColor = BackColor };
+            resultsSurface.Controls.Add(_issueList);
+            resultsSurface.Controls.Add(_emptyResults);
 
             _status.Dock = DockStyle.Fill;
             _status.Padding = new Padding(4, 8, 4, 2);
@@ -77,11 +125,12 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = 5,
                 Padding = new Padding(9, 5, 9, 8)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 29F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
@@ -101,13 +150,14 @@ namespace ThesisAddIn.VSTO.Ui
             var searchLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1,
                 Margin = new Padding(0),
                 Padding = new Padding(0)
             };
             searchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22F));
             searchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            searchLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 24F));
             var searchIcon = new Label
             {
                 Dock = DockStyle.Fill,
@@ -119,12 +169,14 @@ namespace ThesisAddIn.VSTO.Ui
             };
             searchLayout.Controls.Add(searchIcon, 0, 0);
             searchLayout.Controls.Add(_searchBox, 1, 0);
+            searchLayout.Controls.Add(_clearSearchButton, 2, 0);
             searchSurface.Controls.Add(searchLayout);
 
             layout.Controls.Add(_summary, 0, 0);
-            layout.Controls.Add(searchSurface, 0, 1);
-            layout.Controls.Add(_issueList, 0, 2);
-            layout.Controls.Add(_status, 0, 3);
+            layout.Controls.Add(_ruleNotice, 0, 1);
+            layout.Controls.Add(searchSurface, 0, 2);
+            layout.Controls.Add(resultsSurface, 0, 3);
+            layout.Controls.Add(_status, 0, 4);
             Controls.Add(layout);
         }
 
@@ -176,6 +228,7 @@ namespace ThesisAddIn.VSTO.Ui
 
         private void ShowAnalysisCore(EngineAnalysisResult result)
         {
+            _analysisSucceeded = true;
             _diagnostics.Clear();
             if (result?.Diagnostics != null)
                 _diagnostics.AddRange(result.Diagnostics.Where(diagnostic => diagnostic != null));
@@ -183,8 +236,6 @@ namespace ThesisAddIn.VSTO.Ui
             _selectedOccurrenceIndex = 0;
             ClearSearch();
             RebuildIssueList();
-            _summary.Text = "格式问题  " + _diagnostics.Count + " 项 · " +
-                _diagnostics.Sum(GetOccurrenceCount) + " 处";
             string baseStatus = _diagnostics.Count == 0
                 ? "未发现已覆盖范围内的格式问题；未覆盖项不会被判为合规。"
                 : "悬停或点击正文黄色标记，可查看对应建议并定位原文。修复与验证操作位于顶部功能区。";
@@ -209,6 +260,7 @@ namespace ThesisAddIn.VSTO.Ui
         {
             InvokeOnUiThread(() =>
             {
+                _analysisSucceeded = false;
                 _diagnostics.Clear();
                 _selectedIndex = -1;
                 _selectedOccurrenceIndex = 0;
@@ -358,7 +410,59 @@ namespace ThesisAddIn.VSTO.Ui
                 try { _issueList.SelectedIndex = visibleIndex; }
                 finally { _updatingList = false; }
             }
+            _clearSearchButton.Visible = !string.IsNullOrWhiteSpace(_searchBox.Text);
             RaiseStateChanged();
+        }
+
+        private void OnClearSearchClicked(object sender, EventArgs e)
+        {
+            ClearSearch();
+            RebuildIssueList();
+            RaiseStateChanged();
+        }
+
+        private void OnSearchKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                ClearSearch();
+                RebuildIssueList();
+                RaiseStateChanged();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Enter && _selectedIndex >= 0)
+            {
+                SelectDiagnostic(_selectedIndex, navigateToSource: true);
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Down && _visibleIndices.Count > 0)
+            {
+                _issueList.Focus();
+                if (_issueList.SelectedIndex < 0) _issueList.SelectedIndex = 0;
+                e.Handled = true;
+            }
+        }
+
+        private void OnIssueListKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter && _issueList.SelectedIndex >= 0 &&
+                _issueList.SelectedIndex < _visibleIndices.Count)
+            {
+                SelectDiagnostic(_visibleIndices[_issueList.SelectedIndex], navigateToSource: true);
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                ClearSearch();
+                RebuildIssueList();
+                _searchBox.Focus();
+                RaiseStateChanged();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
         }
 
         private void RebuildIssueList()
@@ -386,6 +490,18 @@ namespace ThesisAddIn.VSTO.Ui
                 try { _issueList.SelectedIndex = selectedVisibleIndex; }
                 finally { _updatingList = false; }
             }
+
+            int visibleOccurrences = _visibleIndices.Sum(index => GetOccurrenceCount(_diagnostics[index]));
+            int totalOccurrences = _diagnostics.Sum(GetOccurrenceCount);
+            _summary.Text = string.IsNullOrEmpty(query)
+                ? "格式问题  " + _diagnostics.Count + " 项 · " + totalOccurrences + " 处"
+                : "检索结果  " + _visibleIndices.Count + " 项 · " + visibleOccurrences + " 处（共 "
+                    + _diagnostics.Count + " 项）";
+            _emptyResults.Visible = _analysisSucceeded && _visibleIndices.Count == 0;
+            _emptyResults.Text = query.Length > 0
+                ? "没有匹配的问题\r\n调整关键词或清除搜索条件"
+                : "未发现已覆盖范围内的问题";
+            _clearSearchButton.Visible = query.Length > 0;
         }
 
         private static bool Matches(EngineDiagnostic diagnostic, string query)
@@ -615,6 +731,7 @@ namespace ThesisAddIn.VSTO.Ui
                 _searchBox.Text = string.Empty;
                 _searchBox.ForeColor = SystemColors.WindowText;
                 _isShowingPlaceholder = false;
+                if (!_searchBox.Focused) SetPlaceholder();
             }
             finally { _updatingList = false; }
         }

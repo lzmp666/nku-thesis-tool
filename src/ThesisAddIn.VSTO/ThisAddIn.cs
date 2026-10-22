@@ -815,7 +815,7 @@ namespace ThesisAddIn.VSTO
                 for (int i = 0; i < rules.Length; i++)
                 {
                     if (i > 0) message.Append("、");
-                    message.Append(rules[i]);
+                    message.Append(DiagnosticsPane.DescribeRule(rules[i]));
                 }
                 message.Append("）");
             }

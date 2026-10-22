@@ -16,20 +16,24 @@ namespace ThesisAddIn.VSTO.Ui
         {
             Text = "修复预览（" + scopeLabel + "）";
             StartPosition = FormStartPosition.CenterParent;
-            Size = new Size(720, 460);
+            Size = new Size(760, 500);
             MinimizeBox = false;
             MaximizeBox = false;
             Font = new Font("Microsoft YaHei UI", 9F);
+            BackColor = Color.FromArgb(246, 248, 251);
 
             var summary = new Label
             {
                 Dock = DockStyle.Top,
-                Height = 58,
-                Padding = new Padding(8),
-                Text = "将修改 " + plan.Patches.Count + " 处，"
+                Height = 70,
+                Padding = new Padding(12, 8, 10, 8),
+                BackColor = Color.FromArgb(255, 247, 220),
+                ForeColor = Color.FromArgb(91, 63, 12),
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+                Text = "演示规则预览 · 将修改 " + plan.Patches.Count + " 处，"
                     + "保留 " + plan.Deferred.Count + " 项给用户处理。"
                     + Environment.NewLine
-                    + "修复直接更新当前打开的文档；完成后由你决定是否保存。"
+                    + "确认后直接更新当前打开的文档；不自动保存，是否保存由你决定。"
             };
 
             var list = new ListView
@@ -37,13 +41,18 @@ namespace ThesisAddIn.VSTO.Ui
                 Dock = DockStyle.Fill,
                 View = View.Details,
                 FullRowSelect = true,
-                MultiSelect = false
+                MultiSelect = false,
+                GridLines = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                HeaderStyle = ColumnHeaderStyle.Nonclickable
             };
-            list.Columns.Add("格式项目", 120);
-            list.Columns.Add("位置", 170);
-            list.Columns.Add("改前", 110);
-            list.Columns.Add("改为", 110);
-            list.Columns.Add("依据", 200);
+            list.Columns.Add("格式项目", 100);
+            list.Columns.Add("位置", 220);
+            list.Columns.Add("当前值", 110);
+            list.Columns.Add("修改为", 110);
+            list.Columns.Add("修改说明", 180);
             foreach (var group in plan.Patches.GroupBy(patch => new
                      {
                 patch.RuleId,
@@ -66,21 +75,45 @@ namespace ThesisAddIn.VSTO.Ui
             var deferred = new TextBox
             {
                 Dock = DockStyle.Bottom,
-                Height = 84,
+                Height = 100,
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White,
+                Font = new Font("Microsoft YaHei UI", 8.5F),
                 Text = BuildDeferredText(plan)
             };
 
             var buttons = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom,
-                Height = 42,
-                FlowDirection = FlowDirection.RightToLeft
+                Height = 54,
+                Padding = new Padding(8),
+                FlowDirection = FlowDirection.RightToLeft,
+                BackColor = BackColor
             };
-            var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-            var confirm = new Button { Text = "确认并修复当前文档", DialogResult = DialogResult.OK, AutoSize = true };
+            var cancel = new Button
+            {
+                Text = "取消",
+                DialogResult = DialogResult.Cancel,
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+                Padding = new Padding(10, 3, 10, 3),
+                BackColor = Color.White
+            };
+            cancel.FlatAppearance.BorderColor = Color.FromArgb(197, 207, 221);
+            var confirm = new Button
+            {
+                Text = "确认并修复当前文档",
+                DialogResult = DialogResult.OK,
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+                Padding = new Padding(10, 3, 10, 3),
+                BackColor = Color.FromArgb(37, 99, 190),
+                ForeColor = Color.White
+            };
+            confirm.FlatAppearance.BorderSize = 0;
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(confirm);
 

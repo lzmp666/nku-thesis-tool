@@ -54,6 +54,36 @@ public sealed class WordAnnotationWriterTests
     }
 
     [Fact]
+    public void CommentShowsApprovedSourceAndHumanReadableRuleName()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        const string source = "南开大学研究生学位论文写作规范（2026版）第4.7节表4.6（M26-036）";
+        try
+        {
+            var diagnostic = new Diagnostic("NKU-REQ-042", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "manual",
+                source + "：中文字体应为「宋体」，实际为「黑体」。");
+
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, new[] { diagnostic });
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var comments = ReadXml(archive, "word/comments.xml");
+            var comment = Assert.Single(comments.Root!.Elements(W + "comment"));
+            var visibleText = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            Assert.Equal("要求参考来源：" + source + "；规则：中文字体；期望值：宋体；实际值：黑体。", visibleText);
+            Assert.DoesNotContain("NKU-REQ-042", visibleText);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
     public void AnnotatesExistingSyntheticDemoFixture()
     {
         var root = FindRepositoryRoot();
@@ -113,9 +143,10 @@ public sealed class WordAnnotationWriterTests
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value))))
                 .ToArray();
             Assert.Equal(3, commentTexts.Length);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/east-asian-font；期望值：宋体；实际值：黑体。", commentTexts);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/western-font；期望值：Times New Roman；实际值：Arial。", commentTexts);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/font-size；期望值：12pt；实际值：10.5pt。", commentTexts);
+            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：中文字体；期望值：宋体；实际值：黑体。", commentTexts);
+            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：西文字体；期望值：Times New Roman；实际值：Arial。", commentTexts);
+            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：字号；期望值：12pt；实际值：10.5pt。", commentTexts);
+            Assert.DoesNotContain(commentTexts, text => text.Contains("demo/", StringComparison.Ordinal));
             var hiddenLocations = commentElements
                 .SelectMany(comment => comment.Descendants(W + "r")
                     .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
