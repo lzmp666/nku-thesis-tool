@@ -39,7 +39,7 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
         var coverage = ComputeCoverage(snapshot);
 
         return new AnalysisResult(
-            Diagnostics: diagnostics,
+            Diagnostics: DiagnosticGrouper.Group(diagnostics),
             RuleVersion: profile.RuleVersion,
             Coverage: coverage,
             UnsupportedScopes: snapshot.UnsupportedScopes);

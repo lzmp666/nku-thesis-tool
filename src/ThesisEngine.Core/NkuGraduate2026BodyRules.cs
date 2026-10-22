@@ -89,7 +89,7 @@ public sealed class NkuGraduate2026BodyAnalyzer
 
         var distinctUnsupported = unsupported.Distinct(StringComparer.Ordinal).ToArray();
         var coverage = $"规则状态：草案（{profile.Status}）；已检查 {checkedRuns} 个已确认正文文本片段；未覆盖 {distinctUnsupported.Length} 项";
-        return new AnalysisResult(diagnostics, profile.RuleVersion, coverage, distinctUnsupported);
+        return new AnalysisResult(DiagnosticGrouper.Group(diagnostics), profile.RuleVersion, coverage, distinctUnsupported);
     }
 
     private static void CheckFontSize(TextRunSnapshot run, string location, NkuGraduate2026BodyProfile profile,

@@ -392,10 +392,19 @@ namespace ThesisAddIn.VSTO.Ui
 
         private static string BuildDiagnosticCardText(EngineDiagnostic diagnostic)
         {
+            string actual = diagnostic.Actual ?? "（未提供）";
+            int occurrenceCount = diagnostic.Occurrences == null || diagnostic.Occurrences.Count == 0
+                ? 1
+                : diagnostic.Occurrences.Count;
+            if (occurrenceCount > 1)
+            {
+                actual += "（" + occurrenceCount + "处）";
+            }
+
             return "要求参考来源：" + DemoRequirementSource
                 + Environment.NewLine + "规则：" + (diagnostic.RuleId ?? "（未提供）")
                 + Environment.NewLine + "期望值：" + (diagnostic.Expected ?? "（未提供）")
-                + Environment.NewLine + "实际值：" + (diagnostic.Actual ?? "（未提供）");
+                + Environment.NewLine + "实际值：" + actual;
         }
 
         private void ResizeDiagnosticCards()

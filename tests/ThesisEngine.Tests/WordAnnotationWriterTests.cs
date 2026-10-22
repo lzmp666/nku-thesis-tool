@@ -12,6 +12,48 @@ public sealed class WordAnnotationWriterTests
     private static readonly XNamespace Ct = "http://schemas.openxmlformats.org/package/2006/content-types";
 
     [Fact]
+    public void GroupedDiagnosticCreatesOneCommentAndHighlightsEveryOccurrence()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            var diagnostic = new Diagnostic("demo/east-asian-font", "warning",
+                "word/document.xml#paragraph[0]/run[0]", "宋体", "黑体、雅黑", "auto", "统一改为宋体。")
+            {
+                Occurrences = new[]
+                {
+                    new DiagnosticOccurrence("word/document.xml#paragraph[0]/run[0]", "黑体"),
+                    new DiagnosticOccurrence("word/document.xml#paragraph[1]/run[0]", "雅黑")
+                }
+            };
+
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, new[] { diagnostic });
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var document = ReadXml(archive, "word/document.xml");
+            var paragraphs = document.Descendants(W + "body").Single().Elements(W + "p").ToArray();
+            Assert.Equal("yellow", (string?)paragraphs[0].Descendants(W + "highlight").Single().Attribute(W + "val"));
+            Assert.Equal("yellow", (string?)paragraphs[1].Descendants(W + "highlight").Single().Attribute(W + "val"));
+            Assert.Single(document.Descendants(W + "commentRangeStart"));
+            Assert.Single(document.Descendants(W + "commentRangeEnd"));
+
+            var comments = ReadXml(archive, "word/comments.xml");
+            var comment = Assert.Single(comments.Root!.Elements(W + "comment"));
+            var hidden = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[0]/run[0]|absent]", hidden);
+            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[1]/run[0]|absent]", hidden);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
     public void AnnotatesExistingSyntheticDemoFixture()
     {
         var root = FindRepositoryRoot();

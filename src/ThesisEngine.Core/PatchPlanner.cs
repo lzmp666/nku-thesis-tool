@@ -16,14 +16,34 @@ public static class PatchPlanner
 
         foreach (var diagnostic in result.Diagnostics ?? Array.Empty<Diagnostic>())
         {
+            var occurrences = diagnostic.Occurrences.Count > 0
+                ? diagnostic.Occurrences
+                : new[] { new DiagnosticOccurrence(diagnostic.Location, diagnostic.Actual) };
+
             if (!string.Equals(diagnostic.FixLevel, "auto", StringComparison.OrdinalIgnoreCase))
             {
                 deferred.Add(diagnostic);
                 continue;
             }
 
-            if (TryCreatePatch(diagnostic, out var patch))
-                patches.Add(patch!);
+            var created = new List<Patch>();
+            var allValid = true;
+            foreach (var occurrence in occurrences)
+            {
+                var occurrenceDiagnostic = diagnostic with
+                {
+                    Location = occurrence.Location,
+                    Actual = occurrence.Actual,
+                    Occurrences = Array.Empty<DiagnosticOccurrence>()
+                };
+                if (TryCreatePatch(occurrenceDiagnostic, out var patch))
+                    created.Add(patch!);
+                else
+                    allValid = false;
+            }
+
+            if (allValid && created.Count == occurrences.Count)
+                patches.AddRange(created);
             else
                 deferred.Add(diagnostic);
         }

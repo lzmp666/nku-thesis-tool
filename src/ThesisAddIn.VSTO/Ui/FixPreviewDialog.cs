@@ -1,12 +1,13 @@
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
 
 namespace ThesisAddIn.VSTO.Ui
 {
     /// <summary>
-    /// 修复预览：在真正写入新文件之前，逐条展示会改动的位置、改前值、目标值和依据，
+    /// 修复预览：在更新当前工作副本之前，逐条展示会改动的位置、改前值、目标值和依据，
     /// 并单独列出保留给用户的诊断。用户确认后才执行。
     /// </summary>
     public sealed class FixPreviewDialog : Form
@@ -26,9 +27,9 @@ namespace ThesisAddIn.VSTO.Ui
                 Height = 58,
                 Padding = new Padding(8),
                 Text = "将修改 " + plan.Patches.Count + " 处，"
-                    + "保留 " + plan.Deferred.Count + " 处给用户处理。"
+                    + "保留 " + plan.Deferred.Count + " 项给用户处理。"
                     + Environment.NewLine
-                    + "原始文件不会被修改；修复结果会另存为你指定的新文件。"
+                    + "修复直接更新当前标注工作副本；原始提交文件不变，完成后由你决定是否保存。"
             };
 
             var list = new ListView
@@ -43,11 +44,20 @@ namespace ThesisAddIn.VSTO.Ui
             list.Columns.Add("改前", 110);
             list.Columns.Add("改为", 110);
             list.Columns.Add("依据", 200);
-            foreach (EnginePatch patch in plan.Patches)
+            foreach (var group in plan.Patches.GroupBy(patch => new
+                     {
+                         patch.RuleId,
+                         patch.DesiredAfter,
+                         patch.Reason
+                     }))
             {
+                EnginePatch patch = group.First();
                 var item = new ListViewItem(patch.RuleId);
-                item.SubItems.Add(patch.Location);
-                item.SubItems.Add(patch.ExpectedBefore);
+                item.SubItems.Add(group.Count() == 1
+                    ? patch.Location
+                    : group.Count() + " 处（" + patch.Location + " 等）");
+                item.SubItems.Add(string.Join("、", group.Select(value => value.ExpectedBefore)
+                    .Distinct(StringComparer.Ordinal)));
                 item.SubItems.Add(patch.DesiredAfter);
                 item.SubItems.Add(patch.Reason);
                 list.Items.Add(item);
@@ -70,7 +80,7 @@ namespace ThesisAddIn.VSTO.Ui
                 FlowDirection = FlowDirection.RightToLeft
             };
             var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-            var confirm = new Button { Text = "确认修复并另存", DialogResult = DialogResult.OK, AutoSize = true };
+            var confirm = new Button { Text = "确认并修复当前工作副本", DialogResult = DialogResult.OK, AutoSize = true };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(confirm);
 
@@ -92,7 +102,10 @@ namespace ThesisAddIn.VSTO.Ui
             var lines = new System.Collections.Generic.List<string> { "以下项目不会自动修改，需要你确认或手动处理：" };
             foreach (EngineDiagnostic diagnostic in plan.Deferred)
             {
-                lines.Add("· " + diagnostic.RuleId + " @ " + diagnostic.Location
+                int occurrenceCount = diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0
+                    ? diagnostic.Occurrences.Count : 1;
+                lines.Add("· " + diagnostic.RuleId + " @ "
+                    + (occurrenceCount > 1 ? occurrenceCount + " 处（" + diagnostic.Location + " 等）" : diagnostic.Location)
                     + "（处理方式：" + DiagnosticsPane.DescribeFixLevel(diagnostic.FixLevel)
                     + "；期望 " + diagnostic.Expected + "，实际 " + diagnostic.Actual + "）");
             }

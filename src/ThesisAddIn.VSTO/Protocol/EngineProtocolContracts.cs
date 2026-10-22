@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -56,6 +57,11 @@ public sealed class EngineRequest
     [JsonPropertyName("location")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Location { get; set; }
+
+    /// <summary>所有属于当前合并问题的位置；旧客户端仍可只传 location。</summary>
+    [JsonPropertyName("locations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Locations { get; set; }
 }
 
 public sealed class EngineResponse
@@ -212,6 +218,18 @@ public sealed class EngineDiagnostic
 
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("occurrences")]
+    public List<EngineDiagnosticOccurrence> Occurrences { get; set; } = new();
+}
+
+public sealed class EngineDiagnosticOccurrence
+{
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("actual")]
+    public string Actual { get; set; } = string.Empty;
 }
 
 public static class EngineProtocolCodec
@@ -325,6 +343,9 @@ public sealed class EngineProtocolClient
     public EngineResponse Plan(string inputPath, string? ruleId, string? location) =>
         Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location));
 
+    public EngineResponse Plan(string inputPath, string? ruleId, string? location, IReadOnlyList<string>? locations) =>
+        Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location, locations));
+
     public Task<EngineResponse> PlanAsync(
         string inputPath,
         string? ruleId,
@@ -332,8 +353,19 @@ public sealed class EngineProtocolClient
         CancellationToken cancellationToken = default) =>
         SendAsync(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location), cancellationToken);
 
+    public Task<EngineResponse> PlanAsync(
+        string inputPath,
+        string? ruleId,
+        string? location,
+        IReadOnlyList<string>? locations,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location, locations), cancellationToken);
+
     public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location) =>
         Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location));
+
+    public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location, IReadOnlyList<string>? locations) =>
+        Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location, locations));
 
     public EngineResponse Annotate(string inputPath, string outputPath) =>
         Send(CreateRequest(EngineProtocol.AnnotateOperation, inputPath, outputPath, null, null));
@@ -352,19 +384,30 @@ public sealed class EngineProtocolClient
         CancellationToken cancellationToken = default) =>
         SendAsync(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location), cancellationToken);
 
+    public Task<EngineResponse> ApplyAsync(
+        string inputPath,
+        string outputPath,
+        string? ruleId,
+        string? location,
+        IReadOnlyList<string>? locations,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location, locations), cancellationToken);
+
     public Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default) =>
         SendAsync(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null), cancellationToken);
 
     public EngineResponse Send(EngineRequest request) => SendAsync(request).GetAwaiter().GetResult();
 
-    private static EngineRequest CreateRequest(string operation, string inputPath, string? outputPath, string? ruleId, string? location) => new()
+    private static EngineRequest CreateRequest(string operation, string inputPath, string? outputPath, string? ruleId, string? location,
+        IReadOnlyList<string>? locations = null) => new()
     {
         RequestId = Guid.NewGuid().ToString("N"),
         Operation = operation,
         InputPath = inputPath ?? string.Empty,
         OutputPath = outputPath,
         RuleId = ruleId,
-        Location = location
+        Location = location,
+        Locations = locations?.ToList()
     };
 
     public async Task<EngineResponse> SendAsync(EngineRequest request, CancellationToken cancellationToken = default)

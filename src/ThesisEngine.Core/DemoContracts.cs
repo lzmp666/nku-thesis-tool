@@ -60,7 +60,14 @@ public sealed record Diagnostic(
     string Expected,
     string Actual,
     string FixLevel,
-    string Message);
+    string Message)
+{
+    /// <summary>All text runs represented by this one user-facing issue.</summary>
+    public IReadOnlyList<DiagnosticOccurrence> Occurrences { get; init; } = Array.Empty<DiagnosticOccurrence>();
+}
+
+/// <summary>A concrete document location included in a grouped diagnostic.</summary>
+public sealed record DiagnosticOccurrence(string Location, string Actual);
 
 /// <summary>
 /// 分析结果，对齐 engine-api.md 中的 AnalysisResult。

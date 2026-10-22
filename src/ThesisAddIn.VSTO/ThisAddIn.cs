@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,8 +18,8 @@ namespace ThesisAddIn.VSTO
     /// Word 侧入口：创建中文问题侧边栏，把分析、定位、修复和批注锚点联动接到一起。
     ///
     /// 重要：Word 会锁住正在编辑的 .docx，引擎无法直接读取，因此所有分析/修复
-    /// 都基于 Word 当前内存内容生成的临时副本；修复结果另存到用户指定的新文件，
-    /// 原始文件与当前打开中的文档都不会被覆盖。
+        /// 都基于 Word 当前内存内容生成的临时快照；修复只更新唯一的标注工作副本，
+        /// 原始提交文件保持不变，作者完成后自行保存。
     /// </summary>
     public partial class ThisAddIn
     {
@@ -177,6 +178,7 @@ namespace ThesisAddIn.VSTO
             DiagnosticsPane pane = sender as DiagnosticsPane ?? _pane;
             string workCopy = null;
             string annotatedPath = null;
+            bool updatingWorkingCopy = false;
             try
             {
                 WriteStartupLog("收到“分析当前文档”点击。");
@@ -197,10 +199,15 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
                 workCopy = operation.SnapshotPath;
-                annotatedPath = CreateAnnotatedOutputPath(operation);
+                updatingWorkingCopy = IsToolWorkingCopy(operation.Document);
+                annotatedPath = updatingWorkingCopy
+                    ? CreateTemporaryDocxPath("reanalyzed")
+                    : CreateAnnotatedOutputPath(operation);
 
-                WriteStartupLog("已为 Word 窗口 " + operation.WindowHandle + " 生成当前内容快照，开始分析并创建标注副本。");
-                SetBusy(pane, true, "正在分析并生成标注副本…（读取当前 Word 内容，原文不变）");
+                WriteStartupLog("已为 Word 窗口 " + operation.WindowHandle + " 生成当前内容快照，开始分析。");
+                SetBusy(pane, true, updatingWorkingCopy
+                    ? "正在更新当前工作副本中的格式标注…（原始提交文件保持不变）"
+                    : "正在分析并创建唯一的标注工作副本…（原始提交文件保持不变）");
                 EngineResponse response = await gateway.AnnotateAsync(workCopy, annotatedPath, cancellationToken);
                 if (response == null || !response.Ok || response.Result == null || response.Annotation == null
                     || !PathsEqual(response.Annotation.OutputPath, annotatedPath)
@@ -222,20 +229,32 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                string openError;
-                Word.Document annotatedDocument = OpenAnnotatedCopy(annotatedPath, out openError);
+                string openError = null;
+                Word.Document annotatedDocument;
+                if (updatingWorkingCopy)
+                {
+                    annotatedDocument = pane.InvokeOnUiThread(() => ReplaceWorkingCopy(operation.Document,
+                        operation.DocumentFullName, annotatedPath, out openError));
+                }
+                else
+                {
+                    annotatedDocument = OpenAnnotatedCopy(annotatedPath, out openError);
+                }
                 if (annotatedDocument == null)
                 {
-                    ShowFailure(pane, "批注副本已生成，但 Word 未能打开它：" + openError
-                        + Environment.NewLine + "文件位置：" + annotatedPath);
+                    ShowFailure(pane, "分析结果已生成，但 Word 未能打开当前工作副本：" + openError
+                        + Environment.NewLine + "文件位置：" + (updatingWorkingCopy ? operation.DocumentFullName : annotatedPath));
                     return;
                 }
 
                 DiagnosticsPane annotatedPane = GetPaneForWindow(annotatedDocument.ActiveWindow);
                 ShowAnalysis(annotatedPane, response.Result);
-                SetStatus(annotatedPane, "分析完成：已生成并打开标注副本，共 "
-                    + response.Result.Diagnostics.Count + " 条问题；原文保持不变。\n" + annotatedPath);
-                SetStatus(pane, "分析完成：已在独立窗口打开标注副本，原文保持不变。\n" + annotatedPath);
+                string workPath = updatingWorkingCopy ? operation.DocumentFullName : annotatedPath;
+                SetStatus(annotatedPane, "分析完成：当前工作副本共 "
+                    + response.Result.Diagnostics.Count + " 项问题；原始提交文件保持不变。\n" + workPath);
+                SetStatus(pane, updatingWorkingCopy
+                    ? "分析完成：已更新同一份工作副本，未新增文档。\n" + workPath
+                    : "分析完成：已创建唯一的标注工作副本，原始提交文件保持不变。\n" + workPath);
                 WriteStartupLog("已打开标注副本，批注数 " + response.Annotation.CommentCount + "，窗口 "
                     + SafeWindowHandle(annotatedDocument.ActiveWindow) + "。");
             }
@@ -248,6 +267,10 @@ namespace ThesisAddIn.VSTO
             {
                 SetBusy(pane, false, null);
                 TryDelete(workCopy);
+                if (updatingWorkingCopy)
+                {
+                    TryDelete(annotatedPath);
+                }
             }
         }
 
@@ -447,15 +470,14 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 修复闭环：临时副本 → 生成计划 → 中文预览确认 → 选择输出文件 → 执行 → 重新分析。
-        /// 任何一步失败都停止，不会产生半成品。
+        /// 修复闭环：临时快照 → 生成计划 → 中文预览确认 → 更新同一工作副本 → 重新分析。
+        /// 原始提交文件保持不变；每次修复不再提示另存为，也不保留额外结果副本。
         /// </summary>
         private async Task RunRepair(DiagnosticsPane pane, EngineDiagnostic diagnostic, string scopeLabel)
         {
             string workCopy = null;
             string applyOutput = null;
             string finalOutput = null;
-            bool keepApplyOutput = false;
             try
             {
                 WriteStartupLog("收到修复请求：" + scopeLabel + "。");
@@ -522,27 +544,6 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                finalOutput = pane.InvokeOnUiThread(() => AskOutputPath());
-                if (string.IsNullOrEmpty(finalOutput))
-                {
-                    WriteStartupLog("用户未选择输出文件。");
-                    SetStatus(pane, "未选择输出文件，已取消修复。");
-                    return;
-                }
-
-                if (File.Exists(finalOutput))
-                {
-                    SetStatus(pane, "为避免覆盖已有文件，请重新选择一个尚不存在的输出文件名。");
-                    finalOutput = null;
-                    return;
-                }
-
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
                 applyOutput = CreateTemporaryDocxPath("repair");
 
                 /*
@@ -551,7 +552,7 @@ namespace ThesisAddIn.VSTO
                  * subsequent status and result updates back to the same UI thread.
                  */
                 WriteStartupLog("开始生成修复中间副本。");
-                SetStatus(pane, "正在写入修复副本…（原文保持不变）");
+                SetStatus(pane, "正在更新当前工作副本…（原始提交文件保持不变）");
                 EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, applyOutput, diagnostic, cancellationToken);
                 if (applyResponse == null || !applyResponse.Ok || applyResponse.Apply == null)
                 {
@@ -587,21 +588,20 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                SetStatus(pane, "正在重新分析修复结果并刷新工具批注…");
+                finalOutput = CreateTemporaryDocxPath("refreshed");
+                SetStatus(pane, "正在重新分析修复结果并刷新当前工作副本的批注…");
                 EngineResponse refreshed = await gateway.AnnotateAsync(applied.OutputPath, finalOutput, cancellationToken);
                 if (refreshed == null || !refreshed.Ok || refreshed.Result == null || refreshed.Annotation == null
                     || !PathsEqual(refreshed.Annotation.OutputPath, finalOutput)
                     || !File.Exists(finalOutput))
                 {
-                    keepApplyOutput = File.Exists(applyOutput);
                     string refreshError = EngineGateway.DescribeError(refreshed != null ? refreshed.Error : null);
                     if (refreshed != null && refreshed.Ok && refreshed.Annotation != null
                         && !PathsEqual(refreshed.Annotation.OutputPath, finalOutput))
                     {
                         refreshError = "标注引擎返回了与请求不一致的输出路径。";
                     }
-                    ShowFailure(pane, applySummary + Environment.NewLine + "修复已写入中间副本，但刷新批注失败："
-                        + refreshError + (keepApplyOutput ? Environment.NewLine + "可恢复的修复文件：" + applyOutput : string.Empty));
+                    ShowFailure(pane, applySummary + Environment.NewLine + "当前工作副本尚未替换；刷新批注失败：" + refreshError);
                     return;
                 }
 
@@ -613,23 +613,24 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                string openError;
-                Word.Document resultDocument = OpenAnnotatedCopy(finalOutput, out openError);
+                string openError = null;
+                Word.Document resultDocument = pane.InvokeOnUiThread(() => ReplaceWorkingCopy(operation.Document,
+                    operation.DocumentFullName, finalOutput, out openError));
                 if (resultDocument == null)
                 {
-                    ShowFailure(pane, applySummary + Environment.NewLine + "修复结果已生成，但 Word 未能打开它："
-                        + openError + Environment.NewLine + "文件位置：" + finalOutput);
+                    ShowFailure(pane, applySummary + Environment.NewLine + "修复结果已准备，但无法更新当前工作副本："
+                        + openError + Environment.NewLine + "工作副本位置：" + operation.DocumentFullName);
                     return;
                 }
 
                 DiagnosticsPane resultPane = GetPaneForWindow(resultDocument.ActiveWindow);
                 ShowAnalysis(resultPane, refreshed.Result);
                 SetStatus(resultPane, applySummary + Environment.NewLine
-                    + "修复结果已重新分析，剩余 " + refreshed.Result.Diagnostics.Count + " 条问题；批注已刷新。\n"
-                    + "原文保持不变。结果文件：" + finalOutput);
-                SetStatus(pane, "修复完成：已在独立窗口打开并复查结果副本，当前文档保持不变。\n" + finalOutput);
-                WriteStartupLog("已打开修复并刷新批注的结果副本；剩余问题 "
-                    + refreshed.Result.Diagnostics.Count + " 条。");
+                    + "已在同一工作副本中重新分析，剩余 " + refreshed.Result.Diagnostics.Count + " 项；批注已刷新。\n"
+                    + "原始提交文件保持不变；完成后请按需保存当前工作副本。\n" + operation.DocumentFullName);
+                SetStatus(pane, "修复完成：已更新同一份工作副本，没有另建结果文档。\n" + operation.DocumentFullName);
+                WriteStartupLog("已替换并重新打开同一路径的工作副本；剩余问题 "
+                    + refreshed.Result.Diagnostics.Count + " 项。");
             }
             catch (Exception exception)
             {
@@ -639,10 +640,8 @@ namespace ThesisAddIn.VSTO
             {
                 SetBusy(pane, false, null);
                 TryDelete(workCopy);
-                if (!keepApplyOutput)
-                {
-                    TryDelete(applyOutput);
-                }
+                TryDelete(applyOutput);
+                TryDelete(finalOutput);
             }
         }
 
@@ -655,10 +654,11 @@ namespace ThesisAddIn.VSTO
             if (result.Applied.Count > 0)
             {
                 message.Append("（");
-                for (int i = 0; i < result.Applied.Count; i++)
+                string[] rules = result.Applied.Select(patch => patch.RuleId).Distinct(StringComparer.Ordinal).ToArray();
+                for (int i = 0; i < rules.Length; i++)
                 {
                     if (i > 0) message.Append("、");
-                    message.Append(result.Applied[i].RuleId);
+                    message.Append(rules[i]);
                 }
                 message.Append("）");
             }
@@ -674,7 +674,7 @@ namespace ThesisAddIn.VSTO
             }
             else
             {
-                message.Append("。修复副本已生成。");
+                message.Append("。即将更新当前工作副本。");
             }
             foreach (EnginePatchFailure failure in result.Failures)
             {
@@ -1132,6 +1132,100 @@ namespace ThesisAddIn.VSTO
         {
             string flatOpc = document.WordOpenXML;
             FlatOpcPackageWriter.Write(flatOpc, path);
+        }
+
+        private static bool IsToolWorkingCopy(Word.Document document)
+        {
+            if (document == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                for (int i = 1; i <= document.Comments.Count; i++)
+                {
+                    Word.Comment comment = document.Comments[i];
+                    if (!string.Equals(comment.Author, "NKU Thesis Tool", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    Word.Range text = comment.Range.Duplicate;
+                    text.TextRetrievalMode.IncludeHiddenText = true;
+                    if ((text.Text ?? string.Empty).IndexOf("[NKU-TOOL-ANNOTATION:v1]", StringComparison.Ordinal) >= 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // If marker inspection fails, treat the document as a source and
+                // create a fresh initial working copy instead of overwriting it.
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Publishes an engine-produced DOCX back to the same annotated working-copy path.
+        /// Word releases its file lock while closed; a same-volume replacement avoids leaving
+        /// a trail of user-visible “fixed” copies. The submitted source is never this path.
+        /// </summary>
+        private Word.Document ReplaceWorkingCopy(Word.Document currentDocument, string workingCopyPath,
+            string replacementPath, out string error)
+        {
+            error = null;
+            string adjacentReplacement = null;
+            bool documentClosed = false;
+            try
+            {
+                if (currentDocument == null || string.IsNullOrWhiteSpace(workingCopyPath) ||
+                    string.IsNullOrWhiteSpace(replacementPath) || !File.Exists(workingCopyPath) || !File.Exists(replacementPath))
+                {
+                    error = "当前工作副本或修复结果文件不存在，已停止替换。";
+                    return null;
+                }
+
+                adjacentReplacement = workingCopyPath + ".nku-" + Guid.NewGuid().ToString("N") + ".tmp.docx";
+                File.Copy(replacementPath, adjacentReplacement);
+
+                object saveChanges = Word.WdSaveOptions.wdDoNotSaveChanges;
+                object missing = Type.Missing;
+                currentDocument.Close(ref saveChanges, ref missing, ref missing);
+                documentClosed = true;
+
+                File.Replace(adjacentReplacement, workingCopyPath, null);
+                adjacentReplacement = null;
+
+                string openError;
+                Word.Document updated = OpenAnnotatedCopy(workingCopyPath, out openError);
+                if (updated == null)
+                {
+                    error = "文件已更新，但 Word 未能重新打开它：" + openError;
+                    return null;
+                }
+
+                return updated;
+            }
+            catch (Exception exception)
+            {
+                error = "无法安全更新同一份工作副本：" + exception.Message;
+                if (documentClosed && File.Exists(workingCopyPath))
+                {
+                    string reopenError;
+                    if (OpenAnnotatedCopy(workingCopyPath, out reopenError) == null)
+                    {
+                        error += "；原工作副本也未能重新打开：" + reopenError;
+                    }
+                }
+                return null;
+            }
+            finally
+            {
+                TryDelete(adjacentReplacement);
+            }
         }
 
         private static string CreateAnnotatedOutputPath(DocumentOperationContext operation)

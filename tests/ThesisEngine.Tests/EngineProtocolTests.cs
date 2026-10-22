@@ -31,14 +31,42 @@ public sealed class EngineProtocolTests
                 Coverage = "正文 run",
                 Diagnostics = new List<EngineDiagnostic>
                 {
-                    new() { RuleId = "font-size", Location = "word/document.xml#paragraph[0]/run[0]" }
+                    new()
+                    {
+                        RuleId = "font-size",
+                        Location = "word/document.xml#paragraph[0]/run[0]",
+                        Occurrences = new List<EngineDiagnosticOccurrence>
+                        {
+                            new() { Location = "word/document.xml#paragraph[0]/run[0]", Actual = "10pt" },
+                            new() { Location = "word/document.xml#paragraph[1]/run[0]", Actual = "10pt" }
+                        }
+                    }
                 }
             }
         };
         Assert.True(EngineProtocolCodec.TryDeserializeResponse(
             EngineProtocolCodec.SerializeResponse(response), out var decodedResponse, out var responseError), responseError);
         Assert.True(decodedResponse!.Ok);
-        Assert.Equal("font-size", Assert.Single(decodedResponse.Result!.Diagnostics).RuleId);
+        EngineDiagnostic decodedDiagnostic = Assert.Single(decodedResponse.Result!.Diagnostics);
+        Assert.Equal("font-size", decodedDiagnostic.RuleId);
+        Assert.Equal(2, decodedDiagnostic.Occurrences.Count);
+        Assert.Equal("word/document.xml#paragraph[1]/run[0]", decodedDiagnostic.Occurrences[1].Location);
+
+        var locationRequest = new EngineRequest
+        {
+            RequestId = "group-fix",
+            Operation = EngineProtocol.PlanOperation,
+            InputPath = @"C:\temp\sample.docx",
+            RuleId = "font-size",
+            Locations = new List<string>
+            {
+                "word/document.xml#paragraph[0]/run[0]",
+                "word/document.xml#paragraph[1]/run[0]"
+            }
+        };
+        Assert.True(EngineProtocolCodec.TryDeserializeRequest(
+            EngineProtocolCodec.SerializeRequest(locationRequest), out var decodedLocationRequest, out var locationRequestError), locationRequestError);
+        Assert.Equal(locationRequest.Locations, decodedLocationRequest!.Locations);
     }
 
     [Fact]
