@@ -294,7 +294,9 @@ namespace ThesisAddIn.VSTO
                 EngineResponse response = await gateway.AnalyzeAsync(snapshotPath, cancellationToken);
                 if (response == null || !response.Ok || response.Result == null)
                 {
-                    ShowFailure(pane, EngineGateway.DescribeError(response != null ? response.Error : null));
+                    string analysisError = EngineGateway.DescribeError(response != null ? response.Error : null);
+                    WriteStartupLog("引擎分析返回错误：" + analysisError);
+                    ShowFailure(pane, analysisError);
                     return;
                 }
 
@@ -309,6 +311,7 @@ namespace ThesisAddIn.VSTO
                     operation.Document, operation.SnapshotPath, response.Result, out syncError));
                 if (!synchronized)
                 {
+                    WriteStartupLog("刷新当前文档格式标记失败：" + syncError);
                     ShowFailure(pane, "无法更新当前文档的格式标注：" + syncError);
                     return;
                 }
@@ -741,7 +744,9 @@ namespace ThesisAddIn.VSTO
                 }
 
                 finalOutput = CreateTemporaryDocxPath("refreshed");
-                SetStatus(pane, "正在重新分析修复结果并刷新当前文档的批注…");
+                SetStatus(pane, "正在复查修复结果并刷新当前文档标记；长文档可能需要一两分钟…");
+                WriteStartupLog("开始重新分析修复结果并刷新标记；剩余待处理 "
+                    + (plan.Deferred != null ? plan.Deferred.Count : 0) + " 项。");
                 EngineResponse refreshed = await gateway.AnnotateAsync(applied.OutputPath, finalOutput, cancellationToken);
                 if (refreshed == null || !refreshed.Ok || refreshed.Result == null || refreshed.Annotation == null
                     || !PathsEqual(refreshed.Annotation.OutputPath, finalOutput)
@@ -753,9 +758,13 @@ namespace ThesisAddIn.VSTO
                     {
                         refreshError = "标注引擎返回了与请求不一致的输出路径。";
                     }
+                    WriteStartupLog("修复结果重新分析或标注失败；Word 原文尚未写入：" + refreshError);
                     ShowFailure(pane, applySummary + Environment.NewLine + "当前文档尚未修改；刷新批注失败：" + refreshError);
                     return;
                 }
+
+                WriteStartupLog("修复结果重新分析完成：剩余问题 " + refreshed.Result.Diagnostics.Count
+                    + " 项；将刷新 " + refreshed.Annotation.CommentCount + " 条汇总批注。");
 
                 if (!TryEnsureSnapshotUnchanged(operation, out failure))
                 {
@@ -770,6 +779,7 @@ namespace ThesisAddIn.VSTO
                     operation.Document, operation.SnapshotPath, applied.Applied, refreshed.Result, out syncError));
                 if (!synchronized)
                 {
+                    WriteStartupLog("Word 原文修复或标注同步失败：" + syncError);
                     ShowFailure(pane, applySummary + Environment.NewLine + "Word 当前文档未完成修复："
                         + syncError + Environment.NewLine + "请检查文档状态后重新分析。当前文档：" + operation.DocumentFullName);
                     return;
@@ -791,11 +801,13 @@ namespace ThesisAddIn.VSTO
             }
             catch (Exception exception)
             {
+                WriteStartupLog("修复过程出现异常：" + exception);
                 ShowFailure(pane, "修复过程出现异常，已停止：" + exception.Message);
             }
             finally
             {
                 SetBusy(pane, false, null);
+                WriteStartupLog("修复操作结束；操作按钮已恢复。");
                 TryDelete(workCopy);
                 TryDelete(applyOutput);
                 TryDelete(finalOutput);
@@ -806,8 +818,8 @@ namespace ThesisAddIn.VSTO
         {
             var message = new System.Text.StringBuilder();
             message.Append(result.Failures != null && result.Failures.Count > 0
-                ? "修复未完成：已应用 "
-                : "修复完成：已应用 ").Append(result.Applied.Count).Append(" 处");
+                ? "引擎修复未完全应用：已准备 "
+                : "引擎已准备写回 ").Append(result.Applied.Count).Append(" 处");
             if (result.Applied.Count > 0)
             {
                 message.Append("（");
@@ -827,11 +839,11 @@ namespace ThesisAddIn.VSTO
 
             if (string.IsNullOrWhiteSpace(result.OutputPath))
             {
-                message.Append("。未生成输出文件。");
+                message.Append("。没有生成修复文件。");
             }
             else
             {
-                message.Append("。即将更新当前文档。");
+                message.Append("。等待同步到当前 Word 文档。");
             }
             foreach (EnginePatchFailure failure in result.Failures)
             {

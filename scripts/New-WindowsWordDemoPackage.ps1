@@ -11,6 +11,7 @@ $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 $addinOutput = Join-Path $root 'src\ThesisAddIn.VSTO\bin\Release'
 $engineOutput = Join-Path $root 'src\ThesisAddIn.VSTO\ProtocolHost\bin\Release\net10.0'
 $sampleRoot = Join-Path $root 'tests\fixtures\synthetic\demo'
+$fullThesisRoot = Join-Path $root 'tests\fixtures\synthetic\full-thesis'
 $requiredAddin = @('ThesisAddIn.VSTO.dll', 'ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manifest')
 foreach ($name in $requiredAddin) {
     if (-not (Test-Path -LiteralPath (Join-Path $addinOutput $name) -PathType Leaf)) { throw "缺少 Release 加载项输出：$name。请先完成签名构建。" }
@@ -20,6 +21,9 @@ foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.
 }
 foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $sampleRoot $name) -PathType Leaf)) { throw "缺少合成样例文件：$name" }
+}
+foreach ($name in @('synthetic_complete_thesis.docx', 'manifest.json', 'README.md')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $fullThesisRoot $name) -PathType Leaf)) { throw "缺少完整合成论文样例：$name" }
 }
 if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { throw '请设置 THESIS_VSTO_CERT_THUMBPRINT 或传入 -CertificateThumbprint。' }
 
@@ -69,6 +73,11 @@ try {
         Copy-Item -Destination $engineStage
     foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $sampleRoot $name) -Destination $samplesStage
+    }
+    $fullThesisStage = Join-Path $samplesStage 'full-thesis'
+    New-Item -ItemType Directory -Path $fullThesisStage | Out-Null
+    foreach ($name in @('synthetic_complete_thesis.docx', 'manifest.json', 'README.md')) {
+        Copy-Item -LiteralPath (Join-Path $fullThesisRoot $name) -Destination $fullThesisStage
     }
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Test-WindowsWordDemoEnvironment.ps1') -Destination (Join-Path $stage 'Preflight.ps1')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Install-WindowsWordDemo.ps1') -Destination (Join-Path $stage 'Install.ps1')

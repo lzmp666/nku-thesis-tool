@@ -208,7 +208,13 @@ public static class WordAnnotationWriter
     private static XElement CreateComment(int id, string timestamp, Diagnostic diagnostic, string? originalHighlight,
         IReadOnlyList<AnnotationHighlight> occurrenceHighlights)
     {
-        var text = $"要求参考来源：{GetSourceReference(diagnostic)}；规则：{DescribeRule(diagnostic.RuleId)}；期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。";
+        var source = GetSourceReference(diagnostic);
+        var fields = new List<string>();
+        if (!string.IsNullOrWhiteSpace(source)) fields.Add("要求参考来源：" + source);
+        fields.Add("格式项：" + DescribeRule(diagnostic.RuleId));
+        fields.Add("期望值：" + diagnostic.Expected);
+        fields.Add("实际值：" + diagnostic.Actual);
+        var text = string.Join("；", fields) + "。";
         return new XElement(W + "comment",
             new XAttribute(W + "id", id),
             new XAttribute(W + "author", "NKU Thesis Tool"),
@@ -233,7 +239,7 @@ public static class WordAnnotationWriter
             if (separator > 0) return diagnostic.Message![..separator];
         }
 
-        return "演示规则（仅用于验证插件流程，不代表正式标准）";
+        return string.Empty;
     }
 
     private static string DescribeRule(string ruleId) => ruleId switch

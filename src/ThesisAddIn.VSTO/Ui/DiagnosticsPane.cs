@@ -578,9 +578,11 @@ namespace ThesisAddIn.VSTO.Ui
                 int lines = 0;
                 lines += MeasureWrappedLines(graphics, diagnostic.Expected, Font, textWidth);
                 lines += MeasureWrappedLines(graphics, GetActualValues(diagnostic), Font, textWidth);
-                lines += MeasureWrappedLines(graphics, GetLocations(diagnostic), Font, textWidth);
+                lines += MeasureWrappedLines(graphics, GetCompactLocation(_visibleIndices[e.Index], diagnostic), Font, textWidth);
                 lines += MeasureWrappedLines(graphics, BuildRecommendation(diagnostic), Font, textWidth);
-                lines += MeasureWrappedLines(graphics, GetSource(diagnostic), Font, textWidth);
+                string source = GetSource(diagnostic);
+                if (!string.IsNullOrWhiteSpace(source))
+                    lines += MeasureWrappedLines(graphics, source, Font, textWidth);
                 e.ItemHeight = Math.Max(174, 64 + Math.Min(lines, 11) * 17 +
                     (GetOccurrenceCount(diagnostic) > 1 ? 15 : 0));
             }
@@ -625,9 +627,12 @@ namespace ThesisAddIn.VSTO.Ui
 
                 DrawCardLine(e.Graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
                 DrawCardLine(e.Graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
-                DrawCardLine(e.Graphics, "位置", GetLocations(diagnostic), left, ref y, right, smallFont, mutedBrush);
+                DrawCardLine(e.Graphics, "位置", GetCompactLocation(_visibleIndices[e.Index], diagnostic),
+                    left, ref y, right, smallFont, mutedBrush);
                 DrawCardLine(e.Graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
-                DrawCardLine(e.Graphics, "依据", GetSource(diagnostic), left, ref y, right, smallFont, mutedBrush);
+                string source = GetSource(diagnostic);
+                if (!string.IsNullOrWhiteSpace(source))
+                    DrawCardLine(e.Graphics, "依据", source, left, ref y, right, smallFont, mutedBrush);
                 y += 3;
             }
             e.DrawFocusRectangle();
@@ -692,13 +697,31 @@ namespace ThesisAddIn.VSTO.Ui
             }));
         }
 
+        private string GetCompactLocation(int diagnosticIndex, EngineDiagnostic diagnostic)
+        {
+            int count = GetOccurrenceCount(diagnostic);
+            int occurrenceIndex = diagnosticIndex == _selectedIndex
+                ? Math.Max(0, Math.Min(_selectedOccurrenceIndex, count - 1)) : 0;
+            string location = diagnostic?.Occurrences != null && diagnostic.Occurrences.Count > occurrenceIndex
+                ? diagnostic.Occurrences[occurrenceIndex]?.Location : diagnostic?.Location;
+            DocumentLocation parsed;
+            string error;
+            string description = DocumentLocator.TryParse(location, out parsed, out error)
+                ? DocumentLocator.Describe(parsed) : location ?? "未知位置";
+            if (count <= 1) return description;
+            return "当前第 " + (occurrenceIndex + 1) + "/" + count + " 处：" + description
+                + "；可用功能区“上一处/下一处”浏览。";
+        }
+
         private static string GetSource(EngineDiagnostic diagnostic)
         {
             string message = diagnostic?.Message ?? string.Empty;
             int separator = message.IndexOf('：');
             if (separator > 0 && (diagnostic?.RuleId ?? string.Empty).StartsWith("NKU-REQ-", StringComparison.Ordinal))
                 return message.Substring(0, separator);
-            return "演示规则（仅用于验证插件流程，不代表正式标准）";
+            // The single banner at the top identifies demo mode. Repeating this on every
+            // card obscures the expected/actual values without adding a real source.
+            return null;
         }
 
         private static string BuildRecommendation(EngineDiagnostic diagnostic)

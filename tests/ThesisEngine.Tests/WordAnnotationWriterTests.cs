@@ -74,7 +74,7 @@ public sealed class WordAnnotationWriterTests
             var visibleText = string.Concat(comment.Descendants(W + "r")
                 .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is null)
                 .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
-            Assert.Equal("要求参考来源：" + source + "；规则：中文字体；期望值：宋体；实际值：黑体。", visibleText);
+            Assert.Equal("要求参考来源：" + source + "；格式项：中文字体；期望值：宋体；实际值：黑体。", visibleText);
             Assert.DoesNotContain("NKU-REQ-042", visibleText);
         }
         finally
@@ -143,9 +143,9 @@ public sealed class WordAnnotationWriterTests
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value))))
                 .ToArray();
             Assert.Equal(3, commentTexts.Length);
-            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：中文字体；期望值：宋体；实际值：黑体。", commentTexts);
-            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：西文字体；期望值：Times New Roman；实际值：Arial。", commentTexts);
-            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；规则：字号；期望值：12pt；实际值：10.5pt。", commentTexts);
+            Assert.Contains("格式项：中文字体；期望值：宋体；实际值：黑体。", commentTexts);
+            Assert.Contains("格式项：西文字体；期望值：Times New Roman；实际值：Arial。", commentTexts);
+            Assert.Contains("格式项：字号；期望值：12pt；实际值：10.5pt。", commentTexts);
             Assert.DoesNotContain(commentTexts, text => text.Contains("demo/", StringComparison.Ordinal));
             var hiddenLocations = commentElements
                 .SelectMany(comment => comment.Descendants(W + "r")
@@ -212,8 +212,8 @@ public sealed class WordAnnotationWriterTests
             Assert.Equal(new[] { "0", "1", "2" }, comments.Root!.Elements(W + "comment")
                 .Select(element => (string?)element.Attribute(W + "id")).ToArray());
             var commentText = string.Join(" ", comments.Descendants(W + "t").Select(element => element.Value));
-            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）", commentText);
-            Assert.Contains("规则：中文字体", commentText);
+            Assert.DoesNotContain("演示规则", commentText);
+            Assert.Contains("格式项：中文字体", commentText);
             Assert.DoesNotContain("2026版第4.7节表4.6", commentText);
             Assert.Contains("期望值：宋体；实际值：黑体", commentText);
             Assert.DoesNotContain("修改建议：", commentText);

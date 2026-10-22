@@ -57,6 +57,14 @@ namespace ThesisAddIn.VSTO.Engine
             public string Text { get; set; }
         }
 
+        private sealed class XmlParagraph
+        {
+            public List<XmlRun> Runs { get; set; }
+            public string Text { get; set; }
+            public int CompletedTableRowsBefore { get; set; }
+            public int TotalTableRows { get; set; }
+        }
+
         public static bool IsWorkingCopy(Word.Document document)
         {
             foreach (Word.Variable variable in document.Variables)
@@ -395,11 +403,14 @@ namespace ThesisAddIn.VSTO.Engine
         private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
             IEnumerable<string> requestedLocations)
         {
-            Dictionary<int, List<XmlRun>> runsByParagraph = ReadXmlRuns(snapshotPath);
+            Dictionary<int, XmlParagraph> paragraphs = ReadXmlParagraphs(snapshotPath);
             int paragraphCount = document.Paragraphs.Count;
-            int xmlParagraphCount = runsByParagraph.Count == 0 ? 0 : runsByParagraph.Keys.Max() + 1;
-            if (paragraphCount != xmlParagraphCount)
-                throw new InvalidDataException("Word 段落与分析快照无法一一对应，为避免改错位置已停止。");
+            int xmlParagraphCount = paragraphs.Count == 0 ? 0 : paragraphs.Keys.Max() + 1;
+            int tableRowCount = paragraphs.Values.Select(paragraph => paragraph.TotalTableRows).DefaultIfEmpty(0).Max();
+            if (paragraphCount != xmlParagraphCount + tableRowCount)
+                throw new InvalidDataException("Word 段落与分析快照数量不一致（Word " + paragraphCount
+                    + " 段，快照正文 " + xmlParagraphCount + " 段、表格 " + tableRowCount
+                    + " 行），为避免改错位置已停止。");
 
             var result = new Dictionary<string, Word.Range>(StringComparer.Ordinal);
             var requestedByParagraph = new Dictionary<int, HashSet<int>>();
@@ -410,8 +421,8 @@ namespace ThesisAddIn.VSTO.Engine
                     throw new InvalidDataException("暂不支持该位置格式：" + location);
                 int paragraphIndex = int.Parse(match.Groups["paragraph"].Value, CultureInfo.InvariantCulture);
                 int runIndex = int.Parse(match.Groups["run"].Value, CultureInfo.InvariantCulture);
-                if (!runsByParagraph.TryGetValue(paragraphIndex, out List<XmlRun> paragraphRuns) ||
-                    runIndex < 0 || runIndex >= paragraphRuns.Count)
+                if (!paragraphs.TryGetValue(paragraphIndex, out XmlParagraph xmlParagraph) ||
+                    runIndex < 0 || runIndex >= xmlParagraph.Runs.Count)
                     throw new InvalidDataException("分析位置已不存在：" + location);
 
                 if (!requestedByParagraph.TryGetValue(paragraphIndex, out HashSet<int> requestedRuns))
@@ -422,12 +433,17 @@ namespace ThesisAddIn.VSTO.Engine
             foreach (KeyValuePair<int, HashSet<int>> requested in requestedByParagraph)
             {
                 int paragraphIndex = requested.Key;
-                List<XmlRun> paragraphRuns = runsByParagraph[paragraphIndex];
-                Word.Range paragraphRange = document.Paragraphs[paragraphIndex + 1].Range.Duplicate;
+                XmlParagraph xmlParagraph = paragraphs[paragraphIndex];
+                List<XmlRun> paragraphRuns = xmlParagraph.Runs;
+                int wordParagraphIndex = paragraphIndex + xmlParagraph.CompletedTableRowsBefore;
+                if (wordParagraphIndex < 0 || wordParagraphIndex >= paragraphCount)
+                    throw new InvalidDataException("分析位置超出 Word 正文段落范围，已停止定位。");
+                Word.Range paragraphRange = document.Paragraphs[wordParagraphIndex + 1].Range.Duplicate;
                 string paragraphText = paragraphRange.Text ?? string.Empty;
                 paragraphText = paragraphText.TrimEnd('\r', '\a');
                 string xmlText = string.Concat(paragraphRuns.Select(run => run.Text));
-                if (!string.Equals(paragraphText, xmlText, StringComparison.Ordinal))
+                if (!string.Equals(paragraphText, xmlText, StringComparison.Ordinal)
+                    || !string.Equals(xmlParagraph.Text, xmlText, StringComparison.Ordinal))
                     throw new InvalidDataException("第 " + (paragraphIndex + 1) + " 段包含无法安全映射的 Word 内容，未修改文档。");
 
                 int cursor = paragraphRange.Start;
@@ -486,7 +502,7 @@ namespace ThesisAddIn.VSTO.Engine
             return result;
         }
 
-        private static Dictionary<int, List<XmlRun>> ReadXmlRuns(string snapshotPath)
+        private static Dictionary<int, XmlParagraph> ReadXmlParagraphs(string snapshotPath)
         {
             if (string.IsNullOrWhiteSpace(snapshotPath) || !File.Exists(snapshotPath))
                 throw new FileNotFoundException("用于核对位置的当前文档快照不存在。", snapshotPath);
@@ -499,20 +515,38 @@ namespace ThesisAddIn.VSTO.Engine
                     XDocument document = XDocument.Load(stream, LoadOptions.None);
                     XElement body = document.Root?.Element(W + "body");
                     if (body == null) throw new InvalidDataException("当前快照缺少 Word 正文。");
-                    var result = new Dictionary<int, List<XmlRun>>();
-                    XElement[] paragraphs = body.Descendants(W + "p")
+                    XElement[] bodyRows = body.Descendants(W + "tr")
+                        .Where(row => !row.Ancestors(W + "txbxContent").Any())
+                        .ToArray();
+                    XElement[] orderedNodes = body.DescendantsAndSelf().ToArray();
+                    var nodePositions = new Dictionary<XElement, int>();
+                    for (int nodeIndex = 0; nodeIndex < orderedNodes.Length; nodeIndex++)
+                        nodePositions[orderedNodes[nodeIndex]] = nodeIndex;
+                    var rowEndPositions = bodyRows.ToDictionary(row => row,
+                        row => nodePositions[row] + row.DescendantsAndSelf().Count() - 1);
+                    XElement[] sourceParagraphs = body.Descendants(W + "p")
                         .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
                         .ToArray();
-                    for (int paragraphIndex = 0; paragraphIndex < paragraphs.Length; paragraphIndex++)
+                    var result = new Dictionary<int, XmlParagraph>();
+                    for (int paragraphIndex = 0; paragraphIndex < sourceParagraphs.Length; paragraphIndex++)
                     {
+                        XElement sourceParagraph = sourceParagraphs[paragraphIndex];
                         var runs = new List<XmlRun>();
-                        foreach (XElement run in paragraphs[paragraphIndex].Elements(W + "r")
+                        foreach (XElement run in sourceParagraph.Elements(W + "r")
                                      .Where(candidate => candidate.Descendants(W + "t").Any()))
                         {
                             string text = string.Concat(run.Descendants(W + "t").Select(element => element.Value));
                             runs.Add(new XmlRun { Text = text });
                         }
-                        result.Add(paragraphIndex, runs);
+                        int paragraphPosition = nodePositions[sourceParagraph];
+                        int completedRowsBefore = rowEndPositions.Values.Count(rowEndPosition => rowEndPosition < paragraphPosition);
+                        result.Add(paragraphIndex, new XmlParagraph
+                        {
+                            Runs = runs,
+                            Text = string.Concat(sourceParagraph.Descendants(W + "t").Select(element => element.Value)),
+                            CompletedTableRowsBefore = completedRowsBefore,
+                            TotalTableRows = bodyRows.Length
+                        });
                     }
                     return result;
                 }

@@ -49,7 +49,10 @@ namespace ThesisAddIn.VSTO.Engine
                 return null;
             }
 
-            return new EngineGateway(new EngineProtocolClient(EngineProcessOptions.ForDotnet(hostPath)));
+            // Full documents may contain hundreds of grouped occurrences. Re-analyzing
+            // and annotating that result is more expensive than a single format check.
+            return new EngineGateway(new EngineProtocolClient(
+                EngineProcessOptions.ForDotnet(hostPath, TimeSpan.FromMinutes(2))));
         }
 
         public EngineResponse Analyze(string documentPath)

@@ -157,6 +157,45 @@ public sealed class EngineProtocolTests
     }
 
     [Fact]
+    public async Task ProtocolHostBatchRepairsAndReanalyzesFullSyntheticThesisWithoutChangingItsText()
+    {
+        var root = FindRepositoryRoot();
+        var host = FindProtocolHost(root);
+        Assert.True(File.Exists(host), $"Protocol host was not built: {host}");
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "full-thesis", "synthetic_complete_thesis.docx");
+        var appliedPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-full-thesis-fixed.docx");
+        var annotatedPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "-full-thesis-reviewed.docx");
+        var originalHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(input)));
+        var originalText = ReadBodyText(input);
+        try
+        {
+            var client = new EngineProtocolClient(EngineProcessOptions.ForDotnet(host, TimeSpan.FromMinutes(2)));
+            var plan = await client.PlanAsync(input, null, null);
+            Assert.True(plan.Ok, plan.Error?.Message);
+            Assert.Equal(3, plan.Plan!.Patches.Count);
+
+            var apply = await client.ApplyAsync(input, appliedPath, null, null);
+            Assert.True(apply.Ok, apply.Error?.Message);
+            Assert.NotEmpty(apply.Apply!.Applied);
+            Assert.Empty(apply.Apply.Failures);
+            Assert.Equal(originalText, ReadBodyText(appliedPath));
+
+            var refreshed = await client.AnnotateAsync(appliedPath, annotatedPath);
+            Assert.True(refreshed.Ok, refreshed.Error?.Message);
+            Assert.NotNull(refreshed.Annotation);
+            Assert.NotNull(refreshed.Result);
+            Assert.Empty(refreshed.Result!.Diagnostics);
+            Assert.Equal(originalText, ReadBodyText(annotatedPath));
+            Assert.Equal(originalHash, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(input))));
+        }
+        finally
+        {
+            if (File.Exists(appliedPath)) File.Delete(appliedPath);
+            if (File.Exists(annotatedPath)) File.Delete(annotatedPath);
+        }
+    }
+
+    [Fact]
     public async Task ProtocolHostAnnotateRejectsExistingOutputWithoutOverwritingIt()
     {
         var root = FindRepositoryRoot();
@@ -418,6 +457,15 @@ public sealed class EngineProtocolTests
         var line = await process.StandardOutput.ReadLineAsync();
         Assert.True(EngineProtocolCodec.TryDeserializeResponse(line ?? string.Empty, out var response, out var error), error);
         return response!;
+    }
+
+    private static string ReadBodyText(string path)
+    {
+        using var archive = System.IO.Compression.ZipFile.OpenRead(path);
+        using var stream = archive.GetEntry("word/document.xml")!.Open();
+        var document = System.Xml.Linq.XDocument.Load(stream);
+        var word = System.Xml.Linq.XNamespace.Get("http://schemas.openxmlformats.org/wordprocessingml/2006/main");
+        return string.Concat(document.Descendants(word + "t").Select(element => element.Value));
     }
 
     private static string FindRepositoryRoot()
