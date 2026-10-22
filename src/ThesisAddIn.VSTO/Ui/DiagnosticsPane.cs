@@ -14,6 +14,8 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Button _fixAllButton = new Button();
         private readonly Button _previousButton = new Button();
         private readonly Button _nextButton = new Button();
+        private readonly Button _previousOccurrenceButton = new Button();
+        private readonly Button _nextOccurrenceButton = new Button();
         private readonly Button _toggleListButton = new Button();
         private readonly FlowLayoutPanel _diagnosticList = new FlowLayoutPanel();
         private readonly Panel _resultsHost = new Panel();
@@ -24,6 +26,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<Panel> _diagnosticCards = new List<Panel>();
         private int _selectedIndex = -1;
+        private int _selectedOccurrenceIndex;
         private bool _isBusy;
         private bool _showDiagnosticList;
 
@@ -55,12 +58,16 @@ namespace ThesisAddIn.VSTO.Ui
             _fixAllButton.Enabled = false;
             _previousButton.Enabled = false;
             _nextButton.Enabled = false;
+            _previousOccurrenceButton.Enabled = false;
+            _nextOccurrenceButton.Enabled = false;
             _toggleListButton.Enabled = false;
             _analyzeButton.Click += (s, e) => OnEvent(AnalyzeRequested);
             _fixOneButton.Click += (s, e) => OnEvent(FixCurrentRequested);
             _fixAllButton.Click += (s, e) => OnEvent(FixAllRequested);
             _previousButton.Click += (s, e) => NavigateSelection(-1);
             _nextButton.Click += (s, e) => NavigateSelection(1);
+            _previousOccurrenceButton.Click += (s, e) => NavigateOccurrence(-1);
+            _nextOccurrenceButton.Click += (s, e) => NavigateOccurrence(1);
             _toggleListButton.Click += (s, e) => ToggleDiagnosticList();
             buttons.Controls.Add(_analyzeButton);
             buttons.Controls.Add(_fixOneButton);
@@ -101,9 +108,13 @@ namespace ThesisAddIn.VSTO.Ui
             };
             ConfigureButton(_previousButton, "上一项");
             ConfigureButton(_nextButton, "下一项");
+            ConfigureButton(_previousOccurrenceButton, "上一处");
+            ConfigureButton(_nextOccurrenceButton, "下一处");
             ConfigureButton(_toggleListButton, "展开问题列表");
             navigation.Controls.Add(_previousButton);
             navigation.Controls.Add(_nextButton);
+            navigation.Controls.Add(_previousOccurrenceButton);
+            navigation.Controls.Add(_nextOccurrenceButton);
             navigation.Controls.Add(_toggleListButton);
 
             _resultsHost.Dock = DockStyle.Fill;
@@ -126,7 +137,7 @@ namespace ThesisAddIn.VSTO.Ui
             // 操作按钮紧凑置顶；问题详情优先由原文旁的 Word 批注呈现。
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 92F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 46F));
@@ -149,6 +160,19 @@ namespace ThesisAddIn.VSTO.Ui
             }
         }
 
+        public string SelectedLocation
+        {
+            get
+            {
+                EngineDiagnostic diagnostic = SelectedDiagnostic;
+                if (diagnostic == null) return null;
+                if (diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0
+                    && _selectedOccurrenceIndex >= 0 && _selectedOccurrenceIndex < diagnostic.Occurrences.Count)
+                    return diagnostic.Occurrences[_selectedOccurrenceIndex].Location;
+                return diagnostic.Location;
+            }
+        }
+
         public IList<EngineDiagnostic> Diagnostics
         {
             get { return _diagnostics; }
@@ -166,6 +190,7 @@ namespace ThesisAddIn.VSTO.Ui
                 _fixAllButton.Enabled = !busy && HasAutoDiagnostics;
                 _previousButton.Enabled = !busy && _diagnostics.Count > 0;
                 _nextButton.Enabled = !busy && _diagnostics.Count > 0;
+                UpdateOccurrenceNavigation();
                 _toggleListButton.Enabled = !busy && _diagnostics.Count > 0;
                 if (!string.IsNullOrEmpty(message))
                 {
@@ -193,6 +218,7 @@ namespace ThesisAddIn.VSTO.Ui
             _diagnosticList.Controls.Clear();
             _diagnosticCards.Clear();
             _selectedIndex = -1;
+            _selectedOccurrenceIndex = 0;
             _showDiagnosticList = false;
             if (result != null && result.Diagnostics != null)
             {
@@ -215,6 +241,7 @@ namespace ThesisAddIn.VSTO.Ui
             }
             _previousButton.Enabled = hasDiagnostics;
             _nextButton.Enabled = hasDiagnostics;
+            UpdateOccurrenceNavigation();
             _toggleListButton.Enabled = hasDiagnostics;
             _toggleListButton.Text = "展开问题列表";
             _issueSummary.Text = hasDiagnostics
@@ -247,6 +274,7 @@ namespace ThesisAddIn.VSTO.Ui
             _diagnosticCards.Clear();
             _diagnosticList.Visible = false;
             _selectedIndex = -1;
+            _selectedOccurrenceIndex = 0;
             _showDiagnosticList = false;
             _emptyState.Visible = true;
             string detail = string.IsNullOrWhiteSpace(message) ? "未知错误。" : message.Trim();
@@ -255,6 +283,8 @@ namespace ThesisAddIn.VSTO.Ui
             _fixAllButton.Enabled = false;
             _previousButton.Enabled = false;
             _nextButton.Enabled = false;
+            _previousOccurrenceButton.Enabled = false;
+            _nextOccurrenceButton.Enabled = false;
             _toggleListButton.Enabled = false;
             _toggleListButton.Text = "展开问题列表";
             _issueSummary.Text = "分析失败；请查看下方错误说明。";
@@ -307,8 +337,27 @@ namespace ThesisAddIn.VSTO.Ui
                 return false;
             }
 
-            SelectDiagnostic(matchIndex, navigateToSource);
+            SelectDiagnostic(matchIndex, navigateToSource, location);
             return true;
+        }
+
+        public bool SelectByOccurrenceLocation(string location, bool navigateToSource)
+        {
+            if (string.IsNullOrWhiteSpace(location)) return false;
+            for (int index = 0; index < _diagnostics.Count; index++)
+            {
+                EngineDiagnostic diagnostic = _diagnostics[index];
+                if (diagnostic == null || diagnostic.Occurrences == null) continue;
+                foreach (EngineDiagnosticOccurrence occurrence in diagnostic.Occurrences)
+                {
+                    if (occurrence != null && string.Equals(occurrence.Location, location, StringComparison.Ordinal))
+                    {
+                        SelectDiagnostic(index, navigateToSource, location);
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         private void AddDiagnosticCard(int index, EngineDiagnostic diagnostic)
@@ -464,17 +513,31 @@ namespace ThesisAddIn.VSTO.Ui
             SelectDiagnostic(index, navigateToSource: true);
         }
 
-        private void SelectDiagnostic(int index, bool navigateToSource)
+        private void SelectDiagnostic(int index, bool navigateToSource, string location = null)
         {
             if (index < 0 || index >= _diagnostics.Count)
             {
                 return;
             }
 
+            bool changedDiagnostic = _selectedIndex != index;
             _selectedIndex = index;
             EngineDiagnostic selectedDiagnostic = _diagnostics[index];
+            if (changedDiagnostic) _selectedOccurrenceIndex = 0;
+            if (!string.IsNullOrWhiteSpace(location) && selectedDiagnostic.Occurrences != null)
+            {
+                for (int i = 0; i < selectedDiagnostic.Occurrences.Count; i++)
+                {
+                    if (string.Equals(selectedDiagnostic.Occurrences[i].Location, location, StringComparison.Ordinal))
+                    {
+                        _selectedOccurrenceIndex = i;
+                        break;
+                    }
+                }
+            }
             _issueSummary.Text = "当前 " + (index + 1) + "/" + _diagnostics.Count + "："
-                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + "。已有批注可在原文查看，或展开问题列表查看详情。";
+                + (selectedDiagnostic.RuleId ?? "（未提供规则）") + DescribeOccurrenceSelection(selectedDiagnostic)
+                + "。可用上一处/下一处定位此项的其他位置。";
             for (int i = 0; i < _diagnosticCards.Count; i++)
             {
                 Panel card = _diagnosticCards[i];
@@ -485,6 +548,7 @@ namespace ThesisAddIn.VSTO.Ui
             }
 
             _fixOneButton.Enabled = !_isBusy && CanFixSelected;
+            UpdateOccurrenceNavigation();
             if (_showDiagnosticList && index < _diagnosticCards.Count)
             {
                 _diagnosticList.ScrollControlIntoView(_diagnosticCards[index]);
@@ -513,6 +577,46 @@ namespace ThesisAddIn.VSTO.Ui
             }
 
             SelectDiagnostic(nextIndex);
+        }
+
+        private void NavigateOccurrence(int direction)
+        {
+            if (_isBusy || direction == 0 || SelectedDiagnostic == null)
+                return;
+            int count = GetOccurrenceCount(SelectedDiagnostic);
+            if (count <= 1)
+                return;
+            _selectedOccurrenceIndex = (_selectedOccurrenceIndex + direction + count) % count;
+            UpdateSelectionSummary();
+            OnEvent(DiagnosticSelected);
+        }
+
+        private void UpdateSelectionSummary()
+        {
+            EngineDiagnostic diagnostic = SelectedDiagnostic;
+            if (diagnostic == null) return;
+            _issueSummary.Text = "当前 " + (_selectedIndex + 1) + "/" + _diagnostics.Count + "："
+                + (diagnostic.RuleId ?? "（未提供规则）") + DescribeOccurrenceSelection(diagnostic)
+                + "。可用上一处/下一处定位此项的其他位置。";
+        }
+
+        private void UpdateOccurrenceNavigation()
+        {
+            bool enabled = !_isBusy && SelectedDiagnostic != null && GetOccurrenceCount(SelectedDiagnostic) > 1;
+            _previousOccurrenceButton.Enabled = enabled;
+            _nextOccurrenceButton.Enabled = enabled;
+        }
+
+        private string DescribeOccurrenceSelection(EngineDiagnostic diagnostic)
+        {
+            int count = GetOccurrenceCount(diagnostic);
+            return count > 1 ? "（第 " + (_selectedOccurrenceIndex + 1) + "/" + count + " 处）" : string.Empty;
+        }
+
+        private static int GetOccurrenceCount(EngineDiagnostic diagnostic)
+        {
+            return diagnostic == null || diagnostic.Occurrences == null || diagnostic.Occurrences.Count == 0
+                ? 1 : diagnostic.Occurrences.Count;
         }
 
         private void ToggleDiagnosticList()

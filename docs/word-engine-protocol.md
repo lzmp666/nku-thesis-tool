@@ -14,8 +14,8 @@ netstandard2.0，不引用 ThesisEngine.Core。Word VSTO 插件目标为 .NET Fr
 退出。
 
 宿主本身只读取输入文档：analyze 与 plan 不写入任何文件；apply 和 annotate 只写入调用方指定的
-临时输出文件，且**拒绝覆盖已存在的输出文件**。Word 插件再用临时结果刷新唯一的标注工作副本，
-用户的原始提交文档不会被覆盖。
+临时输出文件，且**拒绝覆盖已存在的输出文件**。Word 插件将临时结果用于验证修复和重新分析，随后
+把格式与批注直接应用到当前打开的标注工作副本；不会关闭、替换或重开用户文档，也不会覆盖原始提交文档。
 
 ## 版本 1.0：analyze
 
@@ -73,10 +73,11 @@ requestId 必须原样回显，插件据此拒绝过期或串线的响应。prot
 {"protocolVersion":"1.2","requestId":"a1","operation":"apply","inputPath":"C:\\work\\sample.docx","outputPath":"C:\\work\\sample-fixed.docx","ruleId":"demo/east-asian-font","locations":["word/document.xml#paragraph[0]/run[0]","word/document.xml#paragraph[1]/run[0]"]}
 ~~~
 
-引擎仍将完整修复结果写到调用方指定的临时 `.docx`，以便整批校验、原子失败和重新标注；
-Word 插件会用该结果更新同一条标注工作副本路径，不再提示用户为每次修复另存一份。原始
-提交文件保持不变。引擎宿主在应用前重新分析输入，且 `outputPath` 不得已存在；全部前置
-条件在写入之前检查完毕，失败时不会产生部分修复文件。
+引擎仍将完整修复结果写到调用方指定的临时 `.docx`，以便整批校验、原子失败和重新分析；
+Word 插件把确认的格式改动及刷新后的批注直接写入当前打开的工作副本，并放入一个 Word 撤销操作中。
+插件不关闭或替换该文档，也不为每次修复创建用户可见的新文件。当前会话中的修改保持未保存，作者完成后
+自行保存或另存工作副本；原始提交文件不变。引擎宿主在应用前重新分析输入，且 `outputPath` 不得已存在；
+全部前置条件在写入之前检查完毕，失败时不会产生部分修复文件。
 
 成功响应：
 
@@ -134,9 +135,9 @@ netstandard2.0 的契约程序集。完整命令见 src/ThesisAddIn.VSTO/README.
 DLL 的完整路径后启动 Word，插件会在 ThisAddIn_Startup 中创建进程客户端。
 
 Word 会锁定正在编辑的 .docx，引擎无法直接读取，因此插件在分析或修复前从 Word 当前内存内容
-生成临时快照，再以快照作为 inputPath。首次分析会生成一份标注工作副本；后续分析和修复通过
-临时文件刷新同一工作副本路径，不会每次为用户新建文档。修复时插件关闭并重新打开该路径以
-释放 Word 文件锁；作者完成修改后可自行保存或另存为。原始提交文件保持不变。
+生成临时快照，再以快照作为 inputPath。首次分析会生成一份标注工作副本；后续分析和修复都直接更新
+当前打开的工作副本，不会关闭、替换或重开该文件。修复和批注刷新作为一个撤销操作留在 Word 当前会话；
+作者完成所有处理后再保存或另存为。原始提交文件保持不变。
 
 协议测试位于 tests/ThesisEngine.Tests/EngineProtocolTests.cs 和
 WordAnnotationWriterTests.cs，包括 JSON 往返、宿主分析/批注、重复刷新、原文不变、用户批注保留、非法输入和超时终止。正式规则仍以 Core 当前的 demo 规则版本为准；本协议不把

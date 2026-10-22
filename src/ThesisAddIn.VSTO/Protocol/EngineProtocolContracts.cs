@@ -13,7 +13,7 @@ namespace ThesisAddIn.Protocol;
 
 public static class EngineProtocol
 {
-    public const string Version = "1.1";
+    public const string Version = "1.2";
     public const string AnalyzeOperation = "analyze";
     public const string PlanOperation = "plan";
     public const string ApplyOperation = "apply";

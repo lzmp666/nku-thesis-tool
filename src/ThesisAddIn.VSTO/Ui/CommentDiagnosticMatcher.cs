@@ -29,12 +29,15 @@ namespace ThesisAddIn.VSTO.Ui
                 if (diagnostic == null
                     || !string.Equals(diagnostic.RuleId, ruleId, StringComparison.OrdinalIgnoreCase)
                     || !string.Equals(diagnostic.Expected ?? string.Empty, expected ?? string.Empty, StringComparison.Ordinal)
-                    || !string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal)
-                    || (!string.IsNullOrEmpty(location)
-                        && !string.Equals(diagnostic.Location ?? string.Empty, location, StringComparison.Ordinal)))
+                    || !string.Equals(diagnostic.Actual ?? string.Empty, actual ?? string.Empty, StringComparison.Ordinal))
                 {
                     continue;
                 }
+
+                if (!string.IsNullOrEmpty(location) &&
+                    !string.Equals(diagnostic.Location ?? string.Empty, location, StringComparison.Ordinal) &&
+                    !ContainsOccurrence(diagnostic, location))
+                    continue;
 
                 if (matchIndex >= 0)
                 {
@@ -45,6 +48,17 @@ namespace ThesisAddIn.VSTO.Ui
             }
 
             return matchIndex;
+        }
+
+        private static bool ContainsOccurrence(EngineDiagnostic diagnostic, string location)
+        {
+            if (diagnostic.Occurrences == null) return false;
+            foreach (EngineDiagnosticOccurrence occurrence in diagnostic.Occurrences)
+            {
+                if (occurrence != null && string.Equals(occurrence.Location, location, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
         }
     }
 }

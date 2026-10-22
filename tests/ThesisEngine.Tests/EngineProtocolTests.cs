@@ -182,8 +182,10 @@ public sealed class EngineProtocolTests
         }
     }
 
-    [Fact]
-    public async Task ProtocolHostRejectsAnUnknownProtocolVersion()
+    [Theory]
+    [InlineData("1.1")]
+    [InlineData("9.0")]
+    public async Task ProtocolHostRejectsAnUnsupportedProtocolVersion(string version)
     {
         var root = FindRepositoryRoot();
         var host = FindProtocolHost(root);
@@ -191,7 +193,7 @@ public sealed class EngineProtocolTests
 
         var response = await RunHost(host, new EngineRequest
         {
-            ProtocolVersion = "9.0",
+            ProtocolVersion = version,
             RequestId = "version-1",
             InputPath = "not-used.docx"
         });
