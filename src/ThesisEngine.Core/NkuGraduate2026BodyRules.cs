@@ -203,8 +203,9 @@ internal sealed record BodyScopeDecision(ParagraphScopeClassification Classifica
 internal static class NkuGraduate2026BodyScopeClassifier
 {
     private static readonly System.Text.RegularExpressions.Regex ChapterHeading = new(
-        @"^第[一二三四五六七八九十百零〇0-9]+章",
-        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        @"^(?:第[一二三四五六七八九十百零〇0-9]+章|Chapter\s+(?:[0-9]+|[IVXLCDM]+)\b)",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static readonly System.Text.RegularExpressions.Regex EndHeading = new(
         @"^(参考文献|主要参考文献|References|Bibliography|附\s*录|Appendix|致\s*谢|Acknowledg(e)?ments|攻读学位期间|个人简历|在学期间成果)",
@@ -213,10 +214,6 @@ internal static class NkuGraduate2026BodyScopeClassifier
     private static readonly System.Text.RegularExpressions.Regex KnownExcludedHeading = new(
         @"^(摘要|中文摘要|英文摘要|Abstract|ABSTRACT|目录|Contents|CONTENTS|图目录|表目录|封面|声明|授权书)\s*$",
         System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-
-    private static readonly System.Text.RegularExpressions.Regex CaptionText = new(
-        @"^\s*(图|表)\s*[0-9一二三四五六七八九十]+([.\-—][0-9一二三四五六七八九十]+)*\s*",
-        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     public static IReadOnlyList<BodyScopeDecision> Classify(IReadOnlyList<BodyScopeInput> paragraphs)
     {
@@ -245,7 +242,7 @@ internal static class NkuGraduate2026BodyScopeClassifier
             {
                 decisions[i] = new(ParagraphScopeClassification.Excluded, "表格单元格；正文规则不适用，表格专属规则尚未启用");
             }
-            else if (paragraph.IsCaption || CaptionText.IsMatch(paragraph.Text.Trim()))
+            else if (paragraph.IsCaption)
             {
                 decisions[i] = new(ParagraphScopeClassification.Excluded, "图表题注应使用题注专属规则");
             }

@@ -107,13 +107,15 @@ def add_heading(doc: Document, text: str, level=1) -> None:
              size=16 if level == 1 else 13, bold=True)
 
 
-def add_caption(doc: Document, text: str) -> None:
+def add_caption(doc: Document, text: str, *, wrong_style: bool = False) -> None:
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    is_figure = text.startswith("图")
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT if wrong_style else WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.first_line_indent = Cm(0)
-    p.paragraph_format.space_before = Pt(5)
-    p.paragraph_format.space_after = Pt(7)
-    add_text(p, text, size=10.5)
+    p.paragraph_format.space_before = Pt(0 if wrong_style else 6)
+    p.paragraph_format.space_after = Pt(0 if wrong_style else (12 if is_figure else 6))
+    p.paragraph_format.line_spacing = 1.5 if wrong_style else 1.0
+    add_text(p, text, east_asia="黑体" if wrong_style else "宋体", size=12 if wrong_style else 10.5)
 
 
 def add_table(doc: Document, headers: list[str], rows: list[list[str]]) -> None:
@@ -359,7 +361,7 @@ def main() -> None:
                 p = doc.add_paragraph(); set_para_format(p)
                 add_text(p, "其中，U(r,t)表示区域r在时段t的座位占用率，N(r,t)表示该时段观察到的使用座位数，C(r,t)表示同时段可使用座位数。分母为零或区域未开放时，该记录标记为不适用，不赋值为零。")
         if chapter_title.startswith("第3章"):
-            add_caption(doc, "表 3-1 观察变量与计算口径")
+            add_caption(doc, "表3.1　观察变量与计算口径")
             add_table(doc, ["变量", "定义", "汇总单位"], [
                 ["区域占用率", "使用座位数/开放座位数", "区域×时段"],
                 ["设备可用率", "正常设备数/计划开放设备数", "区域×观察日"],
@@ -367,27 +369,27 @@ def main() -> None:
                 ["记录完整度", "有效字段数/应填字段数", "单条观察记录"],
             ])
         if chapter_title.startswith("第4章"):
-            add_caption(doc, "表 4-1 合成样本的区域汇总指标")
+            add_caption(doc, "表4.1　合成样本的区域汇总指标")
             add_table(doc, ["虚构区域", "平均占用率", "高占用时段数", "设备可用率"], [
                 ["安静学习区", "0.72", "18", "0.98"],
                 ["协作讨论区", "0.66", "14", "0.96"],
                 ["数字资源区", "0.59", "9", "0.91"],
             ])
-            add_caption(doc, "图 4-1 不同时段的合成平均占用水平")
             image_paragraph = doc.add_paragraph()
             image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             image_paragraph.add_run().add_picture(make_figure("不同时段的模拟占用记录", ["上午", "午间", "下午", "晚间"], [54, 68, 82, 61]), width=Inches(5.4))
-            add_caption(doc, "表 4-2 数据质量检查结果（合成样本）")
+            add_caption(doc, "图4.1　不同时段的合成平均占用水平", wrong_style=True)
+            add_caption(doc, "表4.2　数据质量检查结果（合成样本）")
             add_table(doc, ["检查项", "记录数", "处理方式"], [
                 ["字段完整", "486", "进入汇总"],
                 ["设备维护", "12", "标记后单独说明"],
                 ["临时关闭", "6", "排除占用率分母"],
                 ["重复记录", "0", "无须删除"],
             ])
-            add_caption(doc, "图 4-2 合成数据处理与复核流程")
             image_paragraph = doc.add_paragraph()
             image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             image_paragraph.add_run().add_picture(make_figure("可追溯的分析流程", ["记录", "校验", "汇总", "复核"], [48, 40, 35, 28]), width=Inches(5.4))
+            add_caption(doc, "图4.2　合成数据处理与复核流程")
 
     add_heading(doc, "参考文献", 1)
     refs = [
@@ -402,7 +404,7 @@ def main() -> None:
 
     add_heading(doc, "附录A 观察记录字段", 1)
     add_body(doc, "字段字典用于说明合成观察表的最小结构。每条记录包含虚构区域代码、观察日期类别、时段代码、开放座位数、使用座位数、设备状态计数和活动类别计数。字段不包含姓名、学号、设备地址或精确个人移动信息。")
-    add_caption(doc, "表 A-1 合成记录字段字典")
+    add_caption(doc, "表A.1　合成记录字段字典")
     add_table(doc, ["字段名", "类型", "说明"], [
         ["area_code", "枚举", "虚构区域编号"],
         ["time_slot", "枚举", "上午/午间/下午/晚间"],
@@ -412,7 +414,7 @@ def main() -> None:
     ])
 
     add_heading(doc, "附录B 合成样本说明", 1)
-    add_body(doc, "本论文的全部数值、图表、人物和机构名称均为程序构造的虚构测试数据。格式异常测试点分别位于正文中文字体、英文西文字体和字号片段。使用者可以在 Word 的问题列表中检索相应位置，预览单项或批量修改，并重新分析。由于项目当前只配置了正文字体和字号规则，图题、表题、表格单元格内部格式以及图像的视觉质量应保持为未覆盖项。")
+    add_body(doc, "本论文的全部数值、图表、人物和机构名称均为程序构造的虚构测试数据。格式异常测试点分别位于正文中文字体、英文西文字体、字号和一条图题的段落格式。使用者可以在 Word 的问题检索列表中筛选对应问题，预览单项或批量修复，并重新分析。当前版本按南开大学 2026 版表 4.6 检查图表题注字体、字号、对齐、行距和段前段后距；题名空格、图表位置和表格单元格结构仍需人工检查。")
     add_body(doc, "测试结束后，请由作者决定是否保存修改后的当前文档。插件不应为每次修复另建输出副本；如需保留原始状态，可在第一次操作前由用户自行另存一份。")
 
     add_heading(doc, "致谢", 1)

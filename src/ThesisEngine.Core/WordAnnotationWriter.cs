@@ -239,6 +239,17 @@ public static class WordAnnotationWriter
             if (separator > 0) return diagnostic.Message![..separator];
         }
 
+        var message = diagnostic.Message ?? string.Empty;
+        const string sourcePrefix = "依据：";
+        if (message.StartsWith(sourcePrefix, StringComparison.Ordinal))
+        {
+            var end = message.IndexOf('。', sourcePrefix.Length);
+            if (end > sourcePrefix.Length) return message[sourcePrefix.Length..end];
+        }
+
+        if (diagnostic.RuleId.StartsWith("demo/", StringComparison.Ordinal))
+            return "演示规则（仅用于验证插件流程，不代表正式标准）";
+
         return string.Empty;
     }
 
@@ -247,6 +258,14 @@ public static class WordAnnotationWriter
         "demo/east-asian-font" or "NKU-REQ-042" => "中文字体",
         "demo/western-font" or "NKU-REQ-043" => "西文字体",
         "demo/font-size" or "NKU-REQ-044" => "字号",
+        "demo/caption-east-asian-font" => "图表题注字体",
+        "demo/caption-font-size" => "图表题注字号",
+        "demo/caption-alignment" => "图表题注对齐",
+        "demo/caption-line-spacing" => "图表题注行距",
+        "demo/caption-space-before" => "图表题注段前距",
+        "demo/caption-space-after" => "图表题注段后距",
+        "demo/caption-placement" => "图表题注位置",
+        "demo/caption-number-gap" => "题注编号间距",
         _ => "格式项目"
     };
 

@@ -556,6 +556,14 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NKU-REQ-043": return "西文字体";
                 case "demo/font-size": return "字号";
                 case "NKU-REQ-044": return "字号";
+                case "demo/caption-east-asian-font": return "图表题注字体";
+                case "demo/caption-font-size": return "图表题注字号";
+                case "demo/caption-alignment": return "图表题注对齐";
+                case "demo/caption-line-spacing": return "图表题注行距";
+                case "demo/caption-space-before": return "图表题注段前距";
+                case "demo/caption-space-after": return "图表题注段后距";
+                case "demo/caption-placement": return "图表题注位置";
+                case "demo/caption-number-gap": return "题注编号间距";
                 default:
                     if (!string.IsNullOrWhiteSpace(ruleId) && ruleId.IndexOf("caption", StringComparison.OrdinalIgnoreCase) >= 0)
                         return "图表题注";

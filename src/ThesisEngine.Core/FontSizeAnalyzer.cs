@@ -11,6 +11,14 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
     public const string RuleIdEastAsiaFont = "demo/east-asian-font";
     public const string RuleIdAsciiFont = "demo/western-font";
     public const string RuleIdFontSize = "demo/font-size";
+    public const string RuleIdCaptionEastAsiaFont = "demo/caption-east-asian-font";
+    public const string RuleIdCaptionFontSize = "demo/caption-font-size";
+    public const string RuleIdCaptionAlignment = "demo/caption-alignment";
+    public const string RuleIdCaptionLineSpacing = "demo/caption-line-spacing";
+    public const string RuleIdCaptionSpaceBefore = "demo/caption-space-before";
+    public const string RuleIdCaptionSpaceAfter = "demo/caption-space-after";
+    public const string RuleIdCaptionPlacement = "demo/caption-placement";
+    public const string RuleIdCaptionNumberGap = "demo/caption-number-gap";
 
     private const string SeverityWarning = "warning";
     private const string FixLevelAuto = "auto";
@@ -25,9 +33,17 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
         var unsupported = new List<string>(snapshot.UnsupportedScopes);
         var checkedRuns = 0;
         var checkedParagraphs = 0;
+        var checkedCaptions = 0;
 
         foreach (var paragraph in snapshot.Paragraphs)
         {
+            if (paragraph.Caption is not null)
+            {
+                checkedCaptions++;
+                CheckCaption(paragraph, diagnostics);
+                continue;
+            }
+
             // Known headings, table cells, and figure/table captions have separate
             // requirements. Never apply body-prose demo values to them.
             if (paragraph.Scope == ParagraphScopeClassification.Excluded)
@@ -54,13 +70,108 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
             }
         }
 
-        var coverage = $"已检查 {checkedRuns} 个正文文本片段，涉及 {checkedParagraphs} 个确认正文段落";
+        var coverage = $"已检查 {checkedRuns} 个正文文本片段，涉及 {checkedParagraphs} 个确认正文段落；识别 {checkedCaptions} 条图/表题注";
 
         return new AnalysisResult(
             Diagnostics: DiagnosticGrouper.Group(diagnostics),
             RuleVersion: profile.RuleVersion,
             Coverage: coverage,
             UnsupportedScopes: unsupported.Distinct(StringComparer.Ordinal).ToArray());
+    }
+
+    private static void CheckCaption(ParagraphSnapshot paragraph, List<Diagnostic> diagnostics)
+    {
+        var captionName = paragraph.Caption == CaptionKind.Figure ? "图题" : "表题";
+        var location = paragraph.Runs.Count == 0
+            ? null
+            : $"word/document.xml#paragraph[{paragraph.ParagraphIndex}]/run[{paragraph.Runs[0].RunIndex}]";
+        if (location is null) return;
+
+        foreach (var run in paragraph.Runs.Where(run => !string.IsNullOrWhiteSpace(run.Text)))
+        {
+            var runLocation = $"word/document.xml#paragraph[{paragraph.ParagraphIndex}]/run[{run.RunIndex}]";
+            if (ContainsHan(run.Text))
+                CheckCaptionValue(run.EastAsiaFont, "宋体", RuleIdCaptionEastAsiaFont, "东亚字体",
+                    captionName, run.HasUnresolvedStyle, runLocation, diagnostics);
+            CheckCaptionValue(run.FontSizePt?.ToString(System.Globalization.CultureInfo.InvariantCulture) + "pt",
+                "10.5pt", RuleIdCaptionFontSize, "字号", captionName,
+                run.HasUnresolvedStyle || run.FontSizePt is null, runLocation, diagnostics);
+        }
+
+        var format = paragraph.ParagraphFormatting;
+        if (format is null || format.HasUnresolvedStyle)
+        {
+            AddCaptionDiagnostic(RuleIdCaptionAlignment, location, "居中", "无法解析",
+                captionName + "对齐方式无法可靠解析，需要人工检查。", "manual", diagnostics);
+            AddCaptionDiagnostic(RuleIdCaptionLineSpacing, location, "单倍", "无法解析",
+                captionName + "行距无法可靠解析，需要人工检查。", "manual", diagnostics);
+            AddCaptionDiagnostic(RuleIdCaptionSpaceBefore, location, "6pt", "无法解析",
+                captionName + "段前距无法可靠解析，需要人工检查。", "manual", diagnostics);
+            AddCaptionDiagnostic(RuleIdCaptionSpaceAfter, location,
+                paragraph.Caption == CaptionKind.Figure ? "12pt" : "6pt", "无法解析",
+                captionName + "段后距无法可靠解析，需要人工检查。", "manual", diagnostics);
+        }
+        else
+        {
+            CheckCaptionValue(format.Alignment, "center", RuleIdCaptionAlignment, "对齐方式",
+                captionName, false, location, diagnostics);
+            CheckCaptionValue(format.LineSpacing, "single", RuleIdCaptionLineSpacing, "行距",
+                captionName, false, location, diagnostics);
+            CheckCaptionValue(format.SpaceBeforePt.ToString(System.Globalization.CultureInfo.InvariantCulture) + "pt",
+                "6pt", RuleIdCaptionSpaceBefore, "段前距", captionName, false, location, diagnostics);
+            var expectedAfter = paragraph.Caption == CaptionKind.Figure ? "12pt" : "6pt";
+            CheckCaptionValue(format.SpaceAfterPt.ToString(System.Globalization.CultureInfo.InvariantCulture) + "pt",
+                expectedAfter, RuleIdCaptionSpaceAfter, "段后距", captionName, false, location, diagnostics);
+        }
+
+        if (paragraph.CaptionPlacementCorrect != true)
+        {
+            var expectedPosition = paragraph.Caption == CaptionKind.Figure ? "图片下方" : "表格上方";
+            var actualPosition = paragraph.CaptionPlacementCorrect is null ? "无法确认对应对象" : "位置不符合要求";
+            AddCaptionDiagnostic(RuleIdCaptionPlacement, location, expectedPosition, actualPosition,
+                captionName + "应置于" + expectedPosition + "；系统不会自动移动内容，请人工调整。", "manual", diagnostics);
+        }
+
+        var labelMatch = System.Text.RegularExpressions.Regex.Match(paragraph.Text.TrimStart(),
+            @"^(?:图|表)\s*(?:[A-Z]|[0-9]+)(?:[.\-—][0-9]+)*");
+        if (!labelMatch.Success || labelMatch.Length >= paragraph.Text.TrimStart().Length ||
+            paragraph.Text.TrimStart()[labelMatch.Length] != '\u3000')
+        {
+            var actualGap = labelMatch.Success && labelMatch.Length < paragraph.Text.TrimStart().Length
+                ? "序号后不是一个全角空格"
+                : "未识别到完整题名或序号";
+            AddCaptionDiagnostic(RuleIdCaptionNumberGap, location, "序号与题名间一个汉字符宽度", actualGap,
+                captionName + "序号与题名之间应空一个汉字符宽度；这会改变题名文本，需人工调整。", "manual", diagnostics);
+        }
+    }
+
+    private static void CheckCaptionValue(string? actual, string expected, string ruleId,
+        string propertyName, string captionName, bool unresolved, string location,
+        List<Diagnostic> diagnostics)
+    {
+        if (unresolved || string.IsNullOrWhiteSpace(actual) || string.Equals(actual, "pt", StringComparison.Ordinal))
+        {
+            AddCaptionDiagnostic(ruleId, location, expected, "无法解析",
+                captionName + propertyName + "无法可靠解析，保留人工检查。", "manual", diagnostics);
+            return;
+        }
+
+        var equal = ruleId == RuleIdCaptionFontSize
+            ? PatchPlanner.TryParsePoints(actual, out var actualPoints) &&
+              PatchPlanner.TryParsePoints(expected, out var expectedPoints) && Math.Abs(actualPoints - expectedPoints) <= 0.01
+            : string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+        if (!equal)
+            AddCaptionDiagnostic(ruleId, location, expected, actual,
+                captionName + propertyName + "应为「" + expected + "」，实际为「" + actual + "」。",
+                "auto", diagnostics);
+    }
+
+    private static void AddCaptionDiagnostic(string ruleId, string location, string expected,
+        string actual, string detail, string fixLevel, List<Diagnostic> diagnostics)
+    {
+        var source = "依据：南开大学《研究生学位论文写作规范（2026版）》第 4.7 节表 4.6。";
+        diagnostics.Add(new Diagnostic(ruleId, "warning", location, expected, actual, fixLevel,
+            source + " " + detail));
     }
 
     private static void CheckEastAsiaFont(

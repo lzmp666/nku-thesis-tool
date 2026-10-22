@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Xunit;
 
 namespace ThesisEngine.Tests;
@@ -61,7 +62,7 @@ public sealed class DemoEndToEndTests
     }
 
     [Fact]
-    public async Task FullSyntheticThesisFindsOnlyItsThreePlannedBodyFaults()
+    public async Task FullSyntheticThesisFindsThreeBodyFaultsAndOneGroupedCaptionStyleSet()
     {
         var sample = Path.Combine(FindRepositoryRoot(), FullThesis);
         var before = File.ReadAllBytes(sample);
@@ -70,13 +71,19 @@ public sealed class DemoEndToEndTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Empty(result.Error);
-        Assert.Contains("诊断数量：3", result.Output);
-        Assert.Contains("已检查 47 个正文文本片段，涉及 41 个确认正文段落", result.Output);
+        Assert.Contains("诊断数量：9", result.Output);
+        Assert.Contains("已检查 49 个正文文本片段，涉及 43 个确认正文段落", result.Output);
+        Assert.Contains("识别 6 条图/表题注", result.Output);
         Assert.Contains("demo/east-asian-font", result.Output);
         Assert.Contains("demo/western-font", result.Output);
         Assert.Contains("demo/font-size", result.Output);
+        Assert.Contains("demo/caption-east-asian-font", result.Output);
+        Assert.Contains("demo/caption-font-size", result.Output);
+        Assert.Contains("demo/caption-alignment", result.Output);
+        Assert.Contains("demo/caption-line-spacing", result.Output);
+        Assert.Contains("demo/caption-space-before", result.Output);
+        Assert.Contains("demo/caption-space-after", result.Output);
         Assert.Contains("tables (cell formatting rules are not configured)", result.Output);
-        Assert.Contains("figure/table caption", result.Output);
         Assert.Contains("images", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
     }
@@ -93,6 +100,8 @@ public sealed class DemoEndToEndTests
             WorkingDirectory = root,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };

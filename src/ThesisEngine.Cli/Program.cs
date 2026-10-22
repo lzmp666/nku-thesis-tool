@@ -1,6 +1,11 @@
 using System.Xml;
+using System.Text;
 using ThesisEngine.Cli;
 using ThesisEngine.Core;
+
+var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+Console.OutputEncoding = utf8;
+Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
 
 if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.OrdinalIgnoreCase))
 {

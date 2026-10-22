@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Text;
+using ThesisEngine.Core;
 using ThesisAddIn.Protocol;
 using Xunit;
 
@@ -172,7 +174,9 @@ public sealed class EngineProtocolTests
             var client = new EngineProtocolClient(EngineProcessOptions.ForDotnet(host, TimeSpan.FromMinutes(2)));
             var plan = await client.PlanAsync(input, null, null);
             Assert.True(plan.Ok, plan.Error?.Message);
-            Assert.Equal(3, plan.Plan!.Patches.Count);
+            Assert.Equal(9, plan.Plan!.Patches.Count);
+            Assert.Contains(plan.Plan.Patches, patch => patch.RuleId == FontSizeAnalyzer.RuleIdCaptionEastAsiaFont);
+            Assert.Contains(plan.Plan.Patches, patch => patch.RuleId == FontSizeAnalyzer.RuleIdCaptionSpaceAfter);
 
             var apply = await client.ApplyAsync(input, appliedPath, null, null);
             Assert.True(apply.Ok, apply.Error?.Message);
@@ -448,7 +452,9 @@ public sealed class EngineProtocolTests
                 CreateNoWindow = true,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             }
         };
         Assert.True(process.Start());

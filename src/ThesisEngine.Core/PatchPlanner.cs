@@ -85,6 +85,41 @@ public static class PatchPlanner
             return true;
         }
 
+        if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdCaptionEastAsiaFont, StringComparison.Ordinal) &&
+            string.Equals(diagnostic.Expected, "宋体", StringComparison.Ordinal))
+        {
+            patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
+                diagnostic.Expected, "将图题或表题中的东亚字体改为宋体；依据 2026 版表 4.6。仍需作者预览确认。");
+            return true;
+        }
+
+        if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdCaptionFontSize, StringComparison.Ordinal) &&
+            TryParsePoints(diagnostic.Expected, out _))
+        {
+            patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
+                diagnostic.Expected, "将图题或表题字号改为规范目标；依据 2026 版表 4.6。仍需作者预览确认。");
+            return true;
+        }
+
+        if (diagnostic.RuleId is FontSizeAnalyzer.RuleIdCaptionAlignment or
+            FontSizeAnalyzer.RuleIdCaptionLineSpacing or
+            FontSizeAnalyzer.RuleIdCaptionSpaceBefore or
+            FontSizeAnalyzer.RuleIdCaptionSpaceAfter)
+        {
+            var supportedExpected = diagnostic.RuleId switch
+            {
+                FontSizeAnalyzer.RuleIdCaptionAlignment => string.Equals(diagnostic.Expected, "center", StringComparison.OrdinalIgnoreCase),
+                FontSizeAnalyzer.RuleIdCaptionLineSpacing => string.Equals(diagnostic.Expected, "single", StringComparison.OrdinalIgnoreCase),
+                _ => TryParseNonNegativePoints(diagnostic.Expected, out _)
+            };
+            if (supportedExpected)
+            {
+                patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,
+                    diagnostic.Expected, "按南开大学 2026 版正文排版要求修改题注段落格式；仅改格式，不移动或重写题名。");
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -96,5 +131,15 @@ public static class PatchPlanner
             normalized = normalized[..^2].Trim();
         return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out points) &&
                points > 0 && double.IsFinite(points);
+    }
+
+    internal static bool TryParseNonNegativePoints(string value, out double points)
+    {
+        points = 0;
+        var normalized = value.Trim();
+        if (normalized.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized[..^2].Trim();
+        return double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out points) &&
+               points >= 0 && double.IsFinite(points);
     }
 }

@@ -111,7 +111,7 @@ namespace ThesisAddIn.VSTO.Engine
                 {
                     if (patch == null || !ranges.ContainsKey(patch.Location))
                         throw new InvalidDataException("修复计划中的位置无法映射到当前 Word 文本。");
-                    ValidatePatch(patch);
+                    ValidatePatch(ranges[patch.Location], patch);
                 }
 
             }, markMutation =>
@@ -553,27 +553,91 @@ namespace ThesisAddIn.VSTO.Engine
             }
         }
 
-        private static void ValidatePatch(EnginePatch patch)
+        private static void ValidatePatch(Word.Range range, EnginePatch patch)
         {
+            string actual;
             if (string.Equals(patch.RuleId, "demo/east-asian-font", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(patch.DesiredAfter))
                     throw new InvalidDataException("字体修复缺少目标字体。");
+                actual = Convert.ToString(range.Font.NameFarEast, CultureInfo.InvariantCulture);
+                EnsureBeforeValue(patch, actual);
                 return;
             }
             if (string.Equals(patch.RuleId, "demo/western-font", StringComparison.Ordinal))
             {
                 if (string.IsNullOrWhiteSpace(patch.DesiredAfter))
                     throw new InvalidDataException("西文字体修复缺少目标字体。");
+                actual = Convert.ToString(range.Font.NameAscii, CultureInfo.InvariantCulture);
+                EnsureBeforeValue(patch, actual);
                 return;
             }
             if (string.Equals(patch.RuleId, "demo/font-size", StringComparison.Ordinal))
             {
                 if (!TryParsePoints(patch.DesiredAfter, out _))
                     throw new InvalidDataException("字号修复目标值无效。");
+                actual = Convert.ToSingle(range.Font.Size, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "pt";
+                EnsureBeforeValue(patch, actual, numeric: true);
+                return;
+            }
+
+            if (string.Equals(patch.RuleId, "demo/caption-east-asian-font", StringComparison.Ordinal))
+            {
+                if (!string.Equals(patch.DesiredAfter, "宋体", StringComparison.Ordinal))
+                    throw new InvalidDataException("题注字体目标值无效。");
+                actual = Convert.ToString(range.Font.NameFarEast, CultureInfo.InvariantCulture);
+                EnsureBeforeValue(patch, actual);
+                return;
+            }
+            if (string.Equals(patch.RuleId, "demo/caption-font-size", StringComparison.Ordinal))
+            {
+                if (!TryParsePoints(patch.DesiredAfter, out _))
+                    throw new InvalidDataException("题注字号目标值无效。");
+                actual = Convert.ToSingle(range.Font.Size, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + "pt";
+                EnsureBeforeValue(patch, actual, numeric: true);
+                return;
+            }
+            if (string.Equals(patch.RuleId, "demo/caption-alignment", StringComparison.Ordinal))
+            {
+                if (!string.Equals(patch.DesiredAfter, "center", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("题注对齐目标值无效。");
+                actual = Convert.ToInt32(range.ParagraphFormat.Alignment, CultureInfo.InvariantCulture) ==
+                    (int)Word.WdParagraphAlignment.wdAlignParagraphCenter ? "center" : "not-center";
+                EnsureBeforeValue(patch, actual);
+                return;
+            }
+            if (string.Equals(patch.RuleId, "demo/caption-line-spacing", StringComparison.Ordinal))
+            {
+                if (!string.Equals(patch.DesiredAfter, "single", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("题注行距目标值无效。");
+                actual = Convert.ToInt32(range.ParagraphFormat.LineSpacingRule, CultureInfo.InvariantCulture) ==
+                    (int)Word.WdLineSpacing.wdLineSpaceSingle ? "single" : "not-single";
+                EnsureBeforeValue(patch, actual);
+                return;
+            }
+            if (string.Equals(patch.RuleId, "demo/caption-space-before", StringComparison.Ordinal) ||
+                string.Equals(patch.RuleId, "demo/caption-space-after", StringComparison.Ordinal))
+            {
+                if (!TryParsePoints(patch.DesiredAfter, out _))
+                    throw new InvalidDataException("题注段前/段后距目标值无效。");
+                float points = string.Equals(patch.RuleId, "demo/caption-space-before", StringComparison.Ordinal)
+                    ? range.ParagraphFormat.SpaceBefore : range.ParagraphFormat.SpaceAfter;
+                actual = points.ToString(CultureInfo.InvariantCulture) + "pt";
+                EnsureBeforeValue(patch, actual, numeric: true);
                 return;
             }
             throw new NotSupportedException("Word 当前不支持此规则的直接修复：" + patch.RuleId);
+        }
+
+        private static void EnsureBeforeValue(EnginePatch patch, string actual, bool numeric = false)
+        {
+            bool matches = numeric && TryParsePoints(actual, out double actualPoints) &&
+                TryParsePoints(patch.ExpectedBefore, out double expectedPoints)
+                    ? Math.Abs(actualPoints - expectedPoints) <= 0.01
+                    : string.Equals(actual, patch.ExpectedBefore, StringComparison.Ordinal);
+            if (!matches)
+                throw new InvalidDataException("修复前置条件已变化，已停止本次批量操作：期望「" +
+                    patch.ExpectedBefore + "」，当前为「" + actual + "」。");
         }
 
         private static void ApplyPatch(Word.Range range, EnginePatch patch)
@@ -587,6 +651,18 @@ namespace ThesisAddIn.VSTO.Engine
             }
             else if (string.Equals(patch.RuleId, "demo/font-size", StringComparison.Ordinal) && TryParsePoints(patch.DesiredAfter, out double points))
                 range.Font.Size = (float)points;
+            else if (string.Equals(patch.RuleId, "demo/caption-east-asian-font", StringComparison.Ordinal))
+                range.Font.NameFarEast = patch.DesiredAfter;
+            else if (string.Equals(patch.RuleId, "demo/caption-font-size", StringComparison.Ordinal) && TryParsePoints(patch.DesiredAfter, out double captionSize))
+                range.Font.Size = (float)captionSize;
+            else if (string.Equals(patch.RuleId, "demo/caption-alignment", StringComparison.Ordinal))
+                range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+            else if (string.Equals(patch.RuleId, "demo/caption-line-spacing", StringComparison.Ordinal))
+                range.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
+            else if (string.Equals(patch.RuleId, "demo/caption-space-before", StringComparison.Ordinal) && TryParsePoints(patch.DesiredAfter, out double before))
+                range.ParagraphFormat.SpaceBefore = (float)before;
+            else if (string.Equals(patch.RuleId, "demo/caption-space-after", StringComparison.Ordinal) && TryParsePoints(patch.DesiredAfter, out double after))
+                range.ParagraphFormat.SpaceAfter = (float)after;
         }
 
         private static bool TryParsePoints(string value, out double points)

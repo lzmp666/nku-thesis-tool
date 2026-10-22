@@ -271,8 +271,54 @@ public sealed class WordFormattingReaderTests
             Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[2].Scope);
             Assert.Contains("题注专属规则", snapshot.Paragraphs[2].ScopeReason);
             Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
-            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("figure/table caption", StringComparison.Ordinal));
             Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("images", StringComparison.Ordinal));
+            Assert.Equal(CaptionKind.Table, snapshot.Paragraphs[2].Caption);
+            Assert.False(snapshot.Paragraphs[2].CaptionPlacementCorrect);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void RecognizesStyledEnglishChapterAndChecksItsLatinText()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults>
+            </w:styles>
+            """;
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Chapter 1 Introduction</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\"/></w:rPr><w:t>This is a synthetic English thesis paragraph.</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>References</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body), styles);
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+            var bodyParagraph = snapshot.Paragraphs[1];
+            var analysis = new NkuGraduate2026BodyAnalyzer().Analyze(snapshot, NkuGraduate2026BodyProfile.Draft);
+
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, bodyParagraph.Scope);
+            Assert.Collection(analysis.Diagnostics,
+                diagnostic => Assert.Equal(NkuGraduate2026BodyAnalyzer.RuleIdLatinFont, diagnostic.RuleId));
+            Assert.Empty(analysis.UnsupportedScopes);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DoesNotTreatA正文SentenceMentioningATableAsTheCaption()
+    {
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>表4.1说明了合成样本的区域指标差异。</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body));
+        try
+        {
+            var paragraph = new WordFormattingReader().Read(path).Paragraphs[1];
+
+            Assert.Null(paragraph.Caption);
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, paragraph.Scope);
         }
         finally { File.Delete(path); }
     }
