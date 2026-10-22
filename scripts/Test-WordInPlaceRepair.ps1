@@ -11,6 +11,28 @@ $outputDirectory = Join-Path $repository ('TestResults\word-inplace-' + [Guid]::
 function Assert-Condition([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
+
+# WPS can take over Word.Application while exposing a compatible object model.
+# Reject that registration before activation, fixture creation, or repair work.
+function Get-MicrosoftWordAutomationExecutable {
+    $classKey = 'Registry::HKEY_CLASSES_ROOT\Word.Application\CLSID'
+    Assert-Condition (Test-Path -LiteralPath $classKey) 'Microsoft Word automation is not registered.'
+    $classId = (Get-Item -LiteralPath $classKey).GetValue('')
+    $serverKey = 'Registry::HKEY_CLASSES_ROOT\CLSID\' + $classId + '\LocalServer32'
+    Assert-Condition (Test-Path -LiteralPath $serverKey) 'The Word automation server is not registered.'
+    $command = [string](Get-Item -LiteralPath $serverKey).GetValue('')
+    $executable = $null
+    if ($command -match '^\s*"([^"]+)"') { $executable = $Matches[1] }
+    elseif ($command -match '^\s*(.+?\.exe)(?:\s|$)') { $executable = $Matches[1] }
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($executable)) 'The Word automation server path is invalid.'
+    Assert-Condition ([IO.Path]::GetFileName($executable) -ieq 'WINWORD.EXE') (
+        'Word.Application points to a different application: ' + $executable + '. Microsoft Word acceptance has NOT run.')
+    Assert-Condition (Test-Path -LiteralPath $executable -PathType Leaf) 'The Microsoft Word executable is missing.'
+    Assert-Condition ((Get-Item -LiteralPath $executable).VersionInfo.CompanyName -like 'Microsoft*') 'The registered executable is not published by Microsoft.'
+    return [IO.Path]::GetFullPath($executable)
+}
+$expectedWordExecutable = Get-MicrosoftWordAutomationExecutable
+
 function Assert-Response($Response, [string]$Operation) {
     Assert-Condition ($null -ne $Response -and $Response.Ok) ($Operation + ': ' + $Response.Error.Message)
 }
@@ -164,8 +186,12 @@ $word = $null
 $document = $null
 $repairedDocument = $null
 $ownsApplication = $false
+$oldAlerts = $null
 try {
     $word = New-Object -ComObject Word.Application
+    $activatedExecutable = [IO.Path]::GetFullPath((Join-Path ([string]$word.Path) 'WINWORD.EXE'))
+    Assert-Condition ([string]::Equals($activatedExecutable, $expectedWordExecutable, [StringComparison]::OrdinalIgnoreCase)) (
+        'The activated automation host is not the registered Microsoft Word application. Acceptance has NOT run.')
     $ownsApplication = $word.Documents.Count -eq 0
     $oldAlerts = $word.DisplayAlerts
     $word.DisplayAlerts = 0
@@ -266,7 +292,7 @@ try {
         try { $repairedDocument.Close([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges) } catch { }
     }
     if ($null -ne $word) {
-        try { $word.DisplayAlerts = $oldAlerts } catch { }
+        if ($null -ne $oldAlerts) { try { $word.DisplayAlerts = $oldAlerts } catch { } }
         if ($ownsApplication) {
             try { $word.Quit([Microsoft.Office.Interop.Word.WdSaveOptions]::wdDoNotSaveChanges) } catch { }
         }

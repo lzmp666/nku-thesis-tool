@@ -69,9 +69,9 @@ Get-FileHash -Algorithm SHA256 -LiteralPath .\known_issues_sample.docx
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-WordInPlaceRepair.ps1 -Configuration Debug
 ```
 
-2026-10-22 对本次实现的实际 Word 检查通过：3 处宋体目标聚合成一项，单项修复覆盖 3 处；接着在同一打开文档内批量修复 1 处字号。两种操作均可一次撤销/恢复，批注数量随之变化，修复后的工具批注作者正确。明确保存前工作副本磁盘哈希不变，保存后复查仅剩 1 项需确认的西文字体问题，输入源稿和仓库夹具哈希均不变。零问题工作副本保存、重开后仍可识别并刷新。
+2026-10-22 宿主核查发现，本机 `Word.Application` 的 COM 注册指向 WPS。此前脚本输出不能作为 Microsoft Word 验收证据，原“Word 检查通过”记录已撤回。本次分组、单项/批量修复、撤销/恢复及保存重开仍需在 Microsoft Word 中重测。
 
-这是对真实 Word 对象模型和本次同步实现的检查；功能区按钮、预览取消、位置导航按钮及纯悬停的视觉效果仍按上表逐项记录。
+脚本现在会在激活前核对 `Word.Application` 注册的程序必须为 Microsoft `WINWORD.EXE`，激活后再次核对宿主路径；指向 WPS 等其他程序时直接失败，不开始验收。只有 Microsoft Word 宿主的通过结果才可记录为对象模型回归通过；功能区按钮、预览取消、位置导航按钮及纯悬停仍按上表逐项验收。
 
 ## 完成判定
 
