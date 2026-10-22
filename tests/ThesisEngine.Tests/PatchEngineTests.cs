@@ -46,7 +46,7 @@ public sealed class PatchEngineTests
             Assert.True(result.Succeeded);
             Assert.Equal(beforeBytes, File.ReadAllBytes(input));
             var after = new WordFormattingReader().Read(output);
-            var run = Assert.Single(after.Paragraphs).Runs.Single();
+            var run = after.Paragraphs[1].Runs.Single();
             Assert.Equal("宋体", run.EastAsiaFont);
             Assert.Equal(12, run.FontSizePt);
             Assert.Equal("Times New Roman", run.AsciiSlotFont);
@@ -74,7 +74,7 @@ public sealed class PatchEngineTests
             using (var archive = ZipFile.Open(input, ZipArchiveMode.Update))
             {
                 var document = XDocument.Parse(ReadEntry(archive, "word/document.xml"));
-                var paragraph = document.Descendants(W + "p").Single();
+                var paragraph = document.Descendants(W + "p").ElementAt(1);
                 var first = paragraph.Element(W + "r")!;
                 foreach (var text in new[] { "第二段", "第三段" })
                 {
@@ -97,8 +97,8 @@ public sealed class PatchEngineTests
             Assert.True(result.Succeeded);
             Assert.Equal(originalBytes, File.ReadAllBytes(annotated));
             var after = new WordFormattingReader().Read(output);
-            Assert.Equal(new[] { "第一段", "第二段", "第三段" }, after.Paragraphs.Single().Runs.Select(run => run.Text));
-            Assert.All(after.Paragraphs.Single().Runs, run =>
+            Assert.Equal(new[] { "第一段", "第二段", "第三段" }, after.Paragraphs[1].Runs.Select(run => run.Text));
+            Assert.All(after.Paragraphs[1].Runs, run =>
             {
                 Assert.Equal("宋体", run.EastAsiaFont);
                 Assert.Equal(12, run.FontSizePt);
@@ -140,7 +140,7 @@ public sealed class PatchEngineTests
             Assert.True(result.Succeeded);
             Assert.Equal(originalBytes, File.ReadAllBytes(input));
             var after = new WordFormattingReader().Read(output);
-            var run = Assert.Single(Assert.Single(after.Paragraphs).Runs);
+            var run = Assert.Single(after.Paragraphs[1].Runs);
             Assert.Equal("宋体", run.EastAsiaFont);
             Assert.Equal(12, run.FontSizePt);
 
@@ -166,7 +166,7 @@ public sealed class PatchEngineTests
         try
         {
             var stale = new Patch(FontSizeAnalyzer.RuleIdEastAsiaFont,
-                "word/document.xml#paragraph[0]/run[0]", "不存在的字体", "宋体", "test");
+                "word/document.xml#paragraph[1]/run[0]", "不存在的字体", "宋体", "test");
             var result = PatchEngine.ApplyPatches(input, new PatchPlan([stale]), output);
 
             Assert.False(result.Succeeded);
@@ -201,7 +201,7 @@ public sealed class PatchEngineTests
 
             Assert.True(applied.Succeeded);
             var repaired = new WordFormattingReader().Read(output);
-            var run = Assert.Single(Assert.Single(repaired.Paragraphs).Runs);
+            var run = Assert.Single(repaired.Paragraphs[1].Runs);
             Assert.Equal("Times New Roman", run.AsciiSlotFont);
             Assert.Equal("Times New Roman", run.HAnsiFont);
             using var archive = ZipFile.OpenRead(output);
@@ -230,9 +230,9 @@ public sealed class PatchEngineTests
             var patches = new[]
             {
                 new Patch(FontSizeAnalyzer.RuleIdEastAsiaFont,
-                    "word/document.xml#paragraph[0]/run[0]", "黑体", "宋体", "east Asian font"),
+                    "word/document.xml#paragraph[1]/run[0]", "黑体", "宋体", "east Asian font"),
                 new Patch(FontSizeAnalyzer.RuleIdFontSize,
-                    "word/document.xml#paragraph[0]/run[0]", "999pt", "12pt", "font size")
+                    "word/document.xml#paragraph[1]/run[0]", "999pt", "12pt", "font size")
             };
 
             var result = PatchEngine.ApplyPatches(input, patches, output);
@@ -285,7 +285,7 @@ public sealed class PatchEngineTests
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
         Add(archive, "[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>");
         Add(archive, "_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>");
-        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Body\"/></w:pPr><w:r><w:rPr><w:rStyle w:val=\"Emphasis\"/><w:highlight w:val=\"yellow\"/></w:rPr><w:t>正文内容</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
+        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val=\"Body\"/></w:pPr><w:r><w:rPr><w:rStyle w:val=\"Emphasis\"/><w:highlight w:val=\"yellow\"/></w:rPr><w:t>正文内容</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
         Add(archive, "word/styles.xml", $"<w:styles xmlns:w=\"{W}\"><w:style w:type=\"paragraph\" w:styleId=\"Body\"><w:rPr><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"22\"/></w:rPr></w:style><w:style w:type=\"character\" w:styleId=\"Emphasis\"><w:rPr><w:b/></w:rPr></w:style></w:styles>");
         return path;
     }
@@ -300,7 +300,7 @@ public sealed class PatchEngineTests
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
         Add(archive, "[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>");
         Add(archive, "_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>");
-        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"{eastAsia}\" w:ascii=\"{ascii}\" w:hAnsi=\"{hAnsi}\" {additionalFontAttributes}/><w:sz w:val=\"{size}\"/></w:rPr><w:t>{text}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
+        Add(archive, "word/document.xml", $"<w:document xmlns:w=\"{W}\"><w:body><w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p><w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"{eastAsia}\" w:ascii=\"{ascii}\" w:hAnsi=\"{hAnsi}\" {additionalFontAttributes}/><w:sz w:val=\"{size}\"/></w:rPr><w:t>{text}</w:t></w:r></w:p><w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p><w:sectPr/></w:body></w:document>");
         return path;
     }
 

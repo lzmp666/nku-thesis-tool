@@ -77,8 +77,9 @@ public sealed class WordFormattingReaderTests
         try
         {
             var snapshot = new WordFormattingReader().Read(path);
-            Assert.Single(snapshot.Paragraphs);
+            Assert.Equal(2, snapshot.Paragraphs.Count);
             Assert.Single(snapshot.Paragraphs[0].Runs);
+            Assert.Single(snapshot.Paragraphs[1].Runs);
             Assert.Contains("hyperlinks", snapshot.UnsupportedScopes);
             Assert.Contains("tracked changes", snapshot.UnsupportedScopes);
             Assert.Contains("content controls", snapshot.UnsupportedScopes);
@@ -101,12 +102,15 @@ public sealed class WordFormattingReaderTests
         try
         {
             var snapshot = new WordFormattingReader().Read(path);
-            var runs = Assert.Single(snapshot.Paragraphs).Runs;
+            Assert.Equal(2, snapshot.Paragraphs.Count);
+            var runs = snapshot.Paragraphs[0].Runs;
             Assert.Equal(2, runs.Count);
             Assert.Equal(0, runs[0].RunIndex);
             Assert.Equal(1, runs[1].RunIndex);
             Assert.Equal(12, runs[0].FontSizePt);
             Assert.Null(runs[1].FontSizePt);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[1].Scope);
+            Assert.Contains("表格单元格", snapshot.Paragraphs[1].ScopeReason);
             Assert.Contains("tables", snapshot.UnsupportedScopes);
             Assert.Contains("headers/footers", snapshot.UnsupportedScopes);
             Assert.Contains("footnotes", snapshot.UnsupportedScopes);

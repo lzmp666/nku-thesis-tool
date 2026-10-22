@@ -20,12 +20,12 @@ public sealed class WordAnnotationWriterTests
         try
         {
             var diagnostic = new Diagnostic("demo/east-asian-font", "warning",
-                "word/document.xml#paragraph[0]/run[0]", "宋体", "黑体、雅黑", "auto", "统一改为宋体。")
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体、雅黑", "auto", "统一改为宋体。")
             {
                 Occurrences = new[]
                 {
-                    new DiagnosticOccurrence("word/document.xml#paragraph[0]/run[0]", "黑体"),
-                    new DiagnosticOccurrence("word/document.xml#paragraph[1]/run[0]", "雅黑")
+                    new DiagnosticOccurrence("word/document.xml#paragraph[1]/run[0]", "黑体"),
+                    new DiagnosticOccurrence("word/document.xml#paragraph[2]/run[0]", "雅黑")
                 }
             };
 
@@ -34,8 +34,8 @@ public sealed class WordAnnotationWriterTests
             using var archive = ZipFile.OpenRead(outputPath);
             var document = ReadXml(archive, "word/document.xml");
             var paragraphs = document.Descendants(W + "body").Single().Elements(W + "p").ToArray();
-            Assert.Equal("yellow", (string?)paragraphs[0].Descendants(W + "highlight").Single().Attribute(W + "val"));
             Assert.Equal("yellow", (string?)paragraphs[1].Descendants(W + "highlight").Single().Attribute(W + "val"));
+            Assert.Equal("yellow", (string?)paragraphs[2].Descendants(W + "highlight").Single().Attribute(W + "val"));
             Assert.Single(document.Descendants(W + "commentRangeStart"));
             Assert.Single(document.Descendants(W + "commentRangeEnd"));
 
@@ -44,8 +44,8 @@ public sealed class WordAnnotationWriterTests
             var hidden = string.Concat(comment.Descendants(W + "r")
                 .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
                 .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
-            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[0]/run[0]|absent]", hidden);
             Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[1]/run[0]|absent]", hidden);
+            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[2]/run[0]|absent]", hidden);
         }
         finally
         {
@@ -65,9 +65,9 @@ public sealed class WordAnnotationWriterTests
             var originalText = ReadTextRuns(inputPath);
             var diagnostics = new[]
             {
-                new Diagnostic("demo/east-asian-font", "warning", "word/document.xml#paragraph[0]/run[0]", "宋体", "黑体", "auto", "请改为宋体。"),
-                new Diagnostic("demo/western-font", "warning", "word/document.xml#paragraph[1]/run[0]", "Times New Roman", "Arial", "auto", "请改为 Times New Roman。"),
-                new Diagnostic("demo/font-size", "warning", "word/document.xml#paragraph[2]/run[0]", "12pt", "10.5pt", "auto", "请调整字号。")
+                new Diagnostic("demo/east-asian-font", "warning", "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "auto", "请改为宋体。"),
+                new Diagnostic("demo/western-font", "warning", "word/document.xml#paragraph[2]/run[0]", "Times New Roman", "Arial", "auto", "请改为 Times New Roman。"),
+                new Diagnostic("demo/font-size", "warning", "word/document.xml#paragraph[3]/run[0]", "12pt", "10.5pt", "auto", "请调整字号。")
             };
 
             WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, diagnostics);
@@ -83,8 +83,8 @@ public sealed class WordAnnotationWriterTests
             var document = ReadXml(archive, "word/document.xml");
             var body = document.Descendants(W + "body").Single();
             var paragraphs = body.Elements(W + "p").ToArray();
-            Assert.Equal(3, paragraphs.Length);
-            Assert.All(paragraphs, paragraph =>
+            Assert.Equal(5, paragraphs.Length);
+            Assert.All(paragraphs.Skip(1).Take(3), paragraph =>
             {
                 Assert.Single(paragraph.Elements(W + "commentRangeStart"));
                 Assert.Single(paragraph.Elements(W + "commentRangeEnd"));
@@ -121,7 +121,7 @@ public sealed class WordAnnotationWriterTests
                     .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value)))
                 .ToArray();
-            Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[0]/run[0]]", hiddenLocations);
+            Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[1]/run[0]]", hiddenLocations);
             Assert.Contains("[NKU-TOOL-ANNOTATION:v1]", hiddenLocations);
             Assert.Contains("[NKU-HIGHLIGHT:absent]", hiddenLocations);
             Assert.DoesNotContain("NKU-LOCATION", string.Join("", commentTexts));

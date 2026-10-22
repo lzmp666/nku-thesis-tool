@@ -15,11 +15,11 @@ public sealed class DiagnosticGrouperTests
             {
                 new TextRunSnapshot(0, "黑体", "Arial", 12, "第一行"),
                 new TextRunSnapshot(1, "楷体", "Arial", 12, "第二行")
-            }),
+            }, ParagraphScopeClassification.ConfirmedBodyProse),
             new ParagraphSnapshot(1, new[]
             {
                 new TextRunSnapshot(0, "黑体", "Arial", 12, "第三行")
-            })
+            }, ParagraphScopeClassification.ConfirmedBodyProse)
         }, Array.Empty<string>());
 
         var result = analyzer.Analyze(snapshot, DemoRuleSet.NkuDraftSample);

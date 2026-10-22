@@ -249,10 +249,6 @@ internal static class NkuGraduate2026BodyScopeClassifier
             {
                 decisions[i] = new(ParagraphScopeClassification.Excluded, "图表题注应使用题注专属规则");
             }
-            else if (paragraph.HasEquation)
-            {
-                decisions[i] = new(ParagraphScopeClassification.Unknown, "含公式对象；公式段落有单独的行距例外，需人工核验");
-            }
             else if (string.IsNullOrWhiteSpace(paragraph.Text) ||
                 paragraph.IsHeading && KnownExcludedHeading.IsMatch(paragraph.Text.Trim()) ||
                 boundariesKnown && paragraph.IsHeading && (i == chapterStart || i == bodyEnd || i > chapterStart && i < bodyEnd))
@@ -275,6 +271,11 @@ internal static class NkuGraduate2026BodyScopeClassifier
             else if (paragraph.IsHeading)
             {
                 decisions[i] = new(ParagraphScopeClassification.Excluded, "正文中的标题段落不适用本批正文段落规则");
+            }
+            else if (paragraph.HasEquation)
+            {
+                decisions[i] = new(ParagraphScopeClassification.ConfirmedBodyProse,
+                    "含公式对象；仅检查普通文字，公式对象单独标记为未覆盖");
             }
             else
             {

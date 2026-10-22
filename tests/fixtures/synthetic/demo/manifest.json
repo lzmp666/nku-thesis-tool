@@ -16,26 +16,26 @@
     },
     {
       "file": "known_issues_sample.docx",
-      "description": "含三项已知格式问题的合成样本，仅供演示/测试，不代表合规结论",
+      "description": "正文边界可识别且含三项已知格式问题的合成样本，仅供演示/测试，不代表合规结论",
       "expected_diagnosis_count": 3,
       "expected_diagnoses": [
         {
           "ruleId": "demo/east-asian-font",
-          "location": "paragraph[0]/run[0]",
+          "location": "paragraph[1]/run[0]",
           "expected": "宋体",
           "actual": "黑体",
           "note": "demo 规则，非正式校规"
         },
         {
           "ruleId": "demo/western-font",
-          "location": "paragraph[1]/run[0]",
+          "location": "paragraph[2]/run[0]",
           "expected": "Times New Roman",
           "actual": "Arial",
           "note": "demo 规则，非正式校规"
         },
         {
           "ruleId": "demo/font-size",
-          "location": "paragraph[2]/run[0]",
+          "location": "paragraph[3]/run[0]",
           "expected": "12pt",
           "actual": "10.5pt",
           "note": "demo 规则，非正式校规"

@@ -348,7 +348,7 @@ public sealed class EngineProtocolTests
             Assert.NotNull(plan.Plan);
             Assert.Equal(3, plan.Plan!.Patches.Count);
 
-            var filtered = await client.PlanAsync(input, "demo/font-size", "word/document.xml#paragraph[2]/run[0]");
+            var filtered = await client.PlanAsync(input, "demo/font-size", "word/document.xml#paragraph[3]/run[0]");
             Assert.True(filtered.Ok, filtered.Error?.Message);
             var single = Assert.Single(filtered.Plan!.Patches);
             Assert.Equal("demo/font-size", single.RuleId);
