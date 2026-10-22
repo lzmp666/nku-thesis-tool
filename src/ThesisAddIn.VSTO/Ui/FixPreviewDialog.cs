@@ -7,7 +7,7 @@ using ThesisAddIn.Protocol;
 namespace ThesisAddIn.VSTO.Ui
 {
     /// <summary>
-    /// 修复预览：在更新当前工作副本之前，逐条展示会改动的位置、改前值、目标值和依据，
+    /// 修复预览：在更新当前文档之前，逐条展示会改动的位置、改前值、目标值和依据，
     /// 并单独列出保留给用户的诊断。用户确认后才执行。
     /// </summary>
     public sealed class FixPreviewDialog : Form
@@ -29,7 +29,7 @@ namespace ThesisAddIn.VSTO.Ui
                 Text = "将修改 " + plan.Patches.Count + " 处，"
                     + "保留 " + plan.Deferred.Count + " 项给用户处理。"
                     + Environment.NewLine
-                    + "修复直接更新当前标注工作副本；原始提交文件不变，完成后由你决定是否保存。"
+                    + "修复直接更新当前打开的文档；完成后由你决定是否保存。"
             };
 
             var list = new ListView
@@ -80,7 +80,7 @@ namespace ThesisAddIn.VSTO.Ui
                 FlowDirection = FlowDirection.RightToLeft
             };
             var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
-            var confirm = new Button { Text = "确认并修复当前工作副本", DialogResult = DialogResult.OK, AutoSize = true };
+            var confirm = new Button { Text = "确认并修复当前文档", DialogResult = DialogResult.OK, AutoSize = true };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(confirm);
 

@@ -1,6 +1,7 @@
 **/bin/
 **/obj/
 .vs/
+.dotnet-cli/
 .vscode/
 TestResults/
 *.user

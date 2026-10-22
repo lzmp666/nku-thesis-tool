@@ -15,7 +15,7 @@ namespace ThesisAddIn.VSTO.Engine
     /// <summary>
     /// Applies engine patches and refreshes NKU-owned comments in the open Word document.
     /// No document is saved or reopened here, so Word keeps the edits in its normal undo stack
-    /// and the author decides when to save the working copy.
+    /// and the author decides when to save the current document.
     /// </summary>
     public static class WordDocumentSynchronizer
     {
@@ -210,8 +210,8 @@ namespace ThesisAddIn.VSTO.Engine
                 locations.Add(location);
 
             Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath, locations);
-            // Keep the work-copy identity after the last diagnostic/comment is removed.
-            // Word persists document variables when the author saves the working copy.
+            // Retain the legacy marker name for existing documents. It identifies an analyzed
+            // document, including clean ones; it does not require a separate working copy.
             MarkWorkingCopy(document);
 
             // Restore the highlight that was present before the tool marked each run.

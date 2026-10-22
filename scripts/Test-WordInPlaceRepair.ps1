@@ -178,8 +178,7 @@ try {
 } finally { $archive.Dispose() }
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash
 $workingCopy = Join-Path $outputDirectory 'synthetic-working-copy.docx'
-$initial = $client.Annotate($source, $workingCopy)
-Assert-Response $initial 'Initial annotation'
+Copy-Item -LiteralPath $source -Destination $workingCopy
 $workingHash = Get-SharedFileHash $workingCopy
 
 $word = $null
@@ -197,9 +196,25 @@ try {
     $word.DisplayAlerts = 0
     if ($ownsApplication) { $word.Visible = $false }
     $document = $word.Documents.Open($workingCopy)
-    [WordSmokeInterop]::Mark($document)
     $pathBefore = $document.FullName
     $countBefore = $word.Documents.Count
+    $windowsBefore = $word.Windows.Count
+    Assert-Condition ($document.Comments.Count -eq 0) 'The initial synthetic document must be unannotated.'
+    $snapshot = Write-Snapshot $document 'before-first-analysis'
+    $initial = $client.Analyze($snapshot)
+    Assert-Response $initial 'First analysis'
+    $syncError = $null
+    Assert-Condition ([WordSmokeInterop]::Refresh($document, $snapshot, $initial.Result, [ref]$syncError)) ('First in-place analysis failed: ' + $syncError)
+    Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore -and $word.Windows.Count -eq $windowsBefore) 'Initial analysis changed the open document or opened a new window.'
+    Assert-Condition ($document.Comments.Count -eq $initial.Result.Diagnostics.Count) 'Initial analysis did not write grouped comments into the same document.'
+    Assert-Condition ((Get-SharedFileHash $workingCopy) -eq $workingHash) 'Initial analysis saved the document automatically.'
+    $snapshot = Write-Snapshot $document 'before-repeat-analysis'
+    $repeated = $client.Analyze($snapshot)
+    Assert-Response $repeated 'Repeat analysis'
+    Assert-Condition ([WordSmokeInterop]::Refresh($document, $snapshot, $repeated.Result, [ref]$syncError)) ('Repeat in-place analysis failed: ' + $syncError)
+    Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore -and $word.Windows.Count -eq $windowsBefore) 'Repeated analysis changed the open document or opened a new window.'
+    Assert-Condition ($document.Comments.Count -eq $repeated.Result.Diagnostics.Count) 'Repeated analysis duplicated comments.'
+    Assert-Condition ((Get-SharedFileHash $workingCopy) -eq $workingHash) 'Repeated analysis saved the document automatically.'
     $snapshot = Write-Snapshot $document 'before-single'
     $analysis = $client.Analyze($snapshot)
     Assert-Response $analysis 'Analyze'
@@ -271,6 +286,7 @@ try {
     Assert-Condition ((Get-FileHash -Algorithm SHA256 -LiteralPath $fixture).Hash -eq $fixtureHash) 'Repository fixture was overwritten.'
     [ordered]@{
         status = 'passed'
+        initialAndRepeatedAnalysisInSameWindow = 'passed'
         groupedOccurrences = $group.Occurrences.Count
         singleRepairPatches = $singlePatchCount
         bulkRepairPatches = $bulkPatchCount
