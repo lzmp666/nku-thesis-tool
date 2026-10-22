@@ -46,7 +46,6 @@ namespace ThesisAddIn.VSTO.Engine
         private sealed class XmlRun
         {
             public string Text { get; set; }
-            public int Offset { get; set; }
         }
 
         public static bool IsWorkingCopy(Word.Document document)
@@ -69,9 +68,10 @@ namespace ThesisAddIn.VSTO.Engine
         public static bool RefreshAnnotations(Word.Document document, string snapshotPath,
             EngineAnalysisResult analysis, out string error)
         {
-            return ExecuteUndoable(document, "刷新论文格式批注", () =>
+            return ExecuteUndoable(document, "刷新论文格式批注",
+                () => ValidateAnnotationTargets(document, snapshotPath, analysis), markMutation =>
             {
-                RefreshAnnotationsCore(document, snapshotPath, analysis);
+                RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation);
                 document.Saved = false;
             }, out error);
         }
@@ -81,9 +81,11 @@ namespace ThesisAddIn.VSTO.Engine
             IReadOnlyList<EnginePatch> patches, EngineAnalysisResult analysis, out string error)
         {
             if (patches == null) throw new ArgumentNullException(nameof(patches));
+            Dictionary<string, Word.Range> ranges = null;
             return ExecuteUndoable(document, "修复论文格式", () =>
             {
-                Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath,
+                ValidateAnnotationTargets(document, snapshotPath, analysis);
+                ranges = BuildRanges(document, snapshotPath,
                     patches.Select(patch => patch.Location)
                         .Concat(GetDiagnosticLocations(analysis)));
 
@@ -95,10 +97,15 @@ namespace ThesisAddIn.VSTO.Engine
                     ValidatePatch(patch);
                 }
 
+            }, markMutation =>
+            {
                 foreach (EnginePatch patch in patches)
+                {
                     ApplyPatch(ranges[patch.Location], patch);
+                    markMutation();
+                }
 
-                RefreshAnnotationsCore(document, snapshotPath, analysis);
+                RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation);
                 document.Saved = false;
             }, out error);
         }
@@ -126,7 +133,8 @@ namespace ThesisAddIn.VSTO.Engine
             return BuildRanges(document, snapshotPath, GetDiagnosticLocations(analysis));
         }
 
-        private static bool ExecuteUndoable(Word.Document document, string actionName, Action action, out string error)
+        private static bool ExecuteUndoable(Word.Document document, string actionName,
+            Action validate, Action<Action> action, out string error)
         {
             error = null;
             if (document == null)
@@ -137,10 +145,12 @@ namespace ThesisAddIn.VSTO.Engine
 
             dynamic undoRecord = null;
             bool customRecordStarted = false;
-            string before = null;
+            bool mutated = false;
             try
             {
-                before = document.WordOpenXML;
+                // Validate before opening an undo record. An empty custom record is
+                // absent from Word's undo stack: Undo would affect the preceding edit.
+                validate();
                 try
                 {
                     undoRecord = document.Application.UndoRecord;
@@ -152,7 +162,7 @@ namespace ThesisAddIn.VSTO.Engine
                     throw new InvalidOperationException("Word 无法创建撤销记录，已停止操作且未修改文档。", exception);
                 }
 
-                action();
+                action(() => mutated = true);
                 return true;
             }
             catch (Exception exception)
@@ -163,8 +173,7 @@ namespace ThesisAddIn.VSTO.Engine
                     {
                         undoRecord.EndCustomRecord();
                         customRecordStarted = false;
-                        string after = document.WordOpenXML;
-                        if (!string.Equals(before, after, StringComparison.Ordinal))
+                        if (mutated)
                         {
                             dynamic commandBars = document.Application.CommandBars;
                             commandBars.ExecuteMso("Undo");
@@ -196,8 +205,16 @@ namespace ThesisAddIn.VSTO.Engine
             }
         }
 
-        private static void RefreshAnnotationsCore(Word.Document document, string snapshotPath,
+        private static void ValidateAnnotationTargets(Word.Document document, string snapshotPath,
             EngineAnalysisResult analysis)
+        {
+            if (analysis == null) throw new ArgumentNullException(nameof(analysis));
+            BuildRanges(document, snapshotPath, GetDiagnosticLocations(analysis)
+                .Concat(ReadOwnedAnnotations(document).SelectMany(record => record.OriginalHighlights.Keys)));
+        }
+
+        private static void RefreshAnnotationsCore(Word.Document document, string snapshotPath,
+            EngineAnalysisResult analysis, Action markMutation)
         {
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
 
@@ -210,10 +227,6 @@ namespace ThesisAddIn.VSTO.Engine
                 locations.Add(location);
 
             Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath, locations);
-            // Retain the legacy marker name for existing documents. It identifies an analyzed
-            // document, including clean ones; it does not require a separate working copy.
-            MarkWorkingCopy(document);
-
             // Restore the highlight that was present before the tool marked each run.
             var originalByLocation = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (AnnotationRecord record in existing)
@@ -227,11 +240,18 @@ namespace ThesisAddIn.VSTO.Engine
             }
 
             foreach (KeyValuePair<string, string> highlight in originalByLocation)
+            {
+                if (string.Equals(GetHighlight(ranges[highlight.Key]), highlight.Value, StringComparison.Ordinal)) continue;
                 SetHighlight(ranges[highlight.Key], highlight.Value);
+                markMutation();
+            }
 
             // Delete in reverse order so the 1-based collection indexes remain valid.
             foreach (int index in existing.Select(record => record.Index).OrderByDescending(index => index))
+            {
                 document.Comments[index].Delete();
+                markMutation();
+            }
 
             // Comment removal can shift story ranges. Rebuild all targets against the same
             // text snapshot before writing new highlights and anchors.
@@ -245,14 +265,21 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 string[] occurrences = GetOccurrences(diagnostic).ToArray();
                 foreach (string location in occurrences)
+                {
+                    if (ranges[location].HighlightColorIndex == Word.WdColorIndex.wdYellow) continue;
                     ranges[location].HighlightColorIndex = Word.WdColorIndex.wdYellow;
+                    markMutation();
+                }
 
                 string visibleText = "要求参考来源：2026版第4.7节表4.6；规则：" + diagnostic.RuleId
                     + "；期望值：" + diagnostic.Expected + "；实际值：" + diagnostic.Actual + "。";
                 string hiddenText = BuildHiddenMetadata(diagnostic.Location, freshOriginalHighlights[diagnostic.Location],
                     occurrences, freshOriginalHighlights);
-                AddOwnedComment(document, ranges[diagnostic.Location], visibleText, hiddenText);
+                AddOwnedComment(document, ranges[diagnostic.Location], visibleText, hiddenText, markMutation);
             }
+            // This legacy marker identifies an analyzed document, not a separate copy.
+            // Write it last; document variables do not create Word undo entries.
+            MarkWorkingCopy(document);
         }
 
         private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document)
@@ -302,6 +329,7 @@ namespace ThesisAddIn.VSTO.Engine
                 throw new InvalidDataException("Word 段落与分析快照无法一一对应，为避免改错位置已停止。");
 
             var result = new Dictionary<string, Word.Range>(StringComparer.Ordinal);
+            var requestedByParagraph = new Dictionary<int, HashSet<int>>();
             foreach (string location in requestedLocations.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal))
             {
                 Match match = LocationPattern.Match(location);
@@ -313,6 +341,15 @@ namespace ThesisAddIn.VSTO.Engine
                     runIndex < 0 || runIndex >= paragraphRuns.Count)
                     throw new InvalidDataException("分析位置已不存在：" + location);
 
+                if (!requestedByParagraph.TryGetValue(paragraphIndex, out HashSet<int> requestedRuns))
+                    requestedByParagraph[paragraphIndex] = requestedRuns = new HashSet<int>();
+                requestedRuns.Add(runIndex);
+            }
+
+            foreach (KeyValuePair<int, HashSet<int>> requested in requestedByParagraph)
+            {
+                int paragraphIndex = requested.Key;
+                List<XmlRun> paragraphRuns = runsByParagraph[paragraphIndex];
                 Word.Range paragraphRange = document.Paragraphs[paragraphIndex + 1].Range.Duplicate;
                 string paragraphText = paragraphRange.Text ?? string.Empty;
                 paragraphText = paragraphText.TrimEnd('\r', '\a');
@@ -320,14 +357,59 @@ namespace ThesisAddIn.VSTO.Engine
                 if (!string.Equals(paragraphText, xmlText, StringComparison.Ordinal))
                     throw new InvalidDataException("第 " + (paragraphIndex + 1) + " 段包含无法安全映射的 Word 内容，未修改文档。");
 
-                int offset = paragraphRuns[runIndex].Offset;
-                string expectedText = paragraphRuns[runIndex].Text;
-                int start = paragraphRange.Start + offset;
-                Word.Range runRange = document.Range(start, start + expectedText.Length);
-                if (!string.Equals(runRange.Text, expectedText, StringComparison.Ordinal))
-                    throw new InvalidDataException("无法精确定位原文片段：" + location);
-                result.Add(location, runRange);
+                int cursor = paragraphRange.Start;
+                for (int runIndex = 0; runIndex <= requested.Value.Max(); runIndex++)
+                {
+                    // Word's internal positions include annotation reference marks,
+                    // although Range.Text and OOXML text omit them. Find each next
+                    // literal span in order rather than adding string lengths to CPs.
+                    Word.Range runRange = FindNextTextRange(document, cursor, paragraphRange.End,
+                        paragraphRuns[runIndex].Text);
+                    cursor = runRange.End;
+                    if (requested.Value.Contains(runIndex))
+                        result.Add("word/document.xml#paragraph[" + paragraphIndex + "]/run[" + runIndex + "]", runRange);
+                }
             }
+            return result;
+        }
+
+        private static Word.Range FindNextTextRange(Word.Document document, int cursor, int paragraphEnd, string text)
+        {
+            if (string.IsNullOrEmpty(text)) return document.Range(cursor, cursor);
+            int start = -1;
+            int consumed = 0;
+            while (consumed < text.Length)
+            {
+                // Word Find has a short pattern limit. Leave space for escaped carets
+                // and never cut a UTF-16 surrogate pair between two literal chunks.
+                int length = Math.Min(100, text.Length - consumed);
+                if (consumed + length < text.Length && char.IsHighSurrogate(text[consumed + length - 1])) length--;
+                string chunk = text.Substring(consumed, length);
+                Word.Range target = document.Range(cursor, paragraphEnd);
+                Word.Find find = target.Find;
+                find.ClearFormatting();
+                find.Text = chunk.Replace("^", "^^");
+                find.Forward = true;
+                find.Wrap = Word.WdFindWrap.wdFindStop;
+                find.Format = false;
+                find.MatchCase = true;
+                find.MatchWholeWord = false;
+                find.MatchWildcards = false;
+                find.MatchSoundsLike = false;
+                find.MatchAllWordForms = false;
+                find.MatchFuzzy = false;
+                find.IgnoreSpace = false;
+                find.IgnorePunct = false;
+                if (!find.Execute() || !string.Equals(target.Text, chunk, StringComparison.Ordinal)
+                    || !string.IsNullOrEmpty(document.Range(cursor, target.Start).Text))
+                    throw new InvalidDataException("无法精确定位原文片段，已停止修改。");
+                if (start < 0) start = target.Start;
+                cursor = target.End;
+                consumed += length;
+            }
+            Word.Range result = document.Range(start, cursor);
+            if (!string.Equals(result.Text, text, StringComparison.Ordinal))
+                throw new InvalidDataException("原文片段与分析文本不一致，已停止修改。");
             return result;
         }
 
@@ -348,18 +430,12 @@ namespace ThesisAddIn.VSTO.Engine
                     XElement[] paragraphs = body.Elements(W + "p").ToArray();
                     for (int paragraphIndex = 0; paragraphIndex < paragraphs.Length; paragraphIndex++)
                     {
-                        int offset = 0;
                         var runs = new List<XmlRun>();
                         foreach (XElement run in paragraphs[paragraphIndex].Elements(W + "r")
                                      .Where(candidate => candidate.Descendants(W + "t").Any()))
                         {
                             string text = string.Concat(run.Descendants(W + "t").Select(element => element.Value));
-                            runs.Add(new XmlRun
-                            {
-                                Text = text,
-                                Offset = offset
-                            });
-                            offset += text.Length;
+                            runs.Add(new XmlRun { Text = text });
                         }
                         result.Add(paragraphIndex, runs);
                     }
@@ -427,10 +503,12 @@ namespace ThesisAddIn.VSTO.Engine
             return text.ToString();
         }
 
-        private static void AddOwnedComment(Word.Document document, Word.Range anchor, string visibleText, string hiddenText)
+        private static void AddOwnedComment(Word.Document document, Word.Range anchor, string visibleText, string hiddenText,
+            Action markMutation)
         {
             object text = visibleText;
             Word.Comment comment = document.Comments.Add(anchor, ref text);
+            markMutation();
             // Signed-in Word can ignore Application.UserName when creating a comment.
             // Set the comment itself so both Word and the engine recognize its ownership.
             comment.Author = ToolAuthor;

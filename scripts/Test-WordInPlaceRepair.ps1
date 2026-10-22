@@ -215,6 +215,21 @@ try {
     Assert-Condition ($document.FullName -eq $pathBefore -and $word.Documents.Count -eq $countBefore -and $word.Windows.Count -eq $windowsBefore) 'Repeated analysis changed the open document or opened a new window.'
     Assert-Condition ($document.Comments.Count -eq $repeated.Result.Diagnostics.Count) 'Repeated analysis duplicated comments.'
     Assert-Condition ((Get-SharedFileHash $workingCopy) -eq $workingHash) 'Repeated analysis saved the document automatically.'
+    # Rejected positioning must not undo the author's preceding edit. An empty
+    # custom undo record is absent from Word's stack, so Undo would affect it.
+    $probeRange = Get-Run $document $snapshot $repeated.Result.Diagnostics[0].Location
+    $oldBold = $probeRange.Font.Bold
+    $probeBold = if ($oldBold -eq 0) { -1 } else { 0 }
+    $probeRange.Font.Bold = $probeBold
+    $invalid = [ThesisAddIn.Protocol.EngineAnalysisResult]::new()
+    $invalid.Diagnostics.Add([ThesisAddIn.Protocol.EngineDiagnostic]@{
+        RuleId = 'demo/font-size'; Location = 'word/document.xml#paragraph[0]/run[999999]'
+    })
+    Assert-Condition (-not [WordSmokeInterop]::Refresh($document, $snapshot, $invalid, [ref]$syncError)) 'Invalid positioning was accepted.'
+    Assert-Condition ($probeRange.Font.Bold -eq $probeBold) 'Failed validation undid the author edit.'
+    Assert-Condition ($document.Comments.Count -eq $repeated.Result.Diagnostics.Count) 'Failed validation changed existing comments.'
+    Assert-Condition ([bool]$document.Undo()) 'The author edit could not be undone after validation failed.'
+    Assert-Condition ($probeRange.Font.Bold -eq $oldBold) 'Validation failure changed the undo stack.'
     $snapshot = Write-Snapshot $document 'before-single'
     $analysis = $client.Analyze($snapshot)
     Assert-Response $analysis 'Analyze'
