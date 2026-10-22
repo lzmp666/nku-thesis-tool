@@ -6,6 +6,8 @@
 
 候选构建的实际测试结果见 [2026-10-22 Word 验收记录](word-acceptance-2026-10-22.md)。该记录包含已通过项目和仍需修复的交互问题，不代表本表全部通过。
 
+Issue #85 的最新“当前窗口分析与修复”专项结果见 [2026-10-22 本页操作验收](word-in-place-acceptance-2026-10-22.md)。该专项已在 Microsoft Word 桌面界面验证首次/重复分析、单项修复、批量预览取消/确认和撤销/恢复；不能据此认定纯悬停、多文档等全部用例通过。下表保留为完整验收模板。
+
 ## 测试材料与环境记录
 
 从仓库根目录将 `tests/fixtures/synthetic/demo/known_issues_sample.docx` 复制到单独的临时目录，Word 中只打开这份副本。另准备 `clean_sample.docx` 验证无问题稿。不要直接编辑仓库里的夹具。
@@ -69,7 +71,7 @@ Get-FileHash -Algorithm SHA256 -LiteralPath .\known_issues_sample.docx
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Test-WordInPlaceRepair.ps1 -Configuration Debug
 ```
 
-2026-10-22 宿主核查发现，本机 `Word.Application` 的 COM 注册指向 WPS。此前脚本输出不能作为 Microsoft Word 验收证据，原“Word 检查通过”记录已撤回。本次首次/重复分析不新增窗口、分组、单项/批量修复、撤销/恢复及保存重开仍需在 Microsoft Word 中重测。
+2026-10-22 宿主核查发现，本机 `Word.Application` 的 COM 注册指向 WPS。此前脚本输出不能作为 Microsoft Word 验收证据，原“Word 检查通过”记录已撤回。随后通过 Microsoft Word 桌面界面完成了上述本页操作专项；自动对象模型回归仍未通过，保存重开、多文档和纯悬停等未测项继续保留。
 
 脚本现在会在激活前核对 `Word.Application` 注册的程序必须为 Microsoft `WINWORD.EXE`，激活后再次核对宿主路径；指向 WPS 等其他程序时直接失败，不开始验收。只有 Microsoft Word 宿主的通过结果才可记录为对象模型回归通过；功能区按钮、预览取消、位置导航按钮及纯悬停仍按上表逐项验收。
 
