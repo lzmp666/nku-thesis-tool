@@ -212,7 +212,9 @@ public sealed class WordAnnotationWriterTests
             Assert.Equal(new[] { "0", "1", "2" }, comments.Root!.Elements(W + "comment")
                 .Select(element => (string?)element.Attribute(W + "id")).ToArray());
             var commentText = string.Join(" ", comments.Descendants(W + "t").Select(element => element.Value));
-            Assert.Contains("2026版第4.7节表4.6", commentText);
+            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）", commentText);
+            Assert.Contains("规则：中文字体", commentText);
+            Assert.DoesNotContain("2026版第4.7节表4.6", commentText);
             Assert.Contains("期望值：宋体；实际值：黑体", commentText);
             Assert.DoesNotContain("修改建议：", commentText);
             Assert.DoesNotContain("检测提示：", commentText);
