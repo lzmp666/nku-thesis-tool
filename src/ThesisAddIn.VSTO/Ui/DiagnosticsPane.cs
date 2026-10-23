@@ -111,13 +111,10 @@ namespace ThesisAddIn.VSTO.Ui
 
             _issueList.Name = "IssueSearchResults";
             _issueList.Dock = DockStyle.Fill;
-            _issueList.IntegralHeight = false;
-            _issueList.HorizontalScrollbar = false;
-            _issueList.BorderStyle = BorderStyle.None;
             _issueList.BackColor = BackColor;
-            _issueList.DrawMode = DrawMode.OwnerDrawVariable;
             _issueList.AccessibleName = "格式问题列表";
             _issueList.SelectedIndexChanged += OnIssueSelected;
+            _issueList.CurrentItemInvoked += OnIssueSelected;
             _issueList.DrawItem += OnDrawIssueItem;
             _issueList.MeasureItem += OnMeasureIssueItem;
             _issueList.KeyDown += OnIssueListKeyDown;
@@ -676,7 +673,7 @@ namespace ThesisAddIn.VSTO.Ui
                 return;
             }
             EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
-            int width = Math.Max(160, (int)(_issueList.ClientSize.Width / _uiScale) - 8);
+            int width = Math.Max(160, (int)(_issueList.ContentWidth / _uiScale) - 8);
             using (Graphics graphics = _issueList.CreateGraphics())
             {
                 int left = 15;
@@ -697,7 +694,6 @@ namespace ThesisAddIn.VSTO.Ui
 
         private void OnDrawIssueItem(object sender, DrawItemEventArgs e)
         {
-            e.DrawBackground();
             if (e.Index < 0 || e.Index >= _visibleIndices.Count) return;
             bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
             GraphicsState state = e.Graphics.Save();
