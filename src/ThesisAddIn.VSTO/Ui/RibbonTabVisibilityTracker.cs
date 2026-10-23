@@ -12,6 +12,7 @@ namespace ThesisAddIn.VSTO.Ui
     {
         private const string TabName = "论文格式检查";
         private readonly Dictionary<int, Action<bool>> _callbacks = new Dictionary<int, Action<bool>>();
+        private readonly Dictionary<int, bool> _lastSelection = new Dictionary<int, bool>();
         private readonly WinEventCallback _callback;
         private IntPtr _hook;
 
@@ -47,7 +48,7 @@ namespace ThesisAddIn.VSTO.Ui
                 string name = accessible.get_accName(child);
                 if (name == TabName)
                 {
-                    selectedChanged(true);
+                    NotifySelection(frame, true, selectedChanged);
                     return;
                 }
 
@@ -55,7 +56,7 @@ namespace ThesisAddIn.VSTO.Ui
                 // Office builds; get_accName(index) is not supported by that provider.
                 if (IsBuiltInRibbonTab(name))
                 {
-                    selectedChanged(false);
+                    NotifySelection(frame, false, selectedChanged);
                     return;
                 }
 
@@ -74,12 +75,19 @@ namespace ThesisAddIn.VSTO.Ui
                     catch (COMException) { continue; }
                     if (siblingName == TabName)
                     {
-                        selectedChanged(false);
+                        NotifySelection(frame, false, selectedChanged);
                         return;
                     }
                 }
             }
             catch (Exception) { /* Office may destroy an accessible element during a tab transition. */ }
+        }
+
+        private void NotifySelection(int frame, bool selected, Action<bool> selectedChanged)
+        {
+            if (_lastSelection.TryGetValue(frame, out bool previous) && previous == selected) return;
+            _lastSelection[frame] = selected;
+            selectedChanged(selected);
         }
 
         private static bool IsBuiltInRibbonTab(string name)
@@ -101,6 +109,7 @@ namespace ThesisAddIn.VSTO.Ui
             if (_hook != IntPtr.Zero) UnhookWinEvent(_hook);
             _hook = IntPtr.Zero;
             _callbacks.Clear();
+            _lastSelection.Clear();
         }
 
         private delegate void WinEventCallback(IntPtr hook, uint eventId, IntPtr window,

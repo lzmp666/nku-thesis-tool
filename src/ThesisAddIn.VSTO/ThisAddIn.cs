@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -46,6 +47,8 @@ namespace ThesisAddIn.VSTO
         private int _lastHoveredCursorY = -1;
         private string _lastHoveredCommentKey;
         private bool _isNavigatingToDiagnostic;
+        private bool _issuesVisible;
+        private DateTime _lastNavigationUtc = DateTime.MinValue;
 
         private sealed class DocumentOperationContext
         {
@@ -74,11 +77,11 @@ namespace ThesisAddIn.VSTO
                 OnRibbonNavigateOccurrence,
                 SetDiagnosticsPaneVisible,
                 IsDiagnosticsPaneVisible,
-                () => TryGetPaneForActiveWindow()?.CanFixSelected == true,
-                () => TryGetPaneForActiveWindow()?.HasFixableDiagnostics == true,
-                () => TryGetPaneForActiveWindow()?.CanResolveSelected == true,
-                () => TryGetPaneForActiveWindow()?.CanNavigateIssues == true,
-                () => TryGetPaneForActiveWindow()?.CanNavigateOccurrences == true);
+                () => _pane?.CanFixSelected == true,
+                () => _pane?.HasFixableDiagnostics == true,
+                () => _pane?.CanResolveSelected == true,
+                () => _pane?.CanNavigateIssues == true,
+                () => _pane?.CanNavigateOccurrences == true);
             return _ribbon;
         }
 
@@ -105,18 +108,7 @@ namespace ThesisAddIn.VSTO
             }
         }
 
-        private bool IsDiagnosticsPaneVisible()
-        {
-            try
-            {
-                CustomTaskPane taskPane = FindTaskPaneForWindow(Application.ActiveWindow);
-                return taskPane != null && taskPane.Visible;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        }
+        private bool IsDiagnosticsPaneVisible() => _issuesVisible;
 
         private CustomTaskPane FindTaskPaneForWindow(Word.Window window)
         {
@@ -513,6 +505,8 @@ namespace ThesisAddIn.VSTO
         private void OnWindowActivate(Word.Document document, Word.Window window)
         {
             EnsureTaskPaneForWindow(window);
+            _issuesVisible = _taskPane != null && _taskPane.Visible;
+            _ribbon?.Invalidate();
         }
 
         private void EnsureTaskPaneForWindow(Word.Window window)
@@ -581,7 +575,10 @@ namespace ThesisAddIn.VSTO
                         pane.BeginInvoke(new Action(() =>
                         {
                             if (pane.IsDisposed) return;
-                            try { trackedTaskPane.Visible = selected; }
+                            try
+                            {
+                                if (trackedTaskPane.Visible != selected) trackedTaskPane.Visible = selected;
+                            }
                             catch (Exception) { /* The document window may be closing. */ }
                         }));
                     }
@@ -654,6 +651,8 @@ namespace ThesisAddIn.VSTO
 
         private void OnTaskPaneVisibleChanged(object sender, EventArgs e)
         {
+            if (sender is CustomTaskPane taskPane && object.ReferenceEquals(taskPane, _taskPane))
+                _issuesVisible = taskPane.Visible;
             _ribbon?.Invalidate();
         }
 
@@ -664,6 +663,8 @@ namespace ThesisAddIn.VSTO
             {
                 return;
             }
+
+            if (object.ReferenceEquals(_pane, pane) && _taskPane != null) return;
 
             _pane = pane;
             _taskPane = null;
@@ -917,6 +918,8 @@ namespace ThesisAddIn.VSTO
         /// <summary>把一条诊断定位到原文：选中对应段落（选中即为可见高亮，不修改文档内容）。</summary>
         private string NavigateTo(DiagnosticsPane pane, EngineDiagnostic diagnostic, string selectedLocation)
         {
+            var navigationWatch = Stopwatch.StartNew();
+            _lastNavigationUtc = DateTime.UtcNow;
             DocumentLocation location;
             string parseError;
             if (!DocumentLocator.TryParse(selectedLocation ?? diagnostic.Location, out location, out parseError))
@@ -954,6 +957,8 @@ namespace ThesisAddIn.VSTO
             finally
             {
                 _isNavigatingToDiagnostic = false;
+                _lastNavigationUtc = DateTime.UtcNow;
+                WriteStartupLog("问题定位耗时：" + navigationWatch.ElapsedMilliseconds + "ms；位置=" + locationKey);
             }
         }
 
@@ -1013,6 +1018,15 @@ namespace ThesisAddIn.VSTO
         {
             try
             {
+                // Reject task-pane motion and stationary pointers before any Word COM.
+                // Explicit navigation owns the selection briefly, so hover cannot undo it.
+                System.Drawing.Point cursor = Cursor.Position;
+                if (_isNavigatingToDiagnostic || _pane == null || _pane.IsBusy ||
+                    Control.MouseButtons != MouseButtons.None ||
+                    (DateTime.UtcNow - _lastNavigationUtc).TotalMilliseconds < 700) return;
+                if (_pane.IsHandleCreated && _pane.RectangleToScreen(_pane.ClientRectangle).Contains(cursor)) return;
+                if (cursor.X == _lastHoveredCursorX && cursor.Y == _lastHoveredCursorY) return;
+
                 Word.Window window = Application.ActiveWindow;
                 if (window == null)
                 {
@@ -1032,7 +1046,6 @@ namespace ThesisAddIn.VSTO
                 {
                     _lastHoveredCommentKey = null;
                 }
-                System.Drawing.Point cursor = Cursor.Position;
                 if (windowHandle == _lastHoveredWindowHandle
                     && cursor.X == _lastHoveredCursorX
                     && cursor.Y == _lastHoveredCursorY)

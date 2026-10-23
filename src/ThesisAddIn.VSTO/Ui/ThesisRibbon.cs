@@ -28,6 +28,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Func<bool> _canNavigateIssue;
         private readonly Func<bool> _canNavigateOccurrence;
         private Office.IRibbonUI _ribbonUi;
+        private int _stateMask = -1;
         private readonly Dictionary<string, stdole.IPictureDisp> _images =
             new Dictionary<string, stdole.IPictureDisp>(StringComparer.Ordinal);
 
@@ -58,6 +59,11 @@ namespace ThesisAddIn.VSTO.Ui
   <ribbon>
     <tabs>
       <tab id=""NkuThesisTab"" label=""论文格式检查"" insertAfterMso=""TabHome"">
+        <group id=""NkuThesisIdentity"" label=""南开大学"">
+          <button id=""NkuEmblem"" label="" "" size=""large""
+                  getImage=""GetBrandImage"" onAction=""OnBrandInfo""
+                  screentip=""NKU Thesis Tool"" supertip=""查看插件信息与南开校园主题。"" />
+        </group>
         <group id=""NkuThesisCheck"" label=""检查与检索"">
           <button id=""NkuAnalyzeCurrent"" label=""分析当前文档"" size=""large"" getImage=""GetButtonImage""
                   screentip=""分析当前文档""
@@ -93,6 +99,18 @@ namespace ThesisAddIn.VSTO.Ui
             <button id=""NkuNextOccurrence"" label=""下一处"" getImage=""GetButtonImage"" getEnabled=""GetEnabled"" onAction=""OnNextOccurrence"" />
           </box>
         </group>
+        <group id=""NkuCampusStyle"" label=""南开 · 学术规范"">
+          <box id=""NkuCampusBrandRow"" boxStyle=""horizontal"">
+          <button id=""NkuCampusPanorama"" label=""校园主题"" size=""large""
+                  getImage=""GetBrandImage"" onAction=""OnBrandInfo""
+                  screentip=""南开校园主题"" supertip=""校园意象、青莲紫与暖金色；点击查看完整主题图。"" />
+          <box id=""NkuCampusBrandCopy"" boxStyle=""vertical"">
+            <labelControl id=""NkuCampusMotto"" label=""允公允能 · 日新月异"" />
+            <labelControl id=""NkuCampusProduct"" label=""NKU THESIS TOOL"" />
+            <labelControl id=""NkuCampusWorkflow"" label=""本页检查 · 预览修复 · 自主保存"" />
+          </box>
+          </box>
+        </group>
       </tab>
     </tabs>
   </ribbon>
@@ -107,7 +125,31 @@ namespace ThesisAddIn.VSTO.Ui
 
         public void Invalidate()
         {
-            try { _ribbonUi?.Invalidate(); }
+            int state = (SafeGet(_canFixCurrent) ? 1 : 0) | (SafeGet(_canFixAll) ? 2 : 0)
+                | (SafeGet(_canVerifyResolved) ? 4 : 0) | (SafeGet(_canNavigateIssue) ? 8 : 0)
+                | (SafeGet(_canNavigateOccurrence) ? 16 : 0) | (SafeGet(_isIssuesVisible) ? 32 : 0);
+            int changed = _stateMask < 0 ? 63 : _stateMask ^ state;
+            _stateMask = state;
+            if (_ribbonUi == null || changed == 0) return;
+            try
+            {
+                // Selection changes must not rebuild the whole native Ribbon, which
+                // also emits accessibility tab events and can relayout the task pane.
+                if ((changed & 1) != 0) _ribbonUi.InvalidateControl("NkuFixCurrent");
+                if ((changed & 2) != 0) _ribbonUi.InvalidateControl("NkuFixAll");
+                if ((changed & 4) != 0) _ribbonUi.InvalidateControl("NkuVerifyResolved");
+                if ((changed & 8) != 0)
+                {
+                    _ribbonUi.InvalidateControl("NkuPreviousIssue");
+                    _ribbonUi.InvalidateControl("NkuNextIssue");
+                }
+                if ((changed & 16) != 0)
+                {
+                    _ribbonUi.InvalidateControl("NkuPreviousOccurrence");
+                    _ribbonUi.InvalidateControl("NkuNextOccurrence");
+                }
+                if ((changed & 32) != 0) _ribbonUi.InvalidateControl("NkuShowIssues");
+            }
             catch (COMException) { }
         }
 
@@ -115,20 +157,20 @@ namespace ThesisAddIn.VSTO.Ui
         {
             switch (control.Id)
             {
-                case "NkuFixCurrent": return SafeGet(_canFixCurrent);
-                case "NkuFixAll": return SafeGet(_canFixAll);
-                case "NkuVerifyResolved": return SafeGet(_canVerifyResolved);
+                case "NkuFixCurrent": return (_stateMask & 1) != 0;
+                case "NkuFixAll": return (_stateMask & 2) != 0;
+                case "NkuVerifyResolved": return (_stateMask & 4) != 0;
                 case "NkuPreviousIssue":
-                case "NkuNextIssue": return SafeGet(_canNavigateIssue);
+                case "NkuNextIssue": return (_stateMask & 8) != 0;
                 case "NkuPreviousOccurrence":
-                case "NkuNextOccurrence": return SafeGet(_canNavigateOccurrence);
+                case "NkuNextOccurrence": return (_stateMask & 16) != 0;
                 default: return true;
             }
         }
 
-        public bool GetIssuesPressed(Office.IRibbonControl control) => SafeGet(_isIssuesVisible);
+        public bool GetIssuesPressed(Office.IRibbonControl control) => (_stateMask & 32) != 0;
         public string GetIssuesLabel(Office.IRibbonControl control) =>
-            SafeGet(_isIssuesVisible) ? "关闭检索" : "打开检索";
+            GetIssuesPressed(control) ? "关闭检索" : "打开检索";
 
         public stdole.IPictureDisp GetButtonImage(Office.IRibbonControl control)
         {
@@ -167,6 +209,75 @@ namespace ThesisAddIn.VSTO.Ui
                     _images[control.Id] = picture;
                     return picture;
                 }
+            }
+        }
+
+        public stdole.IPictureDisp GetBrandImage(Office.IRibbonControl control)
+        {
+            if (control == null) return null;
+            if (_images.TryGetValue(control.Id, out stdole.IPictureDisp cached)) return cached;
+            bool emblem = control.Id == "NkuEmblem";
+            string resource = emblem ? "nku-emblem-official.jpg" : "nku-campus-panorama-v2.png";
+            using (Stream stream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("ThesisAddIn.VSTO.Assets." + resource))
+            {
+                if (stream == null) return null;
+                using (Image source = Image.FromStream(stream))
+                using (var bitmap = new Bitmap(emblem ? 64 : 192, 64))
+                using (Graphics graphics = Graphics.FromImage(bitmap))
+                {
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.DrawImage(source, new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+                    cached = RibbonPictureConverter.Convert(bitmap);
+                    _images[control.Id] = cached;
+                    return cached;
+                }
+            }
+        }
+
+        public void OnBrandInfo(Office.IRibbonControl control)
+        {
+            WordWindowContext context = WordWindowContext.FromControl(control);
+            uint dpi = 96;
+            try { if (context != null) dpi = GetDpiForWindow(context.Handle); }
+            catch (EntryPointNotFoundException) { }
+            float scale = Math.Max(1F, Math.Min(4F, dpi / 96F));
+            using (var dialog = new Form
+            {
+                Text = "NKU Thesis Tool · 南开校园主题", Width = (int)(760 * scale), Height = (int)(380 * scale),
+                AutoScaleMode = AutoScaleMode.None, StartPosition = FormStartPosition.CenterParent,
+                MinimizeBox = false, MaximizeBox = false, ShowInTaskbar = false,
+                BackColor = Color.FromArgb(250, 247, 241)
+            })
+            using (Stream stream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("ThesisAddIn.VSTO.Assets.nku-campus-panorama-v2.png"))
+            using (Image illustration = stream == null ? null : Image.FromStream(stream))
+            {
+                var art = new PictureBox { Dock = DockStyle.Fill, Image = illustration, SizeMode = PictureBoxSizeMode.Zoom };
+                var caption = new Label { Dock = DockStyle.Bottom, Height = (int)(56 * scale), TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = Color.FromArgb(118, 34, 85), Font = new Font("Microsoft YaHei UI", 11F * 96F / 72F * scale, GraphicsUnit.Pixel),
+                    Text = "允公允能 · 日新月异\r\n校徽取自南开大学官网；校园主题插画由 GPT-image 生成。" };
+                dialog.Controls.Add(art);
+                dialog.Controls.Add(caption);
+                if (context == null) dialog.ShowDialog(); else dialog.ShowDialog(context);
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
+
+        private sealed class WordWindowContext : IWin32Window
+        {
+            private WordWindowContext(int handle) { Handle = new IntPtr(handle); }
+            public IntPtr Handle { get; }
+            internal static WordWindowContext FromControl(Office.IRibbonControl control)
+            {
+                try
+                {
+                    var window = control?.Context as Microsoft.Office.Interop.Word.Window;
+                    return window == null ? null : new WordWindowContext(window.Hwnd);
+                }
+                catch (COMException) { return null; }
             }
         }
 

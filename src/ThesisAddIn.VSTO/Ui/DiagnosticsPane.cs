@@ -24,6 +24,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Label _ruleNotice = new Label();
         private readonly Label _status = new Label();
         private readonly ToolTip _toolTip = new ToolTip();
+        private readonly Timer _navigationTimer = new Timer { Interval = 100 };
         private readonly Image _headerImage;
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<int> _visibleIndices = new List<int>();
@@ -42,16 +43,23 @@ namespace ThesisAddIn.VSTO.Ui
         public DiagnosticsPane()
         {
             Dock = DockStyle.Fill;
+            DoubleBuffered = true;
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.FromArgb(250, 247, 241);
             ForeColor = Color.FromArgb(44, 39, 42);
             Font = new Font("Microsoft YaHei UI", 9F);
+            _navigationTimer.Tick += (sender, args) =>
+            {
+                _navigationTimer.Stop();
+                if (!_isBusy && !IsDisposed && SelectedDiagnostic != null) OnEvent(DiagnosticSelected);
+            };
 
-            _summary.Dock = DockStyle.Fill;
+            _summary.Dock = DockStyle.Top;
+            _summary.Height = 27;
             _summary.Padding = new Padding(12, 5, 8, 3);
             _summary.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold);
             _summary.ForeColor = Color.FromArgb(104, 31, 61);
-            _summary.BackColor = Color.Transparent;
+            _summary.BackColor = Color.FromArgb(250, 247, 241);
             _summary.AutoEllipsis = true;
             _summary.TextAlign = ContentAlignment.MiddleLeft;
             _summary.Text = "格式问题";
@@ -141,7 +149,7 @@ namespace ThesisAddIn.VSTO.Ui
                 BackColor = BackColor
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 86F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 31F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -229,6 +237,7 @@ namespace ThesisAddIn.VSTO.Ui
                         if (column.SizeType == SizeType.Absolute) column.Width *= _uiScale;
                 }
             }
+            _summary.Height = (int)Math.Round(27F * _uiScale);
             return (int)Math.Round(390F * _uiScale);
         }
 
@@ -277,6 +286,7 @@ namespace ThesisAddIn.VSTO.Ui
             InvokeOnUiThread(() =>
             {
                 _isBusy = busy;
+                if (busy) _navigationTimer.Stop();
                 _searchBox.Enabled = !busy;
                 _issueList.Enabled = !busy;
                 if (!string.IsNullOrEmpty(message)) SetStatusCore(message);
@@ -296,6 +306,7 @@ namespace ThesisAddIn.VSTO.Ui
 
         private void ShowAnalysisCore(EngineAnalysisResult result)
         {
+            _navigationTimer.Stop();
             _analysisSucceeded = true;
             _diagnostics.Clear();
             if (result?.Diagnostics != null)
@@ -406,12 +417,14 @@ namespace ThesisAddIn.VSTO.Ui
             if (count <= 1) return;
             _selectedOccurrenceIndex = (_selectedOccurrenceIndex + direction + count) % count;
             RaiseStateChanged();
-            OnEvent(DiagnosticSelected);
+            QueueSourceNavigation();
         }
 
         private void SelectDiagnostic(int index, bool navigateToSource, string location = null)
         {
             if (index < 0 || index >= _diagnostics.Count) return;
+            int priorIndex = _selectedIndex;
+            int priorOccurrence = _selectedOccurrenceIndex;
             _selectedIndex = index;
             EngineDiagnostic selected = _diagnostics[index];
             _selectedOccurrenceIndex = 0;
@@ -433,13 +446,29 @@ namespace ThesisAddIn.VSTO.Ui
                 _updatingList = true;
                 try
                 {
+                    int firstVisible = _issueList.TopIndex;
                     if (_issueList.SelectedIndex != visibleIndex)
                         _issueList.SelectedIndex = visibleIndex;
+                    // Body/comment hover must not scroll the searchable index either.
+                    if (firstVisible >= 0 && firstVisible < _issueList.Items.Count &&
+                        _issueList.TopIndex != firstVisible) _issueList.TopIndex = firstVisible;
                 }
                 finally { _updatingList = false; }
             }
-            RaiseStateChanged();
-            if (navigateToSource) OnEvent(DiagnosticSelected);
+            if (priorIndex != _selectedIndex || priorOccurrence != _selectedOccurrenceIndex)
+            {
+                if (visibleIndex >= 0) _issueList.Invalidate(_issueList.GetItemRectangle(visibleIndex));
+                RaiseStateChanged();
+            }
+            if (navigateToSource) QueueSourceNavigation();
+        }
+
+        // Let the native ListBox finish selection/painting before entering Word COM.
+        // Rapid clicks replace pending work; only the latest selected issue is located.
+        private void QueueSourceNavigation()
+        {
+            _navigationTimer.Stop();
+            _navigationTimer.Start();
         }
 
         private void OnIssueSelected(object sender, EventArgs e)
@@ -759,7 +788,7 @@ namespace ThesisAddIn.VSTO.Ui
         private static Image LoadHeaderImage()
         {
             using (Stream stream = Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream("ThesisAddIn.VSTO.Assets.nku-campus-header.png"))
+                .GetManifestResourceStream("ThesisAddIn.VSTO.Assets.nku-campus-panorama-v2.png"))
             {
                 if (stream == null) return null;
                 using (Image source = Image.FromStream(stream)) return new Bitmap(source);
@@ -781,6 +810,8 @@ namespace ThesisAddIn.VSTO.Ui
         {
             if (disposing)
             {
+                _navigationTimer.Stop();
+                _navigationTimer.Dispose();
                 _headerImage?.Dispose();
                 _toolTip.Dispose();
             }

@@ -5,10 +5,17 @@ namespace ThesisAddIn.VSTO.Ui
     /// <summary>Mouse selection must not snap a variable-height card to the top.</summary>
     internal sealed class StableIssueListBox : ListBox
     {
+        internal StableIssueListBox()
+        {
+            DoubleBuffered = true;
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        }
+
         protected override void WndProc(ref Message message)
         {
             const int LeftButtonDown = 0x0201;
-            if (message.Msg != LeftButtonDown || Items.Count == 0)
+            const int LeftButtonUp = 0x0202;
+            if ((message.Msg != LeftButtonDown && message.Msg != LeftButtonUp) || Items.Count == 0)
             {
                 base.WndProc(ref message);
                 return;
