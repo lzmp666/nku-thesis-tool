@@ -3,12 +3,19 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$CertificateThumbprint = $env:THESIS_VSTO_CERT_THUMBPRINT,
+    [string]$AddinOutputDirectory,
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$addinOutput = Join-Path $root 'src\ThesisAddIn.VSTO\bin\Release'
+$addinOutput = if ([string]::IsNullOrWhiteSpace($AddinOutputDirectory)) {
+    Join-Path $root 'src\ThesisAddIn.VSTO\bin\Release'
+} elseif ([IO.Path]::IsPathRooted($AddinOutputDirectory)) {
+    (Resolve-Path -LiteralPath $AddinOutputDirectory).Path
+} else {
+    (Resolve-Path -LiteralPath (Join-Path $root $AddinOutputDirectory)).Path
+}
 $engineOutput = Join-Path $root 'src\ThesisAddIn.VSTO\ProtocolHost\bin\Release\net10.0'
 $sampleRoot = Join-Path $root 'tests\fixtures\synthetic\demo'
 $fullThesisRoot = Join-Path $root 'tests\fixtures\synthetic\full-thesis'

@@ -191,6 +191,12 @@
     <Compile Include="Ui\CommentDiagnosticMatcher.cs" />
     <Compile Include="Ui\FixPreviewDialog.cs" />
     <Compile Include="Ui\ThesisRibbon.cs" />
+    <EmbeddedResource Include="Assets\nku-campus-header.png">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-campus-header.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\nku-ribbon-icons.png">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-ribbon-icons.png</LogicalName>
+    </EmbeddedResource>
     <AppDesigner Include="Properties\" />
   </ItemGroup>
 

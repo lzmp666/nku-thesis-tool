@@ -7,6 +7,22 @@ namespace ThesisEngine.Tests;
 public sealed class CommentDiagnosticMatcherTests
 {
     [Fact]
+    public void ReadsMultilineFieldsWithoutTruncatingGroupedActualValues()
+    {
+        const string comment = "规则：demo/western-font\r期望值：Times New Roman\r实际值：Cambria；Arial。[NKU-TOOL-ANNOTATION:v1][NKU-LOCATION:p0]";
+        Assert.Equal("Times New Roman", CommentDiagnosticMatcher.ReadCommentField(comment, "期望值"));
+        Assert.Equal("Cambria；Arial", CommentDiagnosticMatcher.ReadCommentField(comment, "实际值"));
+    }
+
+    [Fact]
+    public void StillReadsLegacyInlineCommentFields()
+    {
+        const string comment = "规则：demo/font-size。期望值：12pt；实际值：10.5pt。";
+        Assert.Equal("12pt", CommentDiagnosticMatcher.ReadCommentField(comment, "期望值"));
+        Assert.Equal("10.5pt", CommentDiagnosticMatcher.ReadCommentField(comment, "实际值"));
+    }
+
+    [Fact]
     public void UsesLocationToSelectTheMatchingRepeatedRule()
     {
         var diagnostics = new[]

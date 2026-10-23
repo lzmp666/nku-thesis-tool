@@ -166,7 +166,12 @@ public static class WordAnnotationWriter
 
     private static IReadOnlyList<RunTarget> ResolveTargets(XElement body, IReadOnlyList<Diagnostic> diagnostics)
     {
-        var paragraphs = body.Elements(W + "p").ToArray();
+        // Keep paragraph indexes aligned with WordFormattingReader, which flattens
+        // all body paragraphs in document order, including table-cell paragraphs.
+        // Text-box stories remain outside the main document snapshot.
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var targetMap = new Dictionary<(int Paragraph, int Run), RunTarget>();
         var targetByLocation = new Dictionary<string, RunTarget>(StringComparer.Ordinal);
         foreach (var diagnostic in diagnostics)

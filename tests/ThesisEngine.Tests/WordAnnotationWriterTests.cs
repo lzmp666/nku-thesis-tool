@@ -270,6 +270,43 @@ public sealed class WordAnnotationWriterTests
     }
 
     [Fact]
+    public void ResolvesDiagnosticLocationsAcrossTableCellParagraphs()
+    {
+        const string documentXml = """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Before table</w:t></w:r></w:p>
+                <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Table cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+                <w:p><w:r><w:t>After table</w:t></w:r></w:p>
+                <w:sectPr />
+              </w:body>
+            </w:document>
+            """;
+        var inputPath = CreatePackage(documentXml);
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            var diagnostic = new Diagnostic("demo/font-size", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "auto", "请改为宋体。");
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, [diagnostic]);
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var document = ReadXml(archive, "word/document.xml");
+            var tableRun = Assert.Single(document.Descendants(W + "tbl").Descendants(W + "r"), run => run.Descendants(W + "t").Any());
+            var followingRun = Assert.Single(document.Descendants(W + "body").Elements(W + "p").Last().Elements(W + "r"));
+            Assert.Equal("Table cell", string.Concat(tableRun.Descendants(W + "t").Select(text => text.Value)));
+            Assert.Equal("yellow", (string?)tableRun.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val"));
+            Assert.Equal("After table", string.Concat(followingRun.Descendants(W + "t").Select(text => text.Value)));
+            Assert.Null(followingRun.Element(W + "rPr")?.Element(W + "highlight"));
+        }
+        finally
+        {
+            File.Delete(inputPath);
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
     public void RefreshRemovesOnlyToolOwnedCommentsAndRestoresOriginalHighlight()
     {
         var inputPath = CreatePackage();
@@ -339,7 +376,7 @@ public sealed class WordAnnotationWriterTests
         }
     }
 
-    private static string CreatePackage()
+    private static string CreatePackage(string? documentXml = null)
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -355,7 +392,7 @@ public sealed class WordAnnotationWriterTests
               <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml" />
             </Relationships>
             """);
-        Add(archive, "word/document.xml", """
+        Add(archive, "word/document.xml", documentXml ?? """
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
               <w:body><w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" /><w:sz w:val="28" /><w:highlight w:val="pink" /><w:u w:val="single" /></w:rPr><w:t>原文内容</w:t></w:r></w:p><w:sectPr /></w:body>
             </w:document>

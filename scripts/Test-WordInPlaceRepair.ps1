@@ -61,7 +61,13 @@ function Assert-ToolMarks($Document, $Analysis, [string]$Operation) {
     $expected = Get-ExpectedToolMarkCount $Analysis
     $actual = Get-ToolMarkCount $Document
     Assert-Condition ($actual -eq $expected) ($Operation + ': expected ' + $expected + ' source marks, found ' + $actual + '.')
-    Assert-Condition ($Document.Comments.Count -eq 0) ($Operation + ': the tool must not create duplicate reply/resolve comments.')
+    $expectedComments = @($Analysis.Diagnostics).Count
+    Assert-Condition ($Document.Comments.Count -eq $expectedComments) ($Operation + ': expected one native comment per grouped issue.')
+    for ($index = 1; $index -le $Document.Comments.Count; $index++) {
+        $commentRange = $Document.Comments.Item($index).Range.Duplicate
+        $commentRange.TextRetrievalMode.IncludeHiddenText = $true
+        Assert-Condition ($commentRange.Text.Contains('[NKU-TOOL-ANNOTATION:v1]')) ($Operation + ': a native comment has lost its tool ownership marker.')
+    }
 }
 function Write-Snapshot($Document, [string]$Name) {
     $path = Join-Path $outputDirectory ($Name + '.docx')

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
 using ThesisAddIn.VSTO.Engine;
@@ -21,6 +23,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Label _ruleNotice = new Label();
         private readonly Label _status = new Label();
         private readonly ToolTip _toolTip = new ToolTip();
+        private readonly Image _headerImage;
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<int> _visibleIndices = new List<int>();
         private int _selectedIndex = -1;
@@ -36,13 +39,17 @@ namespace ThesisAddIn.VSTO.Ui
         public DiagnosticsPane()
         {
             Dock = DockStyle.Fill;
-            BackColor = Color.FromArgb(246, 248, 251);
-            ForeColor = Color.FromArgb(35, 43, 56);
+            BackColor = Color.FromArgb(250, 247, 241);
+            ForeColor = Color.FromArgb(44, 39, 42);
             Font = new Font("Microsoft YaHei UI", 9F);
 
             _summary.Dock = DockStyle.Fill;
-            _summary.Padding = new Padding(4, 7, 4, 2);
-            _summary.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+            _summary.Padding = new Padding(12, 5, 8, 3);
+            _summary.Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold);
+            _summary.ForeColor = Color.FromArgb(104, 31, 61);
+            _summary.BackColor = Color.Transparent;
+            _summary.AutoEllipsis = true;
+            _summary.TextAlign = ContentAlignment.MiddleLeft;
             _summary.Text = "格式问题";
             _summary.AccessibleName = "问题数量";
 
@@ -51,14 +58,14 @@ namespace ThesisAddIn.VSTO.Ui
             _ruleNotice.TextAlign = ContentAlignment.MiddleLeft;
             _ruleNotice.Padding = new Padding(8, 0, 5, 0);
             _ruleNotice.Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
-            _ruleNotice.ForeColor = Color.FromArgb(125, 78, 0);
-            _ruleNotice.BackColor = Color.FromArgb(255, 247, 220);
+            _ruleNotice.ForeColor = Color.FromArgb(116, 74, 28);
+            _ruleNotice.BackColor = Color.FromArgb(250, 239, 216);
             _ruleNotice.AccessibleName = "规则状态：演示规则，不代表正式合规结论";
             _toolTip.SetToolTip(_ruleNotice,
                 "当前 Word 插件连接的是 demo-0.1.0 演示规则，用于检查界面和修复流程；不是南开大学正式规则集，不能据此认定论文合规。");
             _ruleNotice.Paint += (sender, args) =>
             {
-                using (var pen = new Pen(Color.FromArgb(242, 216, 155)))
+                using (var pen = new Pen(Color.FromArgb(224, 202, 165)))
                     args.Graphics.DrawRectangle(pen, 0, 0, _ruleNotice.Width - 1, _ruleNotice.Height - 1);
             };
 
@@ -126,14 +133,26 @@ namespace ThesisAddIn.VSTO.Ui
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 5,
-                Padding = new Padding(9, 5, 9, 8)
+                Padding = new Padding(9, 6, 9, 8),
+                BackColor = BackColor
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 29F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 66F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 31F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+
+            _headerImage = LoadHeaderImage();
+            var header = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(248, 242, 233),
+                Margin = new Padding(0, 0, 0, 4),
+                Padding = new Padding(0)
+            };
+            header.Paint += (sender, args) => PaintHeader(args.Graphics, header.ClientRectangle);
+            header.Controls.Add(_summary);
 
             var searchSurface = new Panel
             {
@@ -172,7 +191,7 @@ namespace ThesisAddIn.VSTO.Ui
             searchLayout.Controls.Add(_clearSearchButton, 2, 0);
             searchSurface.Controls.Add(searchLayout);
 
-            layout.Controls.Add(_summary, 0, 0);
+            layout.Controls.Add(header, 0, 0);
             layout.Controls.Add(_ruleNotice, 0, 1);
             layout.Controls.Add(searchSurface, 0, 2);
             layout.Controls.Add(resultsSurface, 0, 3);
@@ -366,7 +385,6 @@ namespace ThesisAddIn.VSTO.Ui
                 try
                 {
                     _issueList.SelectedIndex = visibleIndex;
-                    _issueList.TopIndex = Math.Max(0, visibleIndex);
                 }
                 finally { _updatingList = false; }
             }
@@ -582,17 +600,19 @@ namespace ThesisAddIn.VSTO.Ui
             int width = Math.Max(160, _issueList.ClientSize.Width - 8);
             using (Graphics graphics = _issueList.CreateGraphics())
             {
-                float textWidth = Math.Max(120, width - 86);
-                int lines = 0;
-                lines += MeasureWrappedLines(graphics, diagnostic.Expected, Font, textWidth);
-                lines += MeasureWrappedLines(graphics, GetActualValues(diagnostic), Font, textWidth);
-                lines += MeasureWrappedLines(graphics, GetCompactLocation(_visibleIndices[e.Index], diagnostic), Font, textWidth);
-                lines += MeasureWrappedLines(graphics, BuildRecommendation(diagnostic), Font, textWidth);
-                string source = GetSource(diagnostic);
-                if (!string.IsNullOrWhiteSpace(source))
-                    lines += MeasureWrappedLines(graphics, source, Font, textWidth);
-                e.ItemHeight = Math.Max(174, 64 + Math.Min(lines, 11) * 17 +
-                    (GetOccurrenceCount(diagnostic) > 1 ? 15 : 0));
+                int left = 15;
+                int right = width - 15;
+                int height = 14 + 24 + 4;
+                using (var smallFont = new Font(Font.FontFamily, 8.4F, FontStyle.Regular))
+                using (var bodyFont = new Font(Font.FontFamily, 9F, FontStyle.Regular))
+                {
+                    height += MeasureCardLineHeight(graphics, diagnostic.Expected, left, right, bodyFont) + 4;
+                    height += MeasureCardLineHeight(graphics, GetActualValues(diagnostic), left, right, bodyFont) + 4;
+                    height += MeasureCardLineHeight(graphics,
+                        GetCompactLocation(_visibleIndices[e.Index], diagnostic), left, right, smallFont) + 4;
+                    height += MeasureCardLineHeight(graphics, BuildRecommendation(diagnostic), left, right, smallFont) + 10;
+                }
+                e.ItemHeight = Math.Max(126, height);
             }
         }
 
@@ -605,8 +625,8 @@ namespace ThesisAddIn.VSTO.Ui
             Rectangle card = Rectangle.Inflate(e.Bounds, -3, -3);
             card.Width = Math.Max(1, card.Width);
             card.Height = Math.Max(1, card.Height);
-            Color fill = selected ? Color.FromArgb(255, 253, 225) : Color.White;
-            Color border = selected ? Color.FromArgb(37, 112, 226) : Color.FromArgb(218, 225, 234);
+            Color fill = selected ? Color.FromArgb(255, 249, 233) : Color.White;
+            Color border = selected ? Color.FromArgb(132, 38, 76) : Color.FromArgb(225, 218, 211);
             using (GraphicsPath path = RoundedRectangle(card, 7))
             using (var brush = new SolidBrush(fill))
             using (var pen = new Pen(border, selected ? 1.5F : 1F))
@@ -615,33 +635,35 @@ namespace ThesisAddIn.VSTO.Ui
                 e.Graphics.FillPath(brush, path);
                 e.Graphics.DrawPath(pen, path);
             }
+            if (selected)
+            {
+                using (var accent = new SolidBrush(Color.FromArgb(132, 38, 76)))
+                    e.Graphics.FillRectangle(accent, card.Left + 1, card.Top + 8, 3, Math.Max(12, card.Height - 16));
+            }
 
             int left = card.Left + 12;
             int right = card.Right - 12;
             float y = card.Top + 10;
             using (var titleFont = new Font(Font, FontStyle.Bold))
-            using (var smallFont = new Font(Font.FontFamily, 8.2F, FontStyle.Regular))
+            using (var smallFont = new Font(Font.FontFamily, 8.4F, FontStyle.Regular))
             using (var bodyFont = new Font(Font.FontFamily, 9F, FontStyle.Regular))
-            using (var mutedBrush = new SolidBrush(Color.FromArgb(98, 111, 131)))
+            using (var mutedBrush = new SolidBrush(Color.FromArgb(112, 99, 102)))
             using (var textBrush = new SolidBrush(ForeColor))
-            using (var accentBrush = new SolidBrush(Color.FromArgb(39, 101, 191)))
+            using (var accentBrush = new SolidBrush(Color.FromArgb(111, 34, 66)))
             {
                 string title = DescribeRule(diagnostic.RuleId);
                 string count = GetOccurrenceCount(diagnostic) > 1 ? "共 " + GetOccurrenceCount(diagnostic) + " 处" : "1 处";
-                e.Graphics.DrawString(title, titleFont, textBrush, left, y);
+                using (var titleBrush = new SolidBrush(Color.FromArgb(104, 31, 61)))
+                    e.Graphics.DrawString(title, titleFont, titleBrush, left, y);
                 SizeF countSize = e.Graphics.MeasureString(count, smallFont);
                 e.Graphics.DrawString(count, smallFont, mutedBrush, Math.Max(left, right - countSize.Width), y + 2);
-                y += 23;
+                y += 25;
 
                 DrawCardLine(e.Graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
                 DrawCardLine(e.Graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
                 DrawCardLine(e.Graphics, "位置", GetCompactLocation(_visibleIndices[e.Index], diagnostic),
                     left, ref y, right, smallFont, mutedBrush);
                 DrawCardLine(e.Graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
-                string source = GetSource(diagnostic);
-                if (!string.IsNullOrWhiteSpace(source))
-                    DrawCardLine(e.Graphics, "依据", source, left, ref y, right, smallFont, mutedBrush);
-                y += 3;
             }
             e.DrawFocusRectangle();
         }
@@ -650,24 +672,56 @@ namespace ThesisAddIn.VSTO.Ui
             ref float y, int right, Font font, Brush valueBrush)
         {
             using (var labelFont = new Font(font.FontFamily, font.Size, FontStyle.Bold))
-            using (var labelBrush = new SolidBrush(Color.FromArgb(88, 101, 120)))
+            using (var labelBrush = new SolidBrush(Color.FromArgb(112, 99, 102)))
             {
+                const int labelColumnWidth = 43;
+                int textWidth = Math.Max(80, right - left - labelColumnWidth);
+                int rowHeight = MeasureCardLineHeight(graphics, value, left, right, font);
                 graphics.DrawString(label, labelFont, labelBrush, left, y);
-                int labelWidth = (int)Math.Ceiling(graphics.MeasureString(label + "：", labelFont).Width) + 2;
-                int textWidth = Math.Max(40, right - left - labelWidth);
-                SizeF measured = graphics.MeasureString(value ?? "—", font, textWidth);
-                Rectangle text = new Rectangle(left + labelWidth, (int)y, textWidth,
-                    Math.Max(20, (int)Math.Ceiling(measured.Height) + 2));
+                var text = new RectangleF(left + labelColumnWidth, y, textWidth, rowHeight);
                 graphics.DrawString(value ?? "—", font, valueBrush, text);
-                y += Math.Max(19, text.Height);
+                y += rowHeight + 4;
             }
         }
 
-        private static int MeasureWrappedLines(Graphics graphics, string value, Font font, float width)
+        private static int MeasureCardLineHeight(Graphics graphics, string value, int left, int right, Font font)
         {
-            if (string.IsNullOrWhiteSpace(value)) return 1;
-            SizeF size = graphics.MeasureString(value, font, (int)width);
-            return Math.Max(1, (int)Math.Ceiling(size.Height / Math.Max(1F, font.GetHeight(graphics))));
+            const int labelColumnWidth = 43;
+            int textWidth = Math.Max(80, right - left - labelColumnWidth);
+            SizeF size = graphics.MeasureString(string.IsNullOrWhiteSpace(value) ? "—" : value,
+                font, textWidth);
+            return Math.Max((int)Math.Ceiling(font.GetHeight(graphics)) + 3, (int)Math.Ceiling(size.Height) + 2);
+        }
+
+        private static Image LoadHeaderImage()
+        {
+            using (Stream stream = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("ThesisAddIn.VSTO.Assets.nku-campus-header.png"))
+            {
+                if (stream == null) return null;
+                using (Image source = Image.FromStream(stream)) return new Bitmap(source);
+            }
+        }
+
+        private void PaintHeader(Graphics graphics, Rectangle bounds)
+        {
+            if (_headerImage == null || bounds.Width <= 0 || bounds.Height <= 0) return;
+            int sourceHeight = Math.Min(_headerImage.Height,
+                Math.Max(1, (int)Math.Ceiling(_headerImage.Width * bounds.Height / (double)bounds.Width)));
+            int sourceTop = Math.Max(0, (_headerImage.Height - sourceHeight) / 2);
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(_headerImage, bounds,
+                new Rectangle(0, sourceTop, _headerImage.Width, sourceHeight), GraphicsUnit.Pixel);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _headerImage?.Dispose();
+                _toolTip.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
@@ -735,8 +789,8 @@ namespace ThesisAddIn.VSTO.Ui
         private static string BuildRecommendation(EngineDiagnostic diagnostic)
         {
             if (IsFixable(diagnostic))
-                return "将所选格式改为「" + (diagnostic.Expected ?? "") + "」；修复前会先预览。";
-            return "当前值无法安全自动修改，请依据规范核对后手动处理。";
+                return "可自动修复为「" + (diagnostic.Expected ?? "") + "」";
+            return "需人工核对，插件不会自动修改";
         }
 
         private static string DescribeUnsupportedScope(string value)

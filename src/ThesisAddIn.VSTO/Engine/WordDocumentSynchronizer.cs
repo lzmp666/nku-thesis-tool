@@ -20,7 +20,6 @@ namespace ThesisAddIn.VSTO.Engine
     /// </summary>
     public static class WordDocumentSynchronizer
     {
-        private const string ToolAuthor = "NKU Thesis Tool";
         private const string ToolMarker = "[NKU-TOOL-ANNOTATION:v1]";
         private const string ToolBookmarkPrefix = "_NKU_MARK_";
         private const string WorkingCopyVariable = "NKUThesisToolWorkingCopy";
@@ -314,6 +313,42 @@ namespace ThesisAddIn.VSTO.Engine
                         markMutation();
                     }
                 }
+
+                // Keep one native Word comment for each grouped issue. The comment is
+                // anchored to the first occurrence; every occurrence remains highlighted
+                // and the hidden location metadata keeps the issue list and hover in sync.
+                if (occurrences.Length > 0)
+                {
+                    string anchorLocation = occurrences[0];
+                    string visibleText = BuildVisibleCommentText(diagnostic);
+                    string hiddenMetadata = BuildHiddenCommentMetadata(diagnostic, anchorLocation,
+                        occurrences, freshOriginalHighlights);
+                    Word.Range anchor = ranges[anchorLocation].Duplicate;
+                    object commentText = visibleText + hiddenMetadata;
+                    Word.Comment comment = document.Comments.Add(anchor, ref commentText);
+                    markMutation();
+                    try
+                    {
+                        comment.Author = "NKU Thesis Tool";
+                        comment.Initial = "NT";
+                    }
+                    catch (System.Runtime.InteropServices.COMException)
+                    {
+                        // Some Word comment providers retain the signed-in author.
+                        // Ownership is identified by the private marker, not the author.
+                    }
+
+                    // The private markers are needed for refresh, hover and safe cleanup,
+                    // but must never appear in the user's visible comment.
+                    Word.Range hiddenRange = comment.Range.Duplicate;
+                    string insertedText = hiddenRange.Text ?? string.Empty;
+                    int markerOffset = insertedText.IndexOf(ToolMarker, StringComparison.Ordinal);
+                    if (markerOffset < 0)
+                        throw new InvalidDataException("Word 未保留问题批注的位置标记。");
+                    int metadataStart = hiddenRange.Start + markerOffset;
+                    hiddenRange.SetRange(metadataStart, metadataStart + hiddenMetadata.Length);
+                    hiddenRange.Font.Hidden = -1;
+                }
             }
             // This legacy marker identifies an analyzed document, not a separate copy.
             // Write it last; document variables do not create Word undo entries.
@@ -332,10 +367,6 @@ namespace ThesisAddIn.VSTO.Engine
                 if (text.IndexOf(ToolMarker, StringComparison.Ordinal) < 0)
                     continue;
 
-                string author = comment.Author ?? string.Empty;
-                if (!string.Equals(author, ToolAuthor, StringComparison.Ordinal))
-                    throw new InvalidDataException("检测到带工具标记但作者不匹配的批注，为保护用户批注已停止刷新。");
-
                 var record = new AnnotationRecord { Index = index };
                 MatchCollection matches = OccurrencePattern.Matches(text);
                 foreach (Match match in matches)
@@ -352,6 +383,56 @@ namespace ThesisAddIn.VSTO.Engine
                 records.Add(record);
             }
             return records;
+        }
+
+        private static string BuildVisibleCommentText(EngineDiagnostic diagnostic)
+        {
+            var fields = new List<string>();
+            string source = GetSourceReference(diagnostic);
+            if (!string.IsNullOrWhiteSpace(source)) fields.Add("要求参考来源：" + source);
+            fields.Add("规则：" + (diagnostic.RuleId ?? "未知"));
+            fields.Add("期望值：" + (diagnostic.Expected ?? "未知"));
+            fields.Add("实际值：" + (diagnostic.Actual ?? "未知"));
+            return string.Join(Environment.NewLine, fields) + "。";
+        }
+
+        private static string GetSourceReference(EngineDiagnostic diagnostic)
+        {
+            string message = diagnostic?.Message ?? string.Empty;
+            if ((diagnostic?.RuleId ?? string.Empty).StartsWith("NKU-REQ-", StringComparison.Ordinal))
+            {
+                int separator = message.IndexOf('：');
+                if (separator > 0) return message.Substring(0, separator);
+            }
+
+            const string sourcePrefix = "依据：";
+            if (message.StartsWith(sourcePrefix, StringComparison.Ordinal))
+            {
+                int end = message.IndexOf('。', sourcePrefix.Length);
+                if (end > sourcePrefix.Length) return message.Substring(sourcePrefix.Length, end - sourcePrefix.Length);
+            }
+
+            return (diagnostic?.RuleId ?? string.Empty).StartsWith("demo/", StringComparison.Ordinal)
+                ? "演示规则（仅用于验证插件流程）" : string.Empty;
+        }
+
+        private static string BuildHiddenCommentMetadata(EngineDiagnostic diagnostic, string anchorLocation,
+            IEnumerable<string> locations, IDictionary<string, int> originalHighlights)
+        {
+            var metadata = new StringBuilder();
+            metadata.Append(ToolMarker);
+            metadata.Append("[NKU-LOCATION:").Append(anchorLocation).Append(']');
+            if (originalHighlights.TryGetValue(anchorLocation, out int original))
+                metadata.Append("[NKU-HIGHLIGHT:").Append(GetHighlightName((Word.WdColorIndex)original)).Append(']');
+
+            foreach (string location in locations.Distinct(StringComparer.Ordinal))
+            {
+                if (!originalHighlights.TryGetValue(location, out int highlight))
+                    throw new InvalidDataException("问题批注缺少原始高亮元数据：" + location);
+                metadata.Append("[NKU-OCCURRENCE:").Append(location).Append('|')
+                    .Append(GetHighlightName((Word.WdColorIndex)highlight)).Append(']');
+            }
+            return metadata.ToString();
         }
 
         private static List<HighlightBookmarkRecord> ReadOwnedHighlightBookmarks(Word.Document document)

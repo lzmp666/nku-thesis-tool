@@ -27,8 +27,6 @@ namespace ThesisAddIn.VSTO
 
         /// <summary>批注正文里用于回填规则编号的片段，例如“规则：demo/east-asian-font。”。</summary>
         private static readonly Regex RuleIdPattern = new Regex(@"规则[:：]\s*(?<id>[A-Za-z0-9_\-/]+)", RegexOptions.Compiled);
-        private static readonly Regex ExpectedValuePattern = new Regex(@"期望值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
-        private static readonly Regex ActualValuePattern = new Regex(@"实际值[:：]\s*(?<value>.*?)(?:[；;。\r\n]|$)", RegexOptions.Compiled);
         private static readonly Regex CommentLocationPattern = new Regex(
             @"\[NKU-LOCATION:(?<location>word/document\.xml#paragraph\[\d+\]/run\[\d+\])\]",
             RegexOptions.Compiled);
@@ -73,7 +71,8 @@ namespace ThesisAddIn.VSTO
                 OnRibbonVerifyResolved,
                 OnRibbonNavigateIssue,
                 OnRibbonNavigateOccurrence,
-                OpenDiagnosticsPane,
+                SetDiagnosticsPaneVisible,
+                IsDiagnosticsPaneVisible,
                 () => TryGetPaneForActiveWindow()?.CanFixSelected == true,
                 () => TryGetPaneForActiveWindow()?.HasFixableDiagnostics == true,
                 () => TryGetPaneForActiveWindow()?.CanResolveSelected == true,
@@ -82,27 +81,60 @@ namespace ThesisAddIn.VSTO
             return _ribbon;
         }
 
-        private void OpenDiagnosticsPane()
+        private void SetDiagnosticsPaneVisible(bool visible)
         {
             try
             {
-                DiagnosticsPane pane = GetPaneForWindow(Application.ActiveWindow);
-                if (pane == null || _taskPane == null)
+                Word.Window window = Application.ActiveWindow;
+                EnsureTaskPaneForWindow(window);
+                CustomTaskPane taskPane = FindTaskPaneForWindow(window);
+                if (taskPane == null)
                 {
                     throw new InvalidOperationException("当前 Word 窗口没有可用的检查面板。");
                 }
 
-                // WindowActivate 会复用已有窗格；用户关闭的窗格仍在集合中，
-                // 因此必须明确恢复 Visible，不能仅再次调用创建方法。
-                _taskPane.Visible = true;
-                WriteStartupLog("已通过功能区打开当前文档的检查面板。");
+                taskPane.Visible = visible;
+                WriteStartupLog(visible ? "已通过功能区打开当前文档的问题检索列表。" : "已通过功能区关闭当前文档的问题检索列表。");
             }
             catch (Exception exception)
             {
-                WriteStartupLog("通过功能区打开检查面板失败：" + exception);
-                MessageBox.Show("未能打开检查面板。请先打开 Word 文档，再重试。",
+                WriteStartupLog("通过功能区切换问题检索列表失败：" + exception);
+                MessageBox.Show("未能切换问题检索列表。请先打开 Word 文档，再重试。",
                     TaskPaneTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private bool IsDiagnosticsPaneVisible()
+        {
+            try
+            {
+                CustomTaskPane taskPane = FindTaskPaneForWindow(Application.ActiveWindow);
+                return taskPane != null && taskPane.Visible;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private CustomTaskPane FindTaskPaneForWindow(Word.Window window)
+        {
+            if (window == null) return null;
+            int windowHandle = window.Hwnd;
+            for (int i = 0; i < CustomTaskPanes.Count; i++)
+            {
+                CustomTaskPane taskPane = CustomTaskPanes[i];
+                try
+                {
+                    Word.Window paneWindow = taskPane.Window as Word.Window;
+                    if (paneWindow != null && paneWindow.Hwnd == windowHandle) return taskPane;
+                }
+                catch (Exception)
+                {
+                    // Skip panes whose Word window is closing.
+                }
+            }
+            return null;
         }
 
         private void OnRibbonAnalyze()
@@ -529,7 +561,8 @@ namespace ThesisAddIn.VSTO
             {
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
                 // The right pane is only a searchable issue index; all actions live on the ribbon.
-                taskPane.Width = 360;
+                taskPane.Width = 390;
+                taskPane.VisibleChanged += OnTaskPaneVisibleChanged;
                 taskPane.Visible = true;
                 _taskPane = taskPane;
                 _pane = pane;
@@ -576,7 +609,8 @@ namespace ThesisAddIn.VSTO
                     Word.Window paneWindow = taskPane.Window as Word.Window;
                     if (paneWindow != null && paneWindow.Hwnd == windowHandle)
                     {
-                        taskPane.Visible = true;
+                        // Keep the user's explicit open/closed choice. Ribbon commands can
+                        // still work against the pane's state while the search list is hidden.
                         return taskPane.Control as DiagnosticsPane;
                     }
                 }
@@ -595,6 +629,11 @@ namespace ThesisAddIn.VSTO
             pane.DiagnosticSelected += OnDiagnosticSelected;
             pane.StateChanged += OnPaneStateChanged;
             return pane;
+        }
+
+        private void OnTaskPaneVisibleChanged(object sender, EventArgs e)
+        {
+            _ribbon?.Invalidate();
         }
 
         private void ActivatePaneFromSender(object sender)
@@ -866,24 +905,25 @@ namespace ThesisAddIn.VSTO
 
             Word.Document document;
             string contextError;
-            if (!TryGetDocumentForPane(pane, out document, out _, out contextError))
+            Word.Window window;
+            if (!TryGetDocumentForPane(pane, out document, out window, out contextError))
             {
                 return contextError;
             }
 
-            string snapshot = CreateTemporaryDocxPath("navigate");
+            string locationKey = selectedLocation ?? diagnostic.Location;
             try
             {
-                SaveDocumentCopy(document, snapshot);
-                Word.Range range;
-                string rangeError;
-                if (!WordDocumentSynchronizer.TryGetRunRange(document, snapshot,
-                    selectedLocation ?? diagnostic.Location, out range, out rangeError))
-                    return rangeError;
+                if (window == null || !_occurrenceRangesByWindow.TryGetValue(window.Hwnd,
+                    out Dictionary<string, Word.Range> cachedRanges)
+                    || !cachedRanges.TryGetValue(locationKey, out Word.Range cachedRange)
+                    || cachedRange == null)
+                    return "原文定位缓存已失效，请重新分析当前文档后再定位。";
+
                 // 程序化选中段落会触发 WindowSelectionChange。重叠批注无法由段落选区
                 // 唯一辨认，忽略这一次回调，避免导航到后续问题时又切回第一条批注。
                 _isNavigatingToDiagnostic = true;
-                range.Select();
+                cachedRange.Duplicate.Select();
                 return "已定位到" + DocumentLocator.Describe(location) + "：" + DiagnosticsPane.DescribeRule(diagnostic.RuleId) + "。";
             }
             catch (Exception exception)
@@ -893,7 +933,6 @@ namespace ThesisAddIn.VSTO
             finally
             {
                 _isNavigatingToDiagnostic = false;
-                TryDelete(snapshot);
             }
         }
 
@@ -983,6 +1022,13 @@ namespace ThesisAddIn.VSTO
                 _lastHoveredWindowHandle = windowHandle;
                 _lastHoveredCursorX = cursor.X;
                 _lastHoveredCursorY = cursor.Y;
+
+                if (_pane.IsHandleCreated && _pane.RectangleToScreen(_pane.ClientRectangle).Contains(cursor))
+                {
+                    // The polling bridge is only for document text. Do no Word COM work
+                    // while the pointer is moving through the searchable issue list.
+                    return;
+                }
 
                 Word.Range range = window.RangeFromPoint(cursor.X, cursor.Y) as Word.Range;
                 // Hover sync is for the document body only. Word can return an
@@ -1077,7 +1123,7 @@ namespace ThesisAddIn.VSTO
             catch (Exception exception)
             {
                 _occurrenceRangesByWindow.Remove(windowHandle);
-                WriteStartupLog("未能缓存合并问题位置，侧栏的上一处/下一处仍可用：" + exception.Message);
+                WriteStartupLog("未能缓存问题位置，请重新分析当前文档后再定位：" + exception.Message);
             }
         }
 
@@ -1158,16 +1204,16 @@ namespace ThesisAddIn.VSTO
                     commentText.TextRetrievalMode.IncludeHiddenText = true;
                     string text = commentText.Text ?? string.Empty;
                     Match ruleMatch = RuleIdPattern.Match(text);
-                    Match expectedMatch = ExpectedValuePattern.Match(text);
-                    Match actualMatch = ActualValuePattern.Match(text);
+                    string expectedValue = CommentDiagnosticMatcher.ReadCommentField(text, "期望值");
+                    string actualValue = CommentDiagnosticMatcher.ReadCommentField(text, "实际值");
                     Match locationMatch = CommentLocationPattern.Match(text);
-                    if (ruleMatch.Success && expectedMatch.Success && actualMatch.Success)
+                    if (ruleMatch.Success && expectedValue.Length > 0 && actualValue.Length > 0)
                     {
                         matches.Add(new[]
                         {
                             ruleMatch.Groups["id"].Value.Trim(),
-                            expectedMatch.Groups["value"].Value.Trim(),
-                            actualMatch.Groups["value"].Value.Trim(),
+                            expectedValue,
+                            actualValue,
                             locationMatch.Success ? locationMatch.Groups["location"].Value.Trim() : string.Empty
                         });
                     }
@@ -1385,11 +1431,6 @@ namespace ThesisAddIn.VSTO
                 for (int i = 1; i <= document.Comments.Count; i++)
                 {
                     Word.Comment comment = document.Comments[i];
-                    if (!string.Equals(comment.Author, "NKU Thesis Tool", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
-
                     Word.Range text = comment.Range.Duplicate;
                     text.TextRetrievalMode.IncludeHiddenText = true;
                     if ((text.Text ?? string.Empty).IndexOf("[NKU-TOOL-ANNOTATION:v1]", StringComparison.Ordinal) >= 0)
