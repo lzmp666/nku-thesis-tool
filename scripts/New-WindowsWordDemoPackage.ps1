@@ -126,6 +126,8 @@ try {
     $buildInfo = [ordered]@{
         product = 'NKU Thesis Tool Word Demo'
         sourceRevision = $revision
+        deploymentVersion = ([xml](Get-Content -LiteralPath (Join-Path $addinOutput 'ThesisAddIn.VSTO.vsto') -Raw)).SelectSingleNode('/*/*[local-name()="assemblyIdentity"]').GetAttribute('version')
+        addinFileVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $addinOutput 'ThesisAddIn.VSTO.dll')).FileVersion
         builtAtUtc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         signingCertificateThumbprint = $certificate.Thumbprint
         wordAcceptanceChecklistIncluded = $acceptanceIncluded

@@ -106,7 +106,7 @@ namespace ThesisAddIn.VSTO.Ui
                   screentip=""南开校园主题"" supertip=""校园意象、青莲紫与暖金色；点击查看完整主题图。"" />
           <box id=""NkuCampusBrandCopy"" boxStyle=""vertical"">
             <labelControl id=""NkuCampusMotto"" label=""允公允能 · 日新月异"" />
-            <labelControl id=""NkuCampusProduct"" label=""NKU THESIS TOOL"" />
+            <labelControl id=""NkuCampusProduct"" getLabel=""GetBuildLabel"" />
             <labelControl id=""NkuCampusWorkflow"" label=""本页检查 · 预览修复 · 自主保存"" />
           </box>
           </box>
@@ -254,13 +254,20 @@ namespace ThesisAddIn.VSTO.Ui
             using (Image illustration = stream == null ? null : Image.FromStream(stream))
             {
                 var art = new PictureBox { Dock = DockStyle.Fill, Image = illustration, SizeMode = PictureBoxSizeMode.Zoom };
-                var caption = new Label { Dock = DockStyle.Bottom, Height = (int)(56 * scale), TextAlign = ContentAlignment.MiddleCenter,
+                var caption = new Label { Dock = DockStyle.Bottom, Height = (int)(76 * scale), TextAlign = ContentAlignment.MiddleCenter,
                     ForeColor = Color.FromArgb(118, 34, 85), Font = new Font("Microsoft YaHei UI", 11F * 96F / 72F * scale, GraphicsUnit.Pixel),
-                    Text = "允公允能 · 日新月异\r\n校徽取自南开大学官网；校园主题插画由 GPT-image 生成。" };
+                    Text = GetBuildLabel(control) + "\r\n允公允能 · 日新月异\r\n校徽取自南开大学官网；校园主题插画由 GPT-image 生成。" };
                 dialog.Controls.Add(art);
                 dialog.Controls.Add(caption);
                 if (context == null) dialog.ShowDialog(); else dialog.ShowDialog(context);
             }
+        }
+
+        public string GetBuildLabel(Office.IRibbonControl control)
+        {
+            string version = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "版本未知";
+            return "预览版 " + version.Replace("-preview.", " · ");
         }
 
         [DllImport("user32.dll")]

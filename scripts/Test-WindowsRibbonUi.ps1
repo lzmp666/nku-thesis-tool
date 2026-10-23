@@ -33,6 +33,14 @@ $show = [Action[bool]]{ param($value) }
 $ribbon = [ThesisAddIn.VSTO.Ui.ThesisRibbon]::new($action,$action,$action,$action,$navigate,$navigate,$show,$visibleCallback,$state,$state,$state,$state,$state)
 $ui = New-Object UiProbe
 $ribbon.OnRibbonLoad($ui)
+[xml]$deployment = Get-Content -LiteralPath (Join-Path $AddinOutputDirectory 'ThesisAddIn.VSTO.vsto') -Raw
+$deploymentVersion = $deployment.SelectSingleNode('/*/*[local-name()="assemblyIdentity"]').GetAttribute('version')
+$fileVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $AddinOutputDirectory 'ThesisAddIn.VSTO.dll')).FileVersion
+if ($deploymentVersion -ne $fileVersion) { throw 'Deployment version and DLL file version differ; bump both before distributing an update.' }
+$buildLabel = $ribbon.GetBuildLabel($null)
+$information = $assembly.GetCustomAttributes([Reflection.AssemblyInformationalVersionAttribute], $false)[0].InformationalVersion
+if ([string]::IsNullOrWhiteSpace($information) -or -not $buildLabel.Contains($information.Split('-')[0])) { throw 'The Ribbon does not expose its loaded assembly version.' }
+Write-Output ('PASS: deployment/DLL version ' + $deploymentVersion + '; loaded Ribbon identity: ' + $buildLabel)
 $ui.Changes.Clear()
 $ribbon.Invalidate()
 if ($ui.Changes.Count -ne 0) { throw 'Unchanged state invalidated controls.' }

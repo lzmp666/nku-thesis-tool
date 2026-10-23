@@ -208,6 +208,10 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
+            System.Reflection.Assembly loadedAssembly = typeof(ThisAddIn).Assembly;
+            WriteStartupLog("实际加载插件：version=" + loadedAssembly.GetName().Version
+                + "; module=" + loadedAssembly.ManifestModule.ModuleVersionId
+                + "; path=" + loadedAssembly.Location);
             // 任何未捕获的异常都写进日志：未激活的 Office 环境下部分 Word 调用会抛
             // 含糊的 COM 错误，只有日志能定位到具体位置。
             AppDomain.CurrentDomain.UnhandledException += (s, args) =>
