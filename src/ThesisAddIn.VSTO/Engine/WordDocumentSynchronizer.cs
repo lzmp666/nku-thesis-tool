@@ -478,28 +478,38 @@ namespace ThesisAddIn.VSTO.Engine
         private static List<HighlightBookmarkRecord> ReadOwnedHighlightBookmarks(Word.Document document)
         {
             var records = new List<HighlightBookmarkRecord>();
-            for (int index = document.Bookmarks.Count; index >= 1; index--)
+            Word.Bookmarks bookmarks = document.Bookmarks;
+            bool previousShowHidden = bookmarks.ShowHidden;
+            // Our underscore-prefixed recovery bookmarks are hidden. Word omits
+            // them from Count/index enumeration unless ShowHidden is enabled.
+            // Restore the caller's setting after taking the owned-range snapshot.
+            try
             {
-                Word.Bookmark bookmark = document.Bookmarks[index];
-                string name = bookmark.Name ?? string.Empty;
-                if (!name.StartsWith(ToolBookmarkPrefix, StringComparison.Ordinal)) continue;
-                int separator = name.LastIndexOf('_');
-                if (separator <= ToolBookmarkPrefix.Length ||
-                    !int.TryParse(name.Substring(separator + 1), NumberStyles.HexNumber,
-                        CultureInfo.InvariantCulture, out int originalHighlight))
-                    throw new InvalidDataException("插件的高亮恢复标记无效；为避免改动文档，已停止刷新。");
-                try { _ = GetHighlightName((Word.WdColorIndex)originalHighlight); }
-                catch (InvalidDataException)
+                bookmarks.ShowHidden = true;
+                for (int index = bookmarks.Count; index >= 1; index--)
                 {
-                    throw new InvalidDataException("插件的高亮恢复颜色无效；为避免改动文档，已停止刷新。");
+                    Word.Bookmark bookmark = bookmarks[index];
+                    string name = bookmark.Name ?? string.Empty;
+                    if (!name.StartsWith(ToolBookmarkPrefix, StringComparison.Ordinal)) continue;
+                    int separator = name.LastIndexOf('_');
+                    if (separator <= ToolBookmarkPrefix.Length ||
+                        !int.TryParse(name.Substring(separator + 1), NumberStyles.HexNumber,
+                            CultureInfo.InvariantCulture, out int originalHighlight))
+                        throw new InvalidDataException("插件的高亮恢复标记无效；为避免改动文档，已停止刷新。");
+                    try { _ = GetHighlightName((Word.WdColorIndex)originalHighlight); }
+                    catch (InvalidDataException)
+                    {
+                        throw new InvalidDataException("插件的高亮恢复颜色无效；为避免改动文档，已停止刷新。");
+                    }
+                    records.Add(new HighlightBookmarkRecord
+                    {
+                        Name = name,
+                        OriginalHighlight = originalHighlight,
+                        Range = bookmark.Range.Duplicate
+                    });
                 }
-                records.Add(new HighlightBookmarkRecord
-                {
-                    Name = name,
-                    OriginalHighlight = originalHighlight,
-                    Range = bookmark.Range.Duplicate
-                });
             }
+            finally { bookmarks.ShowHidden = previousShowHidden; }
             return records;
         }
 
@@ -722,8 +732,7 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 if (!string.Equals(patch.DesiredAfter, "center", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("题注对齐目标值无效。");
-                actual = Convert.ToInt32(range.ParagraphFormat.Alignment, CultureInfo.InvariantCulture) ==
-                    (int)Word.WdParagraphAlignment.wdAlignParagraphCenter ? "center" : "not-center";
+                actual = WordParagraphValueMapper.Alignment((int)range.ParagraphFormat.Alignment);
                 EnsureBeforeValue(patch, actual);
                 return;
             }
@@ -731,8 +740,8 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 if (!string.Equals(patch.DesiredAfter, "single", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("题注行距目标值无效。");
-                actual = Convert.ToInt32(range.ParagraphFormat.LineSpacingRule, CultureInfo.InvariantCulture) ==
-                    (int)Word.WdLineSpacing.wdLineSpaceSingle ? "single" : "not-single";
+                actual = WordParagraphValueMapper.LineSpacing((int)range.ParagraphFormat.LineSpacingRule,
+                    range.ParagraphFormat.LineSpacing);
                 EnsureBeforeValue(patch, actual);
                 return;
             }

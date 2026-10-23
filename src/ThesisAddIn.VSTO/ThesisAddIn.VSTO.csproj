@@ -183,6 +183,7 @@
     </Compile>
     <Compile Include="Engine\DocumentLocator.cs" />
     <Compile Include="Engine\WordDocumentSynchronizer.cs" />
+    <Compile Include="Engine\WordParagraphValueMapper.cs" />
     <Compile Include="Engine\DocxSnapshotFingerprint.cs" />
     <Compile Include="Engine\FlatOpcPackageWriter.cs" />
     <Compile Include="Engine\EngineGateway.cs" />
