@@ -371,7 +371,9 @@ public static class WordAnnotationWriter
             !int.TryParse(match.Groups["paragraph"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var paragraphIndex) ||
             !int.TryParse(match.Groups["run"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var runIndex))
             throw new InvalidDataException("An owned comment has an unsupported location: " + location);
-        var paragraphs = body.Elements(W + "p").ToArray();
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         if (paragraphIndex >= paragraphs.Length)
             throw new InvalidDataException("An owned comment paragraph no longer exists: " + location);
         var runs = paragraphs[paragraphIndex].Elements(W + "r")

@@ -7,6 +7,35 @@ namespace ThesisEngine.Tests;
 public sealed class WordFormattingReaderTests
 {
     [Fact]
+    public void InheritsRenamedDefaultParagraphStyleWhenWordOmitsPStyle()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>
+              <w:style w:type="paragraph" w:default="1" w:styleId="a1">
+                <w:name w:val="Normal"/><w:pPr><w:jc w:val="both"/></w:pPr>
+                <w:rPr><w:rFonts w:eastAsia="宋体" w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/></w:rPr>
+              </w:style>
+            </w:styles>
+            """;
+        var path = CreatePackage(Document(
+            "<w:p><w:r><w:t>正常正文 English</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"21\"/></w:rPr><w:t>直接格式覆盖</w:t></w:r></w:p>"), styles);
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+            var inherited = Assert.Single(snapshot.Paragraphs[0].Runs);
+            Assert.Equal("宋体", inherited.EastAsiaFont);
+            Assert.Equal("Times New Roman", inherited.AsciiSlotFont);
+            Assert.Equal(12, inherited.FontSizePt);
+            var direct = Assert.Single(snapshot.Paragraphs[1].Runs);
+            Assert.Equal("黑体", direct.EastAsiaFont);
+            Assert.Equal(10.5, direct.FontSizePt);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void ReadsDirectFontsAndHalfPointSizeWithoutChangingThePackage()
     {
         var path = CreatePackage(Document(

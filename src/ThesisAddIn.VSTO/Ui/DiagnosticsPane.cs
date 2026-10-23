@@ -5,6 +5,7 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
 using ThesisAddIn.VSTO.Engine;
@@ -17,7 +18,7 @@ namespace ThesisAddIn.VSTO.Ui
         private const string SearchPlaceholder = "搜索问题（例：类型:西文字体 期望:Times New Roman）";
         private readonly TextBox _searchBox = new TextBox();
         private readonly Button _clearSearchButton = new Button();
-        private readonly ListBox _issueList = new ListBox();
+        private readonly StableIssueListBox _issueList = new StableIssueListBox();
         private readonly Label _emptyResults = new Label();
         private readonly Label _summary = new Label();
         private readonly Label _ruleNotice = new Label();
@@ -32,6 +33,8 @@ namespace ThesisAddIn.VSTO.Ui
         private bool _isShowingPlaceholder;
         private bool _updatingList;
         private bool _analysisSucceeded;
+        private float _uiScale = 1F;
+        private readonly List<Font> _scaledFonts = new List<Font>();
 
         public event EventHandler DiagnosticSelected;
         public event EventHandler StateChanged;
@@ -39,6 +42,7 @@ namespace ThesisAddIn.VSTO.Ui
         public DiagnosticsPane()
         {
             Dock = DockStyle.Fill;
+            AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.FromArgb(250, 247, 241);
             ForeColor = Color.FromArgb(44, 39, 42);
             Font = new Font("Microsoft YaHei UI", 9F);
@@ -198,6 +202,51 @@ namespace ThesisAddIn.VSTO.Ui
             layout.Controls.Add(_status, 0, 4);
             Controls.Add(layout);
         }
+
+        internal int ConfigureForOfficeWindow(int windowHandle)
+        {
+            uint dpi = 96;
+            try { dpi = GetDpiForWindow(new IntPtr(windowHandle)); }
+            catch (EntryPointNotFoundException) { }
+            _uiScale = Math.Max(1F, Math.Min(4F, dpi / 96F));
+            var controls = new List<Control>();
+            CollectControls(this, controls);
+            var fonts = controls.Select(control => control.Font).ToArray();
+            for (int i = 0; i < controls.Count; i++)
+            {
+                Control control = controls[i];
+                var font = new Font(fonts[i].FontFamily, fonts[i].SizeInPoints * 96F / 72F * _uiScale,
+                    fonts[i].Style, GraphicsUnit.Pixel);
+                _scaledFonts.Add(font);
+                control.Font = font;
+                control.Padding = ScalePadding(control.Padding);
+                control.Margin = ScalePadding(control.Margin);
+                if (control is TableLayoutPanel table)
+                {
+                    foreach (RowStyle row in table.RowStyles)
+                        if (row.SizeType == SizeType.Absolute) row.Height *= _uiScale;
+                    foreach (ColumnStyle column in table.ColumnStyles)
+                        if (column.SizeType == SizeType.Absolute) column.Width *= _uiScale;
+                }
+            }
+            return (int)Math.Round(390F * _uiScale);
+        }
+
+        private Padding ScalePadding(Padding value) => new Padding(
+            (int)Math.Round(value.Left * _uiScale), (int)Math.Round(value.Top * _uiScale),
+            (int)Math.Round(value.Right * _uiScale), (int)Math.Round(value.Bottom * _uiScale));
+
+        private static void CollectControls(Control control, List<Control> result)
+        {
+            result.Add(control);
+            foreach (Control child in control.Controls) CollectControls(child, result);
+        }
+
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
+
+        private Font LogicalFont(float points, FontStyle style = FontStyle.Regular) =>
+            new Font(Font.FontFamily, points * 96F / 72F, style, GraphicsUnit.Pixel);
 
         public EngineDiagnostic SelectedDiagnostic =>
             _selectedIndex >= 0 && _selectedIndex < _diagnostics.Count ? _diagnostics[_selectedIndex] : null;
@@ -384,7 +433,8 @@ namespace ThesisAddIn.VSTO.Ui
                 _updatingList = true;
                 try
                 {
-                    _issueList.SelectedIndex = visibleIndex;
+                    if (_issueList.SelectedIndex != visibleIndex)
+                        _issueList.SelectedIndex = visibleIndex;
                 }
                 finally { _updatingList = false; }
             }
@@ -593,18 +643,18 @@ namespace ThesisAddIn.VSTO.Ui
         {
             if (e.Index < 0 || e.Index >= _visibleIndices.Count)
             {
-                e.ItemHeight = 100;
+                e.ItemHeight = (int)Math.Ceiling(100 * _uiScale);
                 return;
             }
             EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
-            int width = Math.Max(160, _issueList.ClientSize.Width - 8);
+            int width = Math.Max(160, (int)(_issueList.ClientSize.Width / _uiScale) - 8);
             using (Graphics graphics = _issueList.CreateGraphics())
             {
                 int left = 15;
                 int right = width - 15;
                 int height = 14 + 24 + 4;
-                using (var smallFont = new Font(Font.FontFamily, 8.4F, FontStyle.Regular))
-                using (var bodyFont = new Font(Font.FontFamily, 9F, FontStyle.Regular))
+                using (var smallFont = LogicalFont(8.4F))
+                using (var bodyFont = LogicalFont(9F))
                 {
                     height += MeasureCardLineHeight(graphics, diagnostic.Expected, left, right, bodyFont) + 4;
                     height += MeasureCardLineHeight(graphics, GetActualValues(diagnostic), left, right, bodyFont) + 4;
@@ -612,7 +662,7 @@ namespace ThesisAddIn.VSTO.Ui
                         GetCompactLocation(_visibleIndices[e.Index], diagnostic), left, right, smallFont) + 4;
                     height += MeasureCardLineHeight(graphics, BuildRecommendation(diagnostic), left, right, smallFont) + 10;
                 }
-                e.ItemHeight = Math.Max(126, height);
+                e.ItemHeight = (int)Math.Ceiling(Math.Max(126, height) * _uiScale);
             }
         }
 
@@ -620,9 +670,23 @@ namespace ThesisAddIn.VSTO.Ui
         {
             e.DrawBackground();
             if (e.Index < 0 || e.Index >= _visibleIndices.Count) return;
-            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
             bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            Rectangle card = Rectangle.Inflate(e.Bounds, -3, -3);
+            GraphicsState state = e.Graphics.Save();
+            try
+            {
+                e.Graphics.ScaleTransform(_uiScale, _uiScale);
+                var bounds = new Rectangle((int)(e.Bounds.X / _uiScale), (int)(e.Bounds.Y / _uiScale),
+                    (int)(e.Bounds.Width / _uiScale), (int)(e.Bounds.Height / _uiScale));
+                DrawIssueCard(e.Graphics, bounds, e.Index, selected);
+            }
+            finally { e.Graphics.Restore(state); }
+            e.DrawFocusRectangle();
+        }
+
+        private void DrawIssueCard(Graphics graphics, Rectangle bounds, int index, bool selected)
+        {
+            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[index]];
+            Rectangle card = Rectangle.Inflate(bounds, -3, -3);
             card.Width = Math.Max(1, card.Width);
             card.Height = Math.Max(1, card.Height);
             Color fill = selected ? Color.FromArgb(255, 249, 233) : Color.White;
@@ -631,22 +695,22 @@ namespace ThesisAddIn.VSTO.Ui
             using (var brush = new SolidBrush(fill))
             using (var pen = new Pen(border, selected ? 1.5F : 1F))
             {
-                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                e.Graphics.FillPath(brush, path);
-                e.Graphics.DrawPath(pen, path);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.FillPath(brush, path);
+                graphics.DrawPath(pen, path);
             }
             if (selected)
             {
                 using (var accent = new SolidBrush(Color.FromArgb(132, 38, 76)))
-                    e.Graphics.FillRectangle(accent, card.Left + 1, card.Top + 8, 3, Math.Max(12, card.Height - 16));
+                    graphics.FillRectangle(accent, card.Left + 1, card.Top + 8, 3, Math.Max(12, card.Height - 16));
             }
 
             int left = card.Left + 12;
             int right = card.Right - 12;
             float y = card.Top + 10;
-            using (var titleFont = new Font(Font, FontStyle.Bold))
-            using (var smallFont = new Font(Font.FontFamily, 8.4F, FontStyle.Regular))
-            using (var bodyFont = new Font(Font.FontFamily, 9F, FontStyle.Regular))
+            using (var titleFont = LogicalFont(9.5F, FontStyle.Bold))
+            using (var smallFont = LogicalFont(8.4F))
+            using (var bodyFont = LogicalFont(9F))
             using (var mutedBrush = new SolidBrush(Color.FromArgb(112, 99, 102)))
             using (var textBrush = new SolidBrush(ForeColor))
             using (var accentBrush = new SolidBrush(Color.FromArgb(111, 34, 66)))
@@ -654,24 +718,23 @@ namespace ThesisAddIn.VSTO.Ui
                 string title = DescribeRule(diagnostic.RuleId);
                 string count = GetOccurrenceCount(diagnostic) > 1 ? "共 " + GetOccurrenceCount(diagnostic) + " 处" : "1 处";
                 using (var titleBrush = new SolidBrush(Color.FromArgb(104, 31, 61)))
-                    e.Graphics.DrawString(title, titleFont, titleBrush, left, y);
-                SizeF countSize = e.Graphics.MeasureString(count, smallFont);
-                e.Graphics.DrawString(count, smallFont, mutedBrush, Math.Max(left, right - countSize.Width), y + 2);
+                    graphics.DrawString(title, titleFont, titleBrush, left, y);
+                SizeF countSize = graphics.MeasureString(count, smallFont);
+                graphics.DrawString(count, smallFont, mutedBrush, Math.Max(left, right - countSize.Width), y + 2);
                 y += 25;
 
-                DrawCardLine(e.Graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
-                DrawCardLine(e.Graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
-                DrawCardLine(e.Graphics, "位置", GetCompactLocation(_visibleIndices[e.Index], diagnostic),
+                DrawCardLine(graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
+                DrawCardLine(graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
+                DrawCardLine(graphics, "位置", GetCompactLocation(_visibleIndices[index], diagnostic),
                     left, ref y, right, smallFont, mutedBrush);
-                DrawCardLine(e.Graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
+                DrawCardLine(graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
             }
-            e.DrawFocusRectangle();
         }
 
         private static void DrawCardLine(Graphics graphics, string label, string value, int left,
             ref float y, int right, Font font, Brush valueBrush)
         {
-            using (var labelFont = new Font(font.FontFamily, font.Size, FontStyle.Bold))
+            using (var labelFont = new Font(font.FontFamily, font.Size, FontStyle.Bold, font.Unit))
             using (var labelBrush = new SolidBrush(Color.FromArgb(112, 99, 102)))
             {
                 const int labelColumnWidth = 43;
@@ -722,6 +785,7 @@ namespace ThesisAddIn.VSTO.Ui
                 _toolTip.Dispose();
             }
             base.Dispose(disposing);
+            if (disposing) foreach (Font font in _scaledFonts) font.Dispose();
         }
 
         private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)

@@ -7,6 +7,37 @@ namespace ThesisEngine.Tests;
 public sealed class DocxSnapshotFingerprintTests
 {
     [Fact]
+    public void OwnedCommentRunReserializationDoesNotBlockRepairsButTextAndHumanCommentsAreProtected()
+    {
+        const string ns = "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"";
+        var directory = Path.Combine(Path.GetTempPath(), "nku-comment-fingerprint-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var paths = new[] { "first", "reserialized", "edited", "human" }.Select(name => Path.Combine(directory, name + ".docx")).ToArray();
+        try
+        {
+            for (int i = 0; i < paths.Length; i++)
+            {
+                string body = i == 0
+                    ? "<w:r><w:t>期望值：宋体</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t>[NKU-TOOL-ANNOTATION:v1]</w:t></w:r>"
+                    : "<w:r><w:rPr><w:rFonts w:ascii=\"Arial\"/></w:rPr><w:t>期望值：</w:t></w:r><w:r><w:t>" +
+                        (i == 2 ? "黑体" : "宋体") + "[NKU-TOOL-ANNOTATION:v1]</w:t></w:r>";
+                using var archive = ZipFile.Open(paths[i], ZipArchiveMode.Create);
+                using var writer = new StreamWriter(archive.CreateEntry("word/comments.xml").Open());
+                writer.Write($"<w:comments {ns}><w:comment w:id=\"1\" w:author=\"NKU Thesis Tool\"><w:p>{body}</w:p></w:comment>" +
+                    $"<w:comment w:id=\"2\" w:author=\"Reviewer\"><w:p><w:r><w:rPr><w:b w:val=\"{(i == 3 ? "1" : "0")}\"/></w:rPr><w:t>人工批注</w:t></w:r></w:p></w:comment></w:comments>");
+            }
+            Assert.Equal(DocxSnapshotFingerprint.Compute(paths[0]), DocxSnapshotFingerprint.Compute(paths[1]));
+            Assert.NotEqual(DocxSnapshotFingerprint.Compute(paths[0]), DocxSnapshotFingerprint.Compute(paths[2]));
+            Assert.NotEqual(DocxSnapshotFingerprint.Compute(paths[0]), DocxSnapshotFingerprint.Compute(paths[3]));
+        }
+        finally
+        {
+            foreach (var path in paths) if (File.Exists(path)) File.Delete(path);
+            Directory.Delete(directory);
+        }
+    }
+
+    [Fact]
     public void FingerprintIgnoresZipMetadataButDetectsDocumentChanges()
     {
         var directory = Path.Combine(Path.GetTempPath(), "nku-fingerprint-" + Guid.NewGuid().ToString("N"));

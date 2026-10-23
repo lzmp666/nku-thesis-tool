@@ -188,6 +188,8 @@
     <Compile Include="Engine\EngineGateway.cs" />
     <Compile Include="Engine\EngineHostPathResolver.cs" />
     <Compile Include="Ui\DiagnosticsPane.cs" />
+    <Compile Include="Ui\RibbonTabVisibilityTracker.cs" />
+    <Compile Include="Ui\StableIssueListBox.cs" />
     <Compile Include="Ui\CommentDiagnosticMatcher.cs" />
     <Compile Include="Ui\FixPreviewDialog.cs" />
     <Compile Include="Ui\ThesisRibbon.cs" />

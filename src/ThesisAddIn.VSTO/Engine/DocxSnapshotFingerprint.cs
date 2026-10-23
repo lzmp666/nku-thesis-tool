@@ -103,6 +103,8 @@ namespace ThesisAddIn.VSTO.Engine
                 var root = XDocument.Load(reader).Root;
                 if (root == null) throw new InvalidDataException("快照 XML 部件缺少根元素：" + entry.FullName);
                 if (entry.FullName.StartsWith("word/", StringComparison.Ordinal)) NormalizeExportMetadata(root, entry.FullName);
+                if (string.Equals(entry.FullName, "word/comments.xml", StringComparison.OrdinalIgnoreCase))
+                    NormalizeOwnedCommentPresentation(root);
                 if (string.Equals(entry.FullName, "word/document.xml", StringComparison.OrdinalIgnoreCase))
                 {
                     NormalizeWordAnnotations(root);
@@ -111,6 +113,24 @@ namespace ThesisAddIn.VSTO.Engine
                 var fields = new Dictionary<string, string>(StringComparer.Ordinal);
                 CollectXmlFields(root, "/" + root.Name.LocalName, fields);
                 return fields;
+            }
+        }
+
+        private static void NormalizeOwnedCommentPresentation(XElement root)
+        {
+            foreach (XElement comment in root.Elements(W + "comment"))
+            {
+                string text = string.Join("\r", comment.Elements(W + "p").Select(paragraph =>
+                    string.Concat(paragraph.Descendants().Where(element => element.Name == W + "t"
+                        || element.Name == W + "tab" || element.Name == W + "br")
+                        .Select(element => element.Name == W + "t" ? element.Value
+                            : element.Name == W + "tab" ? "\t" : "\n"))));
+                if (text.IndexOf("[NKU-TOOL-ANNOTATION:v1]", StringComparison.Ordinal) < 0) continue;
+                // Word's background proofing splits styled comment runs and rewrites
+                // hidden flags. The tool owns this presentation; retain every character
+                // (including private location metadata) and comment identity instead.
+                // Human comments retain their full formatting fingerprint.
+                comment.ReplaceNodes(new XElement("nkuOwnedCommentText", text));
             }
         }
 

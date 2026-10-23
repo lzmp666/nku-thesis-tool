@@ -37,6 +37,7 @@ namespace ThesisAddIn.VSTO
         private ThesisRibbon _ribbon;
         private string _gatewayError;
         private System.Windows.Forms.Timer _documentHoverTimer;
+        private RibbonTabVisibilityTracker _ribbonTabTracker;
         private CancellationTokenSource _operationCancellation;
         private readonly Dictionary<int, Dictionary<string, Word.Range>> _occurrenceRangesByWindow =
             new Dictionary<int, Dictionary<string, Word.Range>>();
@@ -227,6 +228,7 @@ namespace ThesisAddIn.VSTO
 
             Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
+            _ribbonTabTracker = new RibbonTabVisibilityTracker();
 
             // Word 没有文档正文的鼠标悬停事件。用 UI 计时器查询鼠标下的
             // Word.Range，再通过批注锚点选择问题列表项；COM 调用仍在 Word UI 线程执行。
@@ -282,6 +284,8 @@ namespace ThesisAddIn.VSTO
             }
 
             _gateway = null;
+            _ribbonTabTracker?.Dispose();
+            _ribbonTabTracker = null;
             _occurrenceRangesByWindow.Clear();
             if (_operationCancellation != null)
             {
@@ -556,16 +560,33 @@ namespace ThesisAddIn.VSTO
             }
 
             DiagnosticsPane pane = CreateDiagnosticsPane();
+            int preferredWidth = pane.ConfigureForOfficeWindow(windowHandle);
             CustomTaskPane taskPane = null;
             try
             {
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
                 // The right pane is only a searchable issue index; all actions live on the ribbon.
-                taskPane.Width = 390;
+                taskPane.Width = preferredWidth;
                 taskPane.VisibleChanged += OnTaskPaneVisibleChanged;
-                taskPane.Visible = true;
+                taskPane.Visible = false;
                 _taskPane = taskPane;
                 _pane = pane;
+                pane.CreateControl();
+                CustomTaskPane trackedTaskPane = taskPane;
+                _ribbonTabTracker?.Track(windowHandle, selected =>
+                {
+                    if (pane.IsDisposed || !pane.IsHandleCreated) return;
+                    try
+                    {
+                        pane.BeginInvoke(new Action(() =>
+                        {
+                            if (pane.IsDisposed) return;
+                            try { trackedTaskPane.Visible = selected; }
+                            catch (Exception) { /* The document window may be closing. */ }
+                        }));
+                    }
+                    catch (InvalidOperationException) { /* The pane has closed. */ }
+                });
                 pane.SetStatus(string.IsNullOrEmpty(_gatewayError)
                     ? "点击功能区“分析当前文档”开始检查。"
                     : _gatewayError);
@@ -720,7 +741,7 @@ namespace ThesisAddIn.VSTO
                     using (var preview = new FixPreviewDialog(plan, scopeLabel))
                     {
                         WriteStartupLog("准备显示修复预览窗口。");
-                        return preview.ShowDialog();
+                        return preview.ShowForOfficeWindow(operation.WindowHandle);
                     }
                 });
                 if (previewResult != DialogResult.OK)

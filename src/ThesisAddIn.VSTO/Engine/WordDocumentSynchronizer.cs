@@ -346,6 +346,7 @@ namespace ThesisAddIn.VSTO.Engine
                     if (markerOffset < 0)
                         throw new InvalidDataException("Word 未保留问题批注的位置标记。");
                     int metadataStart = hiddenRange.Start + markerOffset;
+                    StyleComment(comment, insertedText, metadataStart);
                     hiddenRange.SetRange(metadataStart, metadataStart + hiddenMetadata.Length);
                     hiddenRange.Font.Hidden = -1;
                 }
@@ -353,6 +354,45 @@ namespace ThesisAddIn.VSTO.Engine
             // This legacy marker identifies an analyzed document, not a separate copy.
             // Write it last; document variables do not create Word undo entries.
             MarkWorkingCopy(document);
+            if (document.Comments.Count > 0) ShowCommentBalloons(document);
+        }
+
+        private static void StyleComment(Word.Comment comment, string text, int metadataStart)
+        {
+            Word.Range body = comment.Range.Duplicate;
+            body.SetRange(body.Start, metadataStart);
+            body.Font.Name = "Microsoft YaHei";
+            body.Font.Size = 9.5F;
+            body.Font.Bold = 0;
+            body.Font.Color = (Word.WdColor)0x2A272C;
+            body.ParagraphFormat.SpaceBefore = 0;
+            body.ParagraphFormat.SpaceAfter = 3;
+            body.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
+            foreach (string label in new[] { "要求参考来源：", "规则：", "期望值：", "实际值：" })
+            {
+                int offset = text.IndexOf(label, StringComparison.Ordinal);
+                if (offset < 0) continue;
+                Word.Range field = body.Duplicate;
+                field.SetRange(body.Start + offset, body.Start + offset + label.Length);
+                field.Font.Bold = -1;
+                field.Font.Color = (Word.WdColor)0x3D1F68; // Nankai burgundy, Word's BGR order.
+            }
+        }
+
+        private static void ShowCommentBalloons(Word.Document document)
+        {
+            try
+            {
+                Word.View view = document.ActiveWindow.View;
+                view.ShowComments = true;
+                view.ShowRevisionsAndComments = true;
+                view.RevisionsMode = Word.WdRevisionsMode.wdBalloonRevisions;
+                view.RevisionsFilter.Markup = Word.WdRevisionsMarkup.wdRevisionsMarkupAll;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // The annotations remain intact when this Word version cannot change its view.
+            }
         }
 
         private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document)

@@ -284,6 +284,7 @@ public sealed class WordAnnotationWriterTests
             """;
         var inputPath = CreatePackage(documentXml);
         var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var refreshedPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
         try
         {
             var diagnostic = new Diagnostic("demo/font-size", "warning",
@@ -298,11 +299,17 @@ public sealed class WordAnnotationWriterTests
             Assert.Equal("yellow", (string?)tableRun.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val"));
             Assert.Equal("After table", string.Concat(followingRun.Descendants(W + "t").Select(text => text.Value)));
             Assert.Null(followingRun.Element(W + "rPr")?.Element(W + "highlight"));
+            WordAnnotationWriter.WriteAnnotatedCopy(outputPath, refreshedPath, Array.Empty<Diagnostic>());
+            using var refreshedArchive = ZipFile.OpenRead(refreshedPath);
+            var refreshed = ReadXml(refreshedArchive, "word/document.xml");
+            Assert.Empty(refreshed.Descendants(W + "highlight"));
+            Assert.Empty(refreshed.Descendants(W + "commentRangeStart"));
         }
         finally
         {
             File.Delete(inputPath);
             if (File.Exists(outputPath)) File.Delete(outputPath);
+            if (File.Exists(refreshedPath)) File.Delete(refreshedPath);
         }
     }
 

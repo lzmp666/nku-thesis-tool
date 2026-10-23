@@ -1,6 +1,8 @@
 using System;
 using System.Drawing;
 using System.Linq;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ThesisAddIn.Protocol;
 
@@ -12,15 +14,17 @@ namespace ThesisAddIn.VSTO.Ui
     /// </summary>
     public sealed class FixPreviewDialog : Form
     {
+        private readonly List<Font> _displayFonts = new List<Font>();
         public FixPreviewDialog(EnginePatchPlan plan, string scopeLabel)
         {
             Text = "修复预览（" + scopeLabel + "）";
+            AutoScaleMode = AutoScaleMode.None;
             StartPosition = FormStartPosition.CenterParent;
             Size = new Size(760, 500);
             MinimizeBox = false;
             MaximizeBox = false;
             Font = new Font("Microsoft YaHei UI", 9F);
-            BackColor = Color.FromArgb(246, 248, 251);
+            BackColor = Color.FromArgb(250, 247, 241);
 
             var summary = new Label
             {
@@ -110,7 +114,7 @@ namespace ThesisAddIn.VSTO.Ui
                 AutoSize = true,
                 FlatStyle = FlatStyle.Flat,
                 Padding = new Padding(10, 3, 10, 3),
-                BackColor = Color.FromArgb(37, 99, 190),
+                BackColor = Color.FromArgb(104, 31, 61),
                 ForeColor = Color.White
             };
             confirm.FlatAppearance.BorderSize = 0;
@@ -124,6 +128,49 @@ namespace ThesisAddIn.VSTO.Ui
             AcceptButton = confirm;
             CancelButton = cancel;
         }
+
+        internal DialogResult ShowForOfficeWindow(int windowHandle)
+        {
+            uint dpi = 96;
+            try { dpi = GetDpiForWindow(new IntPtr(windowHandle)); }
+            catch (EntryPointNotFoundException) { }
+            float scale = Math.Max(1F, Math.Min(4F, dpi / 96F));
+            var controls = new List<Control>();
+            Collect(this, controls);
+            Font[] originalFonts = controls.Select(control => control.Font).ToArray();
+            Scale(new SizeF(scale, scale));
+            for (int i = 0; i < controls.Count; i++)
+            {
+                var font = new Font(originalFonts[i].FontFamily,
+                    originalFonts[i].SizeInPoints * 96F / 72F * scale,
+                    originalFonts[i].Style, GraphicsUnit.Pixel);
+                _displayFonts.Add(font);
+                controls[i].Font = font;
+                if (controls[i] is ListView list)
+                    foreach (ColumnHeader column in list.Columns) column.Width = (int)Math.Round(column.Width * scale);
+            }
+            return ShowDialog(new OfficeWindowOwner(windowHandle));
+        }
+
+        private static void Collect(Control control, List<Control> result)
+        {
+            result.Add(control);
+            foreach (Control child in control.Controls) Collect(child, result);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (disposing) foreach (Font font in _displayFonts) font.Dispose();
+        }
+
+        private sealed class OfficeWindowOwner : IWin32Window
+        {
+            internal OfficeWindowOwner(int handle) { Handle = new IntPtr(handle); }
+            public IntPtr Handle { get; }
+        }
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr window);
 
         private static string BuildDeferredText(EnginePatchPlan plan)
         {

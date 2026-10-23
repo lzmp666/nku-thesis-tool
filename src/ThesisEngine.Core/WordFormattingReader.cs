@@ -29,6 +29,12 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var paragraphDefaults = ReadParagraphFormatting(
             styles?.Root?.Element(W + "docDefaults")?.Element(W + "pPrDefault")?.Element(W + "pPr"));
         var styleMap = ReadStyles(styles, theme, defaults.EastAsiaLanguage);
+        // Word omits pStyle for its default paragraph style when serializing
+        // an open document. Its ID may be localized/renamed (for example a1).
+        var defaultParagraphStyle = styles?.Root?.Elements(W + "style")
+            .FirstOrDefault(style => (string?)style.Attribute(W + "type") == "paragraph" &&
+                new[] { "1", "true", "on" }.Contains((string?)style.Attribute(W + "default")))
+            ?.Attribute(W + "styleId")?.Value;
         var body = document.Root?.Element(W + "body")
             ?? throw new InvalidDataException("Missing Word document body.");
 
@@ -78,7 +84,8 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         foreach (var paragraph in sourceParagraphs)
         {
             var paragraphProperties = paragraph.Element(W + "pPr");
-            var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
+            var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value
+                ?? defaultParagraphStyle;
             var paragraphResolution = ResolveStyle(paragraphStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "paragraph");
             var inherited = Merge(defaults, paragraphResolution.Formatting);
             var paragraphStyleResolution = ResolveParagraphStyle(paragraphStyle, styleMap,
