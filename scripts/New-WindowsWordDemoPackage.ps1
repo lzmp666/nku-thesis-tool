@@ -42,7 +42,16 @@ foreach ($manifestName in @('ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manif
 
 $revision = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $revision) { throw '无法从 Git 读取源码提交号。请在仓库工作树中运行。' }
-$dirty = (& git -C $root status --porcelain 2>$null | Out-String).Trim()
+$artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'artifacts')).TrimEnd('\')
+$dirty = @(& git -C $root status --porcelain --untracked-files=all 2>$null) | Where-Object {
+    $line = [string]$_
+    if ($line.StartsWith('?? ', [StringComparison]::Ordinal)) {
+        $relativePath = $line.Substring(3).Trim('"')
+        $untrackedPath = [System.IO.Path]::GetFullPath((Join-Path $root $relativePath))
+        if ($untrackedPath.StartsWith($artifactRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
 if ($dirty) { throw '工作树有未提交修改。请从干净提交构建演示包，避免包与源码 SHA 不一致。' }
 
 $outDir = [System.IO.Path]::GetFullPath($OutputDirectory)
