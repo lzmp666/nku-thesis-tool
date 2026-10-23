@@ -16,7 +16,9 @@ $requiredAddin = @('ThesisAddIn.VSTO.dll', 'ThesisAddIn.VSTO.vsto', 'ThesisAddIn
 foreach ($name in $requiredAddin) {
     if (-not (Test-Path -LiteralPath (Join-Path $addinOutput $name) -PathType Leaf)) { throw "缺少 Release 加载项输出：$name。请先完成签名构建。" }
 }
-foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.exe', 'ThesisEngine.ProtocolHost.runtimeconfig.json', 'ThesisEngine.ProtocolHost.deps.json')) {
+# The add-in launches the protocol host through `dotnet <assembly>.dll`; an apphost
+# executable is optional and is not emitted when UseAppHost=false.
+foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.runtimeconfig.json', 'ThesisEngine.ProtocolHost.deps.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $engineOutput $name) -PathType Leaf)) { throw "缺少 Release 引擎输出：$name。请先构建 ProtocolHost。" }
 }
 foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
