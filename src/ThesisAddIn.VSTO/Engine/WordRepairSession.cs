@@ -30,7 +30,8 @@ namespace ThesisAddIn.VSTO.Engine
             internal string Text;
             internal string AppliedSignature;
             internal Action<Action> RestoreObject;
-            internal Func<string> ObjectSignature;
+            internal Func<Tuple<string, double[]>> ObjectSignature;
+            internal Tuple<string, double[]> AppliedObjectSignature;
         }
         public static bool ClearPreviousToolMarks(Word.Document document, string snapshot, out string error)
         {
@@ -67,7 +68,9 @@ namespace ThesisAddIn.VSTO.Engine
                     markMutation();
                     ValidatePatch(ranges[patch.Location], new EnginePatch { RuleId = patch.RuleId,
                         ExpectedBefore = patch.DesiredAfter, DesiredAfter = patch.DesiredAfter });
-                    captured.Changes[index].AppliedSignature = FormatSignature(captured.Changes[index]);
+                    FormatChange change = captured.Changes[index];
+                    if (change.ObjectSignature != null) change.AppliedObjectSignature = change.ObjectSignature();
+                    else change.AppliedSignature = FormatSignature(change);
                 }
                 document.Saved = false;
             }, out error);
@@ -80,9 +83,19 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 if (record == null || record.Count == 0) throw new InvalidDataException("该项没有可撤销的修复记录。");
                 foreach (FormatChange change in record.Changes)
-                    if (change.Range.Document != document || change.Range.Text != change.Text ||
-                        FormatSignature(change) != change.AppliedSignature)
-                        throw new InvalidDataException("该处文字或目标格式已被再次编辑，已停止撤销以保留后续改动。请重新分析。");
+                {
+                    if (change.Range.Document != document || change.Range.Text != change.Text)
+                        throw new InvalidDataException("该处文字或定位范围已被再次编辑，已停止撤销以保留后续改动。请重新分析。");
+                    bool unchanged;
+                    if (change.ObjectSignature != null)
+                    {
+                        var current = change.ObjectSignature();
+                        unchanged = change.AppliedObjectSignature != null && current.Item1 == change.AppliedObjectSignature.Item1 &&
+                            WordTableGeometry.EquivalentDimensions(change.AppliedObjectSignature.Item2, current.Item2);
+                    }
+                    else unchanged = FormatSignature(change) == change.AppliedSignature;
+                    if (!unchanged) throw new InvalidDataException("该处目标格式已被再次编辑，已停止撤销以保留后续改动。请重新分析。");
+                }
             }, markMutation =>
             {
                 foreach (FormatChange change in record.Changes)
@@ -95,7 +108,6 @@ namespace ThesisAddIn.VSTO.Engine
         }
         private static string FormatSignature(FormatChange change)
         {
-            if (change.ObjectSignature != null) return change.ObjectSignature();
             Word.Range range = change.Range;
             switch (change.RuleId)
             {
@@ -226,8 +238,8 @@ namespace ThesisAddIn.VSTO.Engine
                 Word.InlineShape picture = target.InlineShapes[1];
                 float width = picture.Width, height = picture.Height;
                 var locked = picture.LockAspectRatio;
-                change.ObjectSignature = () => picture.Width.ToString(CultureInfo.InvariantCulture) + "|" +
-                    picture.Height.ToString(CultureInfo.InvariantCulture) + "|" + picture.LockAspectRatio + "|" + PictureContentSignature(picture);
+                change.ObjectSignature = () => Tuple.Create(picture.LockAspectRatio + "|" + PictureContentSignature(picture),
+                    new[] { (double)picture.Width, picture.Height });
                 change.RestoreObject = markMutation =>
                 {
                     try
@@ -245,9 +257,8 @@ namespace ThesisAddIn.VSTO.Engine
                 float[] widths = ReadTableWidths(table);
                 var preferredType = table.PreferredWidthType;
                 float preferredWidth = table.PreferredWidth;
-                change.ObjectSignature = () => table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
-                    table.PreferredWidthType + "|" + table.PreferredWidth.ToString(CultureInfo.InvariantCulture) + "|" +
-                    string.Join("|", ReadTableWidths(table).Select(width => width.ToString(CultureInfo.InvariantCulture)));
+                change.ObjectSignature = () => Tuple.Create(table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
+                    table.PreferredWidthType, new[] { (double)table.PreferredWidth }.Concat(ReadTableWidths(table).Select(value => (double)value)).ToArray());
                 change.RestoreObject = markMutation =>
                 {
                     WriteTableWidths(table, widths, markMutation);

@@ -6,6 +6,16 @@ namespace ThesisEngine.Tests;
 public sealed class WordTableGeometryTests
 {
     [Fact]
+    public void TwipNormalizationDoesNotBlockObjectUndoButResizingDoes()
+    {
+        Assert.True(WordTableGeometry.EquivalentDimensions(new[] { 456.1, 114.025 }, new[] { 456.05, 114.05 }));
+        Assert.False(WordTableGeometry.EquivalentDimensions(new[] { 456.1, 114.025 }, new[] { 450.0, 114.05 }));
+        Assert.False(WordTableGeometry.EquivalentDimensions(new[] { 456.1 }, new[] { 456.1, 1.0 }));
+        Assert.False(WordTableGeometry.EquivalentDimensions(new[] { double.NaN }, new[] { double.NaN }));
+        Assert.False(WordTableGeometry.EquivalentDimensions(new[] { double.PositiveInfinity }, new[] { double.PositiveInfinity }));
+    }
+
+    [Fact]
     public void ConcreteEqualRowsAreAcceptedWithoutDependingOnTheUniformFlag()
     {
         var first = new[] { 100f, 200f, 300f };

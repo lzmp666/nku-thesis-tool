@@ -7,6 +7,15 @@ namespace ThesisAddIn.VSTO.Engine
 {
     internal static class WordTableGeometry
     {
+        internal static bool EquivalentDimensions(double[] expected, double[] actual)
+        {
+            // Word lays out table widths asynchronously and stores dimensions in
+            // twips. Do not confuse that sub-twip normalization with a user edit.
+            return expected != null && actual != null && expected.Length == actual.Length &&
+                expected.Zip(actual, (left, right) => !double.IsNaN(left) && !double.IsNaN(right) &&
+                    !double.IsInfinity(left) && !double.IsInfinity(right) && Math.Abs(left - right) <= 0.1).All(equal => equal);
+        }
+
         // Read concrete row/cell widths instead of Word.Table.Uniform, whose
         // aggregate flag can be false for ordinary compatibility-mode tables.
         internal static float[] ReadColumns(IReadOnlyList<float[]> rows)
