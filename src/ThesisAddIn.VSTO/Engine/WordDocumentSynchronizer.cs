@@ -752,12 +752,12 @@ namespace ThesisAddIn.VSTO.Engine
             if (string.IsNullOrEmpty(text)) return document.Range(cursor, cursor);
             // Most runs have no annotation reference inside them. Validate a direct span
             // first; retain literal Find for Word CP offsets containing hidden references.
-            for (int references = 0; references <= 16 && text.Length + references <= paragraphEnd - cursor; references++)
+            if (text.Length <= paragraphEnd - cursor)
             {
-                Word.Range direct = document.Range(cursor, cursor + text.Length + references);
-                string actual = direct.Text ?? string.Empty;
-                if (string.Equals(actual, text, StringComparison.Ordinal)) return direct;
-                if (actual.Length >= text.Length) break;
+                Word.Range direct = document.Range(cursor, cursor + text.Length);
+                // Never widen this span to include invisible annotation reference CPs:
+                // their independent font can make a correct text range report mixed font.
+                if (string.Equals(direct.Text, text, StringComparison.Ordinal)) return direct;
             }
             int start = -1;
             int consumed = 0;
