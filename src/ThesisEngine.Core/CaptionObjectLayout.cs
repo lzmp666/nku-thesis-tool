@@ -119,8 +119,12 @@ internal static class CaptionObjectLayout
         var picture = inline?.Descendants(PIC + "pic").SingleOrDefault();
         var blip = picture?.Element(PIC + "blipFill")?.Element(A + "blip");
         if (blip?.Attribute(R + "embed") is null || blip.Attribute(R + "link") is not null) return null;
+        var effects = inline?.Element(WP + "effectExtent");
+        // Word may add vertical glyph/visual padding (e.g. b=6350) after
+        // changing a picture size. Only horizontal effects consume line width.
         if ((Number(inline, "distL") ?? 0) != 0 || (Number(inline, "distR") ?? 0) != 0 ||
-            inline?.Element(WP + "effectExtent")?.Attributes().Any(a => a.Value != "0") == true) return null;
+            effects?.Attributes().Where(a => !a.IsNamespaceDeclaration).Any(a => !long.TryParse(a.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value < 0) == true ||
+            (Number(effects, "l") ?? 0) != 0 || (Number(effects, "r") ?? 0) != 0) return null;
         var transform = picture?.Element(PIC + "spPr")?.Element(A + "xfrm");
         var extent = inline?.Element(WP + "extent");
         var inner = transform?.Element(A + "ext");

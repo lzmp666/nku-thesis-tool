@@ -101,6 +101,32 @@ public sealed class ObjectLayoutTests
     }
 
     [Theory]
+    [InlineData("b", "6350", true)]
+    [InlineData("t", "6350", true)]
+    [InlineData("l", "6350", false)]
+    [InlineData("r", "6350", false)]
+    [InlineData("b", "-1", false)]
+    [InlineData("b", "invalid", false)]
+    public void WordVerticalPicturePaddingDoesNotHideOversizedImages(string side, string value, bool supported)
+    {
+        var effects = new XElement(WP + "effectExtent", new XAttribute("l", "0"), new XAttribute("t", "0"),
+            new XAttribute("r", "0"), new XAttribute("b", "0"));
+        effects.SetAttributeValue(side, value);
+        var input = Package(Picture.Replace("<wp:docPr", effects + "<wp:docPr") + Caption("图1.1　合成图"));
+        var output = input + ".fixed.docx";
+        try
+        {
+            var plan = WidthPlan(input);
+            if (!supported) { Assert.Empty(plan); return; }
+            Assert.Single(plan);
+            Assert.True(PatchEngine.ApplyPatches(input, plan, output).Succeeded);
+            Assert.Empty(WidthPlan(output));
+            Assert.Equal(effects.ToString(), ReadXml(output).Descendants(WP + "effectExtent").Single().ToString());
+        }
+        finally { File.Delete(input); File.Delete(output); }
+    }
+
+    [Theory]
     [InlineData("floating")]
     [InlineData("multiple")]
     [InlineData("columns")]
