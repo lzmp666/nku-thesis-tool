@@ -778,12 +778,17 @@ namespace ThesisAddIn.VSTO
                     }
                     WriteStartupLog("复查耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;
-                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,out error,WriteStartupLog))
+                    Dictionary<string, Word.Range> refreshedRanges;
+                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,
+                        out error,out refreshedRanges,WriteStartupLog))
                         throw new InvalidDataException(error);
                     WriteStartupLog("复查耗时 annotations="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;
                     ShowAnalysis(pane,response.Result);
-                    CacheOccurrenceRanges(window.Hwnd,document,operation.SnapshotPath,response.Result);
+                    // Reuse the ranges just validated by annotation refresh. They are live
+                    // Word ranges and already follow comment-reference insertion/deletion.
+                    if (refreshedRanges.Count == 0) _occurrenceRangesByWindow.Remove(window.Hwnd);
+                    else _occurrenceRangesByWindow[window.Hwnd] = refreshedRanges;
                     ShowSuggestions(pane);
                     WriteStartupLog("复查耗时 ui="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     WriteStartupLog("直接修复/撤销后复查：剩余 "+response.Result.Diagnostics.Count+" 项。");

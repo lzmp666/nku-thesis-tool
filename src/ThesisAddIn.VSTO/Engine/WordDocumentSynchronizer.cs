@@ -53,6 +53,14 @@ namespace ThesisAddIn.VSTO.Engine
             public Word.Range Range { get; set; }
         }
 
+        private sealed class AnnotationRefreshState
+        {
+            public List<AnnotationRecord> Comments;
+            public List<HighlightBookmarkRecord> Marks;
+            public Dictionary<string, Word.Range> Ranges;
+            public Dictionary<string, string> Texts;
+        }
+
         private sealed class XmlRun
         {
             public string Text { get; set; }
@@ -86,12 +94,24 @@ namespace ThesisAddIn.VSTO.Engine
         public static bool RefreshAnnotations(Word.Document document, string snapshotPath,
             EngineAnalysisResult analysis, out string error, Action<string> trace = null)
         {
-            return ExecuteUndoable(document, "刷新论文格式批注",
-                () => ValidateAnnotationTargets(document, snapshotPath, analysis), markMutation =>
+            Dictionary<string, Word.Range> ranges;
+            return RefreshAnnotations(document, snapshotPath, analysis, out error, out ranges, trace);
+        }
+
+        public static bool RefreshAnnotations(Word.Document document, string snapshotPath,
+            EngineAnalysisResult analysis, out string error, out Dictionary<string, Word.Range> ranges,
+            Action<string> trace = null)
+        {
+            AnnotationRefreshState prepared = null;
+            Dictionary<string, Word.Range> updated = null;
+            bool success = ExecuteUndoable(document, "刷新论文格式批注",
+                () => prepared = PrepareAnnotationRefresh(document, snapshotPath, analysis), markMutation =>
             {
-                RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation, trace);
+                updated = RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation, trace, prepared);
                 document.Saved = false;
             }, out error);
+            ranges = success ? updated : null;
+            return success;
         }
 
         /// <summary>Applies accepted patches and refreshes marks without replacing the open document.</summary>
@@ -241,11 +261,10 @@ namespace ThesisAddIn.VSTO.Engine
                 .Concat(ReadOwnedAnnotations(document).SelectMany(record => record.OriginalHighlights.Keys)));
         }
 
-        private static void RefreshAnnotationsCore(Word.Document document, string snapshotPath,
-            EngineAnalysisResult analysis, Action markMutation, Action<string> trace = null)
+        private static AnnotationRefreshState PrepareAnnotationRefresh(Word.Document document, string snapshotPath,
+            EngineAnalysisResult analysis)
         {
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
-
             List<AnnotationRecord> existing = ReadOwnedAnnotations(document);
             List<HighlightBookmarkRecord> existingMarks = ReadOwnedHighlightBookmarks(document);
             var locations = new HashSet<string>(StringComparer.Ordinal);
@@ -256,6 +275,18 @@ namespace ThesisAddIn.VSTO.Engine
                 locations.Add(location);
 
             Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath, locations);
+            return new AnnotationRefreshState { Comments = existing, Marks = existingMarks, Ranges = ranges,
+                Texts = ranges.ToDictionary(pair => pair.Key, pair => pair.Value.Text, StringComparer.Ordinal) };
+        }
+
+        private static Dictionary<string, Word.Range> RefreshAnnotationsCore(Word.Document document, string snapshotPath,
+            EngineAnalysisResult analysis, Action markMutation, Action<string> trace = null,
+            AnnotationRefreshState prepared = null)
+        {
+            prepared = prepared ?? PrepareAnnotationRefresh(document, snapshotPath, analysis);
+            List<AnnotationRecord> existing = prepared.Comments;
+            List<HighlightBookmarkRecord> existingMarks = prepared.Marks;
+            Dictionary<string, Word.Range> ranges = prepared.Ranges;
             // Restore the highlight that was present before the tool marked each run.
             var originalByLocation = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (AnnotationRecord record in existing)
@@ -342,9 +373,11 @@ namespace ThesisAddIn.VSTO.Engine
                 markMutation();
             }
 
-            // Comment removal can shift story ranges. Rebuild all targets against the same
-            // text snapshot before writing new highlights and anchors.
-            ranges = BuildRanges(document, snapshotPath, newLocations);
+            // Live Word.Range objects follow deleted/inserted comment reference marks.
+            // Verify their text again rather than repeating XML parsing and COM Find.
+            foreach (string location in newLocations)
+                if (!string.Equals(ranges[location].Text, prepared.Texts[location], StringComparison.Ordinal))
+                    throw new InvalidDataException("批注更新期间原文发生变化，已停止操作。");
 
             var markedLocations = new HashSet<string>(StringComparer.Ordinal);
             foreach (EngineDiagnostic diagnostic in analysis.Diagnostics ?? new List<EngineDiagnostic>())
@@ -409,6 +442,7 @@ namespace ThesisAddIn.VSTO.Engine
                 (existing.Count - retainedComments.Count) + " added=" +
                 ((analysis.Diagnostics?.Count ?? 0) - retainedDiagnostics.Count) +
                 " highlightsRetained=" + retainedMarks.Count);
+            return newLocations.ToDictionary(location => location, location => ranges[location], StringComparer.Ordinal);
         }
 
         private static void StyleComment(Word.Comment comment, string text, int metadataStart)
@@ -718,10 +752,12 @@ namespace ThesisAddIn.VSTO.Engine
             if (string.IsNullOrEmpty(text)) return document.Range(cursor, cursor);
             // Most runs have no annotation reference inside them. Validate a direct span
             // first; retain literal Find for Word CP offsets containing hidden references.
-            if (text.Length <= paragraphEnd - cursor)
+            for (int references = 0; references <= 16 && text.Length + references <= paragraphEnd - cursor; references++)
             {
-                Word.Range direct = document.Range(cursor, cursor + text.Length);
-                if (string.Equals(direct.Text, text, StringComparison.Ordinal)) return direct;
+                Word.Range direct = document.Range(cursor, cursor + text.Length + references);
+                string actual = direct.Text ?? string.Empty;
+                if (string.Equals(actual, text, StringComparison.Ordinal)) return direct;
+                if (actual.Length >= text.Length) break;
             }
             int start = -1;
             int consumed = 0;
