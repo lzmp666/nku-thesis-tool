@@ -800,7 +800,11 @@ namespace ThesisAddIn.VSTO.Ui
         private void OnReviewSelectionChanged(object sender, EventArgs e)
         {
             int index=_diagnostics.FindIndex(x=>IssueReviewState.Key(x)==Review.SelectedKey);
-            if(index>=0) SelectDiagnostic(index,false,Review.SelectedLocation);
+            if(index>=0) {
+                SelectDiagnostic(index,false,Review.SelectedLocation);
+                // Reveal the corresponding actionable card, never scroll the search index.
+                if(IsSuggestion) _issueList.RevealSelection();
+            }
         }
         internal void BeginBatch() { Review.SetBatch(true); }
         internal EngineDiagnostic[] CheckedDiagnostics => _diagnostics.Where(x=>Review.Checked.Contains(IssueReviewState.Key(x)) && Review.CanRepair(x)).ToArray();

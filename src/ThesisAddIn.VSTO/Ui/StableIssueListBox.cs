@@ -52,6 +52,10 @@ namespace ThesisAddIn.VSTO.Ui
         public event DrawItemEventHandler DrawItem;
         public event MeasureItemEventHandler MeasureItem;
         public int SelectedIndex { get => _viewport.SelectedIndex; set => SelectCard(value, false); }
+        internal void RevealSelection()
+        {
+            if (SelectedIndex >= 0) SelectCard(SelectedIndex, true);
+        }
         public int TopIndex
         {
             get => _viewport.TopIndex;

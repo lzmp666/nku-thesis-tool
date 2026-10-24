@@ -48,6 +48,18 @@ try {
     $searchSummary=$search.GetType().GetField('_summary',$flags).GetValue($search).Text
     $suggestionSummary=$suggestion.GetType().GetField('_summary',$flags).GetValue($suggestion).Text
     if($searchSummary -ne $suggestionSummary) { throw 'Completed-item summaries diverged without a data rebuild.' }
+    $suggestion.Height=210
+    $suggestion.PerformLayout()
+    $search.Height=210
+    $search.PerformLayout()
+    $leftViewport=$left.GetType().GetField('_viewport',$flags).GetValue($left)
+    $leftViewport.GetType().GetMethod('ScrollTo',$flags).Invoke($leftViewport,@(17)) | Out-Null
+    $third=$state.GetType().GetField('Rows',$flags).GetValue($state)[2]
+    $state.GetType().GetMethod('Select',$flags).Invoke($state,@($third,$third.Location)) | Out-Null
+    $rightBounds=$right.GetItemRectangle(2)
+    if($rightBounds.Top -lt 0 -and $rightBounds.Height -le $right.Height) { throw 'Linked suggestion was not revealed.' }
+    if($rightBounds.Top -ge $right.Height) { throw 'Linked suggestion remained outside the visible pane.' }
+    if($leftViewport.GetType().GetProperty('Offset',$flags).GetValue($leftViewport) -ne 17) { throw 'Revealing a suggestion scrolled the search index.' }
     $bitmap=[Drawing.Bitmap]::new($right.Width,$right.Height)
     try { $right.DrawToBitmap($bitmap,[Drawing.Rectangle]::new(0,0,$right.Width,$right.Height)) } finally { $bitmap.Dispose() }
     Write-Output 'PASS: both review regions share checkboxes; solve and item undo dispatch real events; compact cards render.'
