@@ -44,7 +44,11 @@ public sealed record ParagraphSnapshot(
     public CaptionKind? Caption { get; init; }
     public bool? CaptionPlacementCorrect { get; init; }
     public ParagraphFormattingSnapshot? ParagraphFormatting { get; init; }
+    public ObjectWidthSnapshot? CaptionObjectWidth { get; init; }
 }
+
+/// <summary>Layout bound for a uniquely paired inline picture or simple fixed table.</summary>
+public sealed record ObjectWidthSnapshot(double WidthPt, double MaximumWidthPt, string Kind);
 
 public enum CaptionKind
 {

@@ -94,7 +94,7 @@ try {
     }
     $fullThesisStage = Join-Path $samplesStage 'full-thesis'
     New-Item -ItemType Directory -Path $fullThesisStage | Out-Null
-    foreach ($name in @('synthetic_complete_thesis.docx', 'manifest.json', 'README.md')) {
+    foreach ($name in @('synthetic_complete_thesis.docx', 'synthetic_object_layout_errors.docx', 'manifest.json', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $fullThesisRoot $name) -Destination $fullThesisStage
     }
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Test-WindowsWordDemoEnvironment.ps1') -Destination (Join-Path $stage 'Preflight.ps1')

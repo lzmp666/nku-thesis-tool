@@ -53,7 +53,8 @@ public static class WordPatchApplier
                 ?? throw new InvalidDataException("Missing Word document body.");
 
             var snapshot = patches.Count == 0 ? null : new WordFormattingReader().Read(fullInputPath);
-            var targets = ResolveTargets(body, patches, snapshot);
+            var styles = entries.TryGetValue("word/styles.xml", out var styleEntry) ? ReadXml(styleEntry, W + "styles", "word/styles.xml") : null;
+            var targets = ResolveTargets(body, patches, snapshot, styles);
             ValidateAll(patches, targets, snapshot);
             foreach (var target in targets)
                 ApplyTarget(target);
@@ -108,7 +109,18 @@ public static class WordPatchApplier
             if (target.Snapshot is null || snapshot is null)
                 throw new PatchFailureException(patch, $"Unable to resolve patch location: {patch.Location}");
             var actual = target.Snapshot;
-            if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
+            if (patch.RuleId is FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
+            {
+                var kind = patch.RuleId == FontSizeAnalyzer.RuleIdPictureWidth ? CaptionKind.Figure : CaptionKind.Table;
+                if (target.ParagraphSnapshot?.Caption != kind)
+                    throw new PatchFailureException(patch, "对象题注类型不匹配。");
+                var layout = CaptionObjectLayout.Read(target.Paragraph, kind, target.Styles);
+                EnsureExpected(patch, layout?.WidthPt.ToString("0.###", CultureInfo.InvariantCulture) + "pt", patch.ExpectedBefore);
+                if (layout is null || !PatchPlanner.TryParsePoints(patch.DesiredAfter, out var limit) ||
+                    Math.Abs(layout.MaximumWidthPt - limit) > 0.01 || layout.WidthPt <= limit)
+                    throw new PatchFailureException(patch, "对象尺寸或版面边界已变化。");
+            }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
             {
                 EnsureExpected(patch, actual.EastAsiaFont, patch.ExpectedBefore);
             }
@@ -172,14 +184,14 @@ public static class WordPatchApplier
             return PatchPlanner.TryParseNonNegativePoints(actual, out var actualSpacing) &&
                    PatchPlanner.TryParseNonNegativePoints(expected, out var expectedSpacing) &&
                    Math.Abs(actualSpacing - expectedSpacing) <= 0.001;
-        if (ruleId is FontSizeAnalyzer.RuleIdFontSize or FontSizeAnalyzer.RuleIdCaptionFontSize)
+        if (ruleId is FontSizeAnalyzer.RuleIdFontSize or FontSizeAnalyzer.RuleIdCaptionFontSize or FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
             return PatchPlanner.TryParsePoints(actual, out var actualPoints) &&
                    PatchPlanner.TryParsePoints(expected, out var expectedPoints) &&
                    Math.Abs(actualPoints - expectedPoints) <= 0.001;
         return string.Equals(actual, expected, StringComparison.Ordinal);
     }
 
-    private static IReadOnlyList<PatchTarget> ResolveTargets(XElement body, IReadOnlyList<Patch> patches, DocumentSnapshot? snapshot)
+    private static IReadOnlyList<PatchTarget> ResolveTargets(XElement body, IReadOnlyList<Patch> patches, DocumentSnapshot? snapshot, XDocument? styles)
     {
         var paragraphs = body.Descendants(W + "p")
             .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
@@ -202,6 +214,7 @@ public static class WordPatchApplier
             result.Add(new PatchTarget(patch, runs[runIndex], paragraphs[paragraphIndex])
             {
                 Snapshot = effective,
+                Styles = styles,
                 ParagraphSnapshot = snapshot?.Paragraphs.FirstOrDefault(p => p.ParagraphIndex == paragraphIndex)
             });
         }
@@ -226,6 +239,13 @@ public static class WordPatchApplier
 
     private static void ApplyTarget(PatchTarget target)
     {
+        if (target.Patch.RuleId is FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
+        {
+            if (!PatchPlanner.TryParsePoints(target.Patch.DesiredAfter, out var limit))
+                throw new PatchFailureException(target.Patch, "对象目标尺寸无效。");
+            CaptionObjectLayout.Apply(target.Paragraph, target.Patch.RuleId == FontSizeAnalyzer.RuleIdPictureWidth ? CaptionKind.Figure : CaptionKind.Table, limit, target.Styles);
+            return;
+        }
         if (IsCaptionParagraphRule(target.Patch.RuleId))
         {
             ApplyCaptionParagraphTarget(target);
@@ -448,6 +468,7 @@ public static class WordPatchApplier
         public XElement Run { get; } = run;
         public XElement Paragraph { get; } = paragraph;
         public TextRunSnapshot? Snapshot { get; set; }
+        public XDocument? Styles { get; set; }
         public ParagraphSnapshot? ParagraphSnapshot { get; set; }
     }
 

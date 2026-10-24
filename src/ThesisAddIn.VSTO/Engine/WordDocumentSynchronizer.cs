@@ -117,7 +117,7 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 foreach (EnginePatch patch in patches)
                 {
-                    ApplyPatch(ranges[patch.Location], patch);
+                    ApplyPatch(ranges[patch.Location], patch, markMutation);
                     markMutation();
                 }
 
@@ -696,6 +696,7 @@ namespace ThesisAddIn.VSTO.Engine
 
         private static void ValidatePatch(Word.Range range, EnginePatch patch)
         {
+            if (IsObjectWidth(patch.RuleId)) { ValidateObjectWidth(range, patch); return; }
             string actual;
             if (string.Equals(patch.RuleId, "demo/east-asian-font", StringComparison.Ordinal))
             {
@@ -773,15 +774,16 @@ namespace ThesisAddIn.VSTO.Engine
         {
             bool matches = numeric && TryParsePoints(actual, out double actualPoints) &&
                 TryParsePoints(patch.ExpectedBefore, out double expectedPoints)
-                    ? Math.Abs(actualPoints - expectedPoints) <= 0.01
+                    ? Math.Abs(actualPoints - expectedPoints) <= (IsObjectWidth(patch.RuleId) ? 0.1 : 0.01)
                     : string.Equals(actual, patch.ExpectedBefore, StringComparison.Ordinal);
             if (!matches)
                 throw new InvalidDataException("修复前置条件已变化，已停止本次批量操作：期望「" +
                     patch.ExpectedBefore + "」，当前为「" + actual + "」。");
         }
 
-        private static void ApplyPatch(Word.Range range, EnginePatch patch)
+        private static void ApplyPatch(Word.Range range, EnginePatch patch, Action markMutation)
         {
+            if (IsObjectWidth(patch.RuleId)) { ResizeObject(range, patch, markMutation); return; }
             if (string.Equals(patch.RuleId, "demo/east-asian-font", StringComparison.Ordinal))
                 range.Font.NameFarEast = patch.DesiredAfter;
             else if (string.Equals(patch.RuleId, "demo/western-font", StringComparison.Ordinal))

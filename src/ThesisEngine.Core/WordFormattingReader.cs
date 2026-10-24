@@ -51,12 +51,12 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             unsupported.Add("tables (cell formatting rules are not configured)");
         }
         if (body.Descendants(W + "p").Any(p =>
-                string.Equals(p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value,
-                    "Caption", StringComparison.OrdinalIgnoreCase) &&
+                IsCaptionStyle(p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value,
+                    styleMap, new HashSet<string>(StringComparer.Ordinal)) &&
                 GetCaptionKind(string.Concat(p.Descendants(W + "t").Select(t => t.Value))) is null))
             unsupported.Add("captions whose labels do not match configured 图/表 or Figure/Fig./Table numbering");
         if (body.Descendants(W + "drawing").Any() || body.Descendants(W + "pict").Any())
-            unsupported.Add("images (visual quality and layout are not analyzed)");
+            unsupported.Add("images (visual quality and complex layout are not analyzed; only paired inline-picture width is supported)");
         if (document.Descendants(W + "txbxContent").Any()) unsupported.Add("textboxes");
         if (body.Descendants(W + "sdt").Any()) unsupported.Add("content controls");
         if (body.Descendants(W + "customXml").Any()) unsupported.Add("custom XML content");
@@ -97,7 +97,7 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 (paragraphStyle is not null && styleMap.TryGetValue(paragraphStyle, out var paragraphStyleDefinition) && paragraphStyleDefinition.IsHeading);
             var paragraphText = string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value));
             var isTableCell = paragraph.Ancestors(W + "tc").Any();
-            var isCaptionStyle = string.Equals(paragraphStyle, "Caption", StringComparison.OrdinalIgnoreCase);
+            var isCaptionStyle = IsCaptionStyle(paragraphStyle, styleMap, new HashSet<string>(StringComparer.Ordinal));
             var captionKind = GetCaptionKind(paragraphText);
             var isCaption = isCaptionStyle || captionKind is not null &&
                 IsAdjacentToFigureOrTable(paragraph, captionKind.Value, body);
@@ -134,6 +134,7 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 Text = paragraphText,
                 Caption = captionKind,
                 CaptionPlacementCorrect = captionKind is null ? null : ResolveCaptionPlacement(paragraph, captionKind.Value, body),
+                CaptionObjectWidth = captionKind is null ? null : CaptionObjectLayout.Read(paragraph, captionKind.Value, styles),
                 ParagraphFormatting = ToSnapshot(paragraphFormatting, paragraphStyleResolution.IsResolved)
             });
             scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading,
@@ -211,7 +212,9 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             map[id] = new StyleDefinition(type,
                 style.Element(W + "basedOn")?.Attribute(W + "val")?.Value,
                 ReadRunProperties(style.Element(W + "rPr"), theme, defaultLanguage),
-                ReadParagraphFormatting(paragraphProperties), isHeading);
+                ReadParagraphFormatting(paragraphProperties), isHeading,
+                string.Equals(id, "Caption", StringComparison.OrdinalIgnoreCase) ||
+                new[] { "Caption", "题注" }.Contains((string?)style.Element(W + "name")?.Attribute(W + "val"), StringComparer.OrdinalIgnoreCase));
         }
         return map;
     }
@@ -227,6 +230,13 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var parentType = style.Type ?? expectedType;
         var parent = ResolveStyle(style.BasedOn, styles, defaults, seen, parentType);
         return new StyleResolution(Merge(parent.Formatting, style.Formatting), parent.IsResolved);
+    }
+
+    private static bool IsCaptionStyle(string? id, IReadOnlyDictionary<string, StyleDefinition> styles, HashSet<string> seen)
+    {
+        if (string.Equals(id, "Caption", StringComparison.OrdinalIgnoreCase)) return true;
+        return id is not null && seen.Add(id) && styles.TryGetValue(id, out var style) && style.Type == "paragraph" &&
+            (style.IsCaption || IsCaptionStyle(style.BasedOn, styles, seen));
     }
 
     private static ParagraphStyleResolution ResolveParagraphStyle(string? id,
@@ -467,5 +477,5 @@ public sealed class WordFormattingReader : IDemoDocumentReader
     private readonly record struct StyleResolution(Formatting Formatting, bool IsResolved);
     private readonly record struct ParagraphStyleResolution(ParagraphFormatting Formatting, bool IsResolved);
     private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting,
-        ParagraphFormatting ParagraphFormatting, bool IsHeading);
+        ParagraphFormatting ParagraphFormatting, bool IsHeading, bool IsCaption);
 }

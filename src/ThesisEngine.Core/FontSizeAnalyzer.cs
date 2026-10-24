@@ -19,6 +19,8 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
     public const string RuleIdCaptionSpaceAfter = "demo/caption-space-after";
     public const string RuleIdCaptionPlacement = "demo/caption-placement";
     public const string RuleIdCaptionNumberGap = "demo/caption-number-gap";
+    public const string RuleIdPictureWidth = "demo/picture-fit-width";
+    public const string RuleIdTableWidth = "demo/table-fit-width";
 
     private const string SeverityWarning = "warning";
     private const string FixLevelAuto = "auto";
@@ -70,7 +72,8 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
             }
         }
 
-        var coverage = $"已检查 {checkedRuns} 个正文文本片段，涉及 {checkedParagraphs} 个确认正文段落；识别 {checkedCaptions} 条图/表题注";
+        var coverage = $"已检查 {checkedRuns} 个正文文本片段，涉及 {checkedParagraphs} 个确认正文段落；识别 {checkedCaptions} 条图/表题注" +
+            $"；核对 {snapshot.Paragraphs.Count(p => p.CaptionObjectWidth is not null)} 个配对图片/简单表格的宽度";
 
         return new AnalysisResult(
             Diagnostics: DiagnosticGrouper.Group(diagnostics),
@@ -86,6 +89,13 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
             ? null
             : $"word/document.xml#paragraph[{paragraph.ParagraphIndex}]/run[{paragraph.Runs[0].RunIndex}]";
         if (location is null) return;
+
+        var objectWidth = paragraph.CaptionObjectWidth;
+        if (objectWidth is not null && objectWidth.WidthPt > objectWidth.MaximumWidthPt + 0.1)
+            diagnostics.Add(new Diagnostic(objectWidth.Kind == "picture" ? RuleIdPictureWidth : RuleIdTableWidth,
+                "warning", location, objectWidth.MaximumWidthPt.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "pt",
+                objectWidth.WidthPt.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "pt", "auto",
+                "版面边界检查（不是校级固定尺寸要求）：对象超出当前分节的可用宽度；选中后按比例缩小，保留图片内容或表格列宽比例。题注作为定位锚点。"));
 
         foreach (var run in paragraph.Runs.Where(run => !string.IsNullOrWhiteSpace(run.Text)))
         {
@@ -132,6 +142,9 @@ public sealed class FontSizeAnalyzer : IDemoAnalyzer
                 captionName + "应置于" + expectedPosition + "；系统不会自动移动内容，请人工调整。", "manual", diagnostics);
         }
 
+        // The Chinese full-width gap rule does not define an English caption gap.
+        if (System.Text.RegularExpressions.Regex.IsMatch(paragraph.Text.TrimStart(),
+            @"^(?:Figure|Fig\.|Table)\s", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return;
         var labelMatch = System.Text.RegularExpressions.Regex.Match(paragraph.Text.TrimStart(),
             @"^(?:图|表)\s*(?:[A-Z]|[0-9]+)(?:[.\-—][0-9]+)*");
         if (!labelMatch.Success || labelMatch.Length >= paragraph.Text.TrimStart().Length ||

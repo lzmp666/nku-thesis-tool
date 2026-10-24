@@ -454,6 +454,17 @@ public sealed class WordFormattingReaderTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData("Caption")]
+    [InlineData("题注")]
+    public void RecognizesRenamedAndDerivedCaptionStylesWithoutDependingOnStyleId(string name)
+    {
+        var styles = "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:styleId=\"a7\"><w:name w:val=\"" + name + "\"/></w:style><w:style w:type=\"paragraph\" w:styleId=\"customCaption\"><w:basedOn w:val=\"a7\"/></w:style></w:styles>";
+        var path = CreatePackage(Document("<w:p><w:pPr><w:pStyle w:val=\"customCaption\"/></w:pPr><w:r><w:t>Table 1.1 Synthetic caption</w:t></w:r></w:p>"), styles);
+        try { Assert.Equal(CaptionKind.Table, Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Caption); }
+        finally { File.Delete(path); }
+    }
+
     private static string CreatePackage(string document, string? styles = null, IEnumerable<(string Name, string Xml)>? entries = null)
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.docx");

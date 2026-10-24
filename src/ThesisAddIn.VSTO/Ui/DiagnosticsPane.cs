@@ -685,6 +685,8 @@ namespace ThesisAddIn.VSTO.Ui
                 case "demo/caption-space-after": return "图表题注段后距";
                 case "demo/caption-placement": return "图表题注位置";
                 case "demo/caption-number-gap": return "题注编号间距";
+                case "demo/picture-fit-width": return "图片超出版心";
+                case "demo/table-fit-width": return "表格超出版心";
                 default:
                     if (!string.IsNullOrWhiteSpace(ruleId) && ruleId.IndexOf("caption", StringComparison.OrdinalIgnoreCase) >= 0)
                         return "图表题注";

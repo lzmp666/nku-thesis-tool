@@ -63,6 +63,15 @@ public static class PatchPlanner
             string.Equals(diagnostic.Actual, "(unknown)", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        if (diagnostic.RuleId is FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
+        {
+            if (!TryParsePoints(diagnostic.Expected, out var limit) || !TryParsePoints(diagnostic.Actual, out var width) || width <= limit)
+                return false;
+            patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual, diagnostic.Expected,
+                "缩小至当前分节可用宽度；图片保持宽高比，简单固定表格保持列宽比例，不修改内容。");
+            return true;
+        }
+
         if (string.Equals(diagnostic.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
         {
             patch = new Patch(diagnostic.RuleId, diagnostic.Location, diagnostic.Actual,

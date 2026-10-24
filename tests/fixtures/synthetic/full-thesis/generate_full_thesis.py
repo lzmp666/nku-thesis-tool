@@ -41,8 +41,9 @@ def set_run_font(run, east_asia: str = CN_FONT, western: str = LATIN_FONT, size:
 def set_cell_shading(cell, fill: str) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
     shading.set(qn("w:fill"), fill)
-    tc_pr.append(shading)
+    tc_pr.insert_element_before(shading, "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark", "w:tcPrChange")
 
 
 def set_cell_borders(cell, color="9AA9BA", size="5") -> None:
@@ -54,7 +55,7 @@ def set_cell_borders(cell, color="9AA9BA", size="5") -> None:
         tag.set(qn("w:sz"), size)
         tag.set(qn("w:color"), color)
         borders.append(tag)
-    tc_pr.append(borders)
+    tc_pr.insert_element_before(borders, "w:shd", "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark", "w:tcPrChange")
 
 
 def set_para_format(paragraph, alignment=WD_ALIGN_PARAGRAPH.JUSTIFY, first_indent=Cm(0.74),

@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Xml.Linq;
 using ThesisAddIn.Protocol;
 using Word = Microsoft.Office.Interop.Word;
 
@@ -26,6 +29,8 @@ namespace ThesisAddIn.VSTO.Engine
             internal string RuleId;
             internal string Text;
             internal string AppliedSignature;
+            internal Action<Action> RestoreObject;
+            internal Func<string> ObjectSignature;
         }
         public static bool ClearPreviousToolMarks(Word.Document document, string snapshot, out string error)
         {
@@ -48,15 +53,17 @@ namespace ThesisAddIn.VSTO.Engine
                 {
                     Word.Range range = ranges[patch.Location];
                     ValidatePatch(range, patch);
-                    captured.Changes.Add(new FormatChange { Range = range.Duplicate, Font = range.Font.Duplicate,
-                        Paragraph = range.ParagraphFormat.Duplicate, RuleId = patch.RuleId, Text = range.Text });
+                    var change = new FormatChange { Range = range.Duplicate, Font = range.Font.Duplicate,
+                        Paragraph = range.ParagraphFormat.Duplicate, RuleId = patch.RuleId, Text = range.Text };
+                    CaptureObjectChange(change);
+                    captured.Changes.Add(change);
                 }
             }, markMutation =>
             {
                 for (int index = 0; index < patches.Count; index++)
                 {
                     EnginePatch patch = patches[index];
-                    ApplyPatch(ranges[patch.Location], patch);
+                    ApplyPatch(ranges[patch.Location], patch, markMutation);
                     markMutation();
                     ValidatePatch(ranges[patch.Location], new EnginePatch { RuleId = patch.RuleId,
                         ExpectedBefore = patch.DesiredAfter, DesiredAfter = patch.DesiredAfter });
@@ -80,7 +87,7 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 foreach (FormatChange change in record.Changes)
                 {
-                    RestoreFormat(change);
+                    RestoreFormat(change, markMutation);
                     markMutation();
                 }
                 document.Saved = false;
@@ -88,6 +95,7 @@ namespace ThesisAddIn.VSTO.Engine
         }
         private static string FormatSignature(FormatChange change)
         {
+            if (change.ObjectSignature != null) return change.ObjectSignature();
             Word.Range range = change.Range;
             switch (change.RuleId)
             {
@@ -102,8 +110,9 @@ namespace ThesisAddIn.VSTO.Engine
                 default: throw new NotSupportedException("该格式尚不支持逐项撤销。");
             }
         }
-        private static void RestoreFormat(FormatChange change)
+        private static void RestoreFormat(FormatChange change, Action markMutation)
         {
+            if (change.RestoreObject != null) { change.RestoreObject(markMutation); return; }
             Word.Range range = change.Range;
             switch (change.RuleId)
             {
@@ -117,6 +126,133 @@ namespace ThesisAddIn.VSTO.Engine
                 case "demo/caption-space-after": range.ParagraphFormat.SpaceAfter = change.Paragraph.SpaceAfter; break;
                 default: throw new NotSupportedException("不能撤销未支持的格式。");
             }
+        }
+
+        private static bool IsObjectWidth(string ruleId) => ruleId == "demo/picture-fit-width" || ruleId == "demo/table-fit-width";
+
+        private static Word.Range AdjacentObjectRange(Word.Range anchor, bool picture)
+        {
+            Word.Paragraph paragraph = anchor.Paragraphs[1];
+            for (int index = 0; index < 32; index++)
+            {
+                paragraph = picture ? paragraph.Previous() : paragraph.Next();
+                if (paragraph == null) break;
+                Word.Range candidate = paragraph.Range;
+                if (picture && candidate.InlineShapes.Count == 1 && candidate.Tables.Count == 0 &&
+                    string.IsNullOrWhiteSpace((candidate.Text ?? "").Replace("\u0001", "").TrimEnd('\r')))
+                    return candidate;
+                if (!picture && candidate.Tables.Count == 1 && candidate.Tables[1].NestingLevel == 1)
+                    return candidate;
+                if (candidate.InlineShapes.Count != 0 || candidate.Tables.Count != 0 ||
+                    !string.IsNullOrWhiteSpace((candidate.Text ?? "").TrimEnd('\r'))) break;
+            }
+            throw new InvalidDataException("题注旁没有唯一、可安全定位的图片或简单表格，已停止修改。");
+        }
+
+        private static double ObjectWidth(Word.Range anchor, string ruleId)
+        {
+            Word.Range target = AdjacentObjectRange(anchor, ruleId == "demo/picture-fit-width");
+            if (ruleId == "demo/picture-fit-width") return target.InlineShapes[1].Width;
+            Word.Table table = target.Tables[1];
+            if (table.AllowAutoFit || !table.Uniform) throw new InvalidDataException("表格已不是规则的固定列宽表格。");
+            double width = 0;
+            foreach (Word.Column column in table.Columns) width += column.Width;
+            return width;
+        }
+
+        private static void ValidateObjectWidth(Word.Range anchor, EnginePatch patch)
+        {
+            if (!TryParsePoints(patch.DesiredAfter, out double limit)) throw new InvalidDataException("对象宽度目标无效。");
+            Word.Range target = AdjacentObjectRange(anchor, patch.RuleId == "demo/picture-fit-width");
+            Word.PageSetup page = target.Sections[1].PageSetup;
+            if (page.TextColumns.Count != 1 || page.Gutter != 0) throw new InvalidDataException("分栏或装订线布局不支持安全缩放。");
+            double available = page.PageWidth - page.LeftMargin - page.RightMargin;
+            if (patch.RuleId == "demo/picture-fit-width")
+                available -= target.ParagraphFormat.LeftIndent + target.ParagraphFormat.RightIndent + target.ParagraphFormat.FirstLineIndent;
+            if (Math.Abs(available - limit) > 0.1) throw new InvalidDataException("当前 Word 版面宽度与快照不同，已停止缩放。");
+            EnsureBeforeValue(patch, ObjectWidth(anchor, patch.RuleId).ToString("0.###", CultureInfo.InvariantCulture) + "pt", true);
+        }
+
+        private static void ResizeObject(Word.Range anchor, EnginePatch patch, Action markMutation)
+        {
+            if (!TryParsePoints(patch.DesiredAfter, out double limit)) throw new InvalidDataException("对象宽度目标无效。");
+            Word.Range target = AdjacentObjectRange(anchor, patch.RuleId == "demo/picture-fit-width");
+            if (patch.RuleId == "demo/picture-fit-width")
+            {
+                Word.InlineShape picture = target.InlineShapes[1];
+                float width = picture.Width, height = picture.Height;
+                var locked = picture.LockAspectRatio;
+                try
+                {
+                    if (locked != Microsoft.Office.Core.MsoTriState.msoFalse)
+                    { picture.LockAspectRatio = Microsoft.Office.Core.MsoTriState.msoFalse; markMutation(); }
+                    picture.Width = (float)limit; markMutation();
+                    picture.Height = (float)(height * limit / width); markMutation();
+                }
+                finally { picture.LockAspectRatio = locked; }
+            }
+            else
+            {
+                Word.Table table = target.Tables[1];
+                float[] widths = table.Columns.Cast<Word.Column>().Select(column => column.Width).ToArray();
+                double total = widths.Sum(width => (double)width);
+                for (int index = 0; index < widths.Length; index++)
+                { table.Columns[index + 1].SetWidth((float)(widths[index] * limit / total), Word.WdRulerStyle.wdAdjustNone); markMutation(); }
+                table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints; markMutation();
+                table.PreferredWidth = (float)limit; markMutation();
+            }
+        }
+
+        private static void CaptureObjectChange(FormatChange change)
+        {
+            if (!IsObjectWidth(change.RuleId)) return;
+            Word.Range target = AdjacentObjectRange(change.Range, change.RuleId == "demo/picture-fit-width");
+            if (change.RuleId == "demo/picture-fit-width")
+            {
+                Word.InlineShape picture = target.InlineShapes[1];
+                float width = picture.Width, height = picture.Height;
+                var locked = picture.LockAspectRatio;
+                change.ObjectSignature = () => picture.Width.ToString(CultureInfo.InvariantCulture) + "|" +
+                    picture.Height.ToString(CultureInfo.InvariantCulture) + "|" + picture.LockAspectRatio + "|" + PictureContentSignature(picture);
+                change.RestoreObject = markMutation =>
+                {
+                    try
+                    {
+                        if (picture.LockAspectRatio != Microsoft.Office.Core.MsoTriState.msoFalse)
+                        { picture.LockAspectRatio = Microsoft.Office.Core.MsoTriState.msoFalse; markMutation(); }
+                        picture.Width = width; markMutation(); picture.Height = height; markMutation();
+                    }
+                    finally { picture.LockAspectRatio = locked; }
+                };
+            }
+            else
+            {
+                Word.Table table = target.Tables[1];
+                float[] widths = table.Columns.Cast<Word.Column>().Select(column => column.Width).ToArray();
+                var preferredType = table.PreferredWidthType;
+                float preferredWidth = table.PreferredWidth;
+                change.ObjectSignature = () => table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
+                    table.PreferredWidthType + "|" + table.PreferredWidth.ToString(CultureInfo.InvariantCulture) + "|" +
+                    string.Join("|", table.Columns.Cast<Word.Column>().Select(column => column.Width.ToString(CultureInfo.InvariantCulture)));
+                change.RestoreObject = markMutation =>
+                {
+                    for (int index = 0; index < widths.Length; index++) { table.Columns[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
+                    table.PreferredWidthType = preferredType; markMutation(); table.PreferredWidth = preferredWidth; markMutation();
+                };
+            }
+        }
+
+        private static string PictureContentSignature(Word.InlineShape picture)
+        {
+            // Ignore unrelated Flat OPC properties/styles/statistics. A changed image
+            // must block item undo; another format repair must not block it.
+            XNamespace package = "http://schemas.microsoft.com/office/2006/xmlPackage";
+            XDocument xml = XDocument.Parse(picture.Range.WordOpenXML);
+            string media = string.Join("|", xml.Descendants(package + "part")
+                .Where(part => ((string)part.Attribute(package + "contentType") ?? "").StartsWith("image/", StringComparison.Ordinal))
+                .Select(part => part.Element(package + "binaryData")?.Value ?? "").OrderBy(value => value, StringComparer.Ordinal));
+            if (string.IsNullOrWhiteSpace(media)) throw new InvalidDataException("无法核对图片内容，已停止撤销。");
+            using (SHA256 hash = SHA256.Create()) return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(media)));
         }
     }
 }
