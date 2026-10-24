@@ -7,6 +7,11 @@ using System.Windows.Forms;
 namespace ThesisAddIn.VSTO.Ui
 {
     /// <summary>Buffered, pixel-scrolling cards without native ListBox selection painting.</summary>
+    internal sealed class CardPointerEventArgs : EventArgs
+    {
+        internal int Index, X, Y;
+        internal bool Handled;
+    }
     internal sealed class StableIssueListBox : Control
     {
         private readonly IssueListViewport _viewport = new IssueListViewport();
@@ -43,6 +48,7 @@ namespace ThesisAddIn.VSTO.Ui
         public int ContentWidth => Math.Max(1, ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
         public event EventHandler SelectedIndexChanged;
         public event EventHandler CurrentItemInvoked;
+        internal event EventHandler<CardPointerEventArgs> ItemPointerPressed;
         public event DrawItemEventHandler DrawItem;
         public event MeasureItemEventHandler MeasureItem;
         public int SelectedIndex { get => _viewport.SelectedIndex; set => SelectCard(value, false); }
@@ -163,8 +169,11 @@ namespace ThesisAddIn.VSTO.Ui
             if (e.Button != MouseButtons.Left || e.X >= ContentWidth) return;
             _scrollTimer.Stop();
             _targetOffset = _viewport.Offset;
-            Focus();
             int index = _viewport.HitTest(e.Y);
+            var pointer = new CardPointerEventArgs { Index=index, X=e.X, Y=e.Y };
+            ItemPointerPressed?.Invoke(this,pointer);
+            if(pointer.Handled) return;
+            Focus();
             if (index >= 0)
             {
                 bool same = index == SelectedIndex;

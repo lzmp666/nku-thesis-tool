@@ -15,7 +15,7 @@ namespace ThesisAddIn.VSTO.Ui
     /// <summary>只显示可检索的问题列表；分析、定位和修复命令位于 Word 功能区。</summary>
     public sealed class DiagnosticsPane : UserControl
     {
-        private const string SearchPlaceholder = "搜索问题（例：类型:西文字体 期望:Times New Roman）";
+        private const string SearchPlaceholder = "搜索类型、要求、实际或位置";
         private readonly TextBox _searchBox = new TextBox();
         private readonly Button _clearSearchButton = new Button();
         private readonly StableIssueListBox _issueList = new StableIssueListBox();
@@ -37,11 +37,21 @@ namespace ThesisAddIn.VSTO.Ui
         private float _uiScale = 1F;
         private readonly List<Font> _scaledFonts = new List<Font>();
 
+        internal readonly IssueReviewState Review;
+        internal bool IsSuggestion { get; }
+        public event EventHandler RepairRequested;
+        public event EventHandler UndoRequested;
+        public event EventHandler ApplyCheckedRequested;
         public event EventHandler DiagnosticSelected;
         public event EventHandler StateChanged;
 
-        public DiagnosticsPane()
+        public DiagnosticsPane() : this(false, new IssueReviewState()) { }
+        internal DiagnosticsPane(bool suggestions, IssueReviewState review)
         {
+            IsSuggestion = suggestions;
+            Review = review;
+            Review.Changed += OnReviewChanged;
+            Review.SelectionChanged += OnReviewSelectionChanged;
             Dock = DockStyle.Fill;
             DoubleBuffered = true;
             AutoScaleMode = AutoScaleMode.None;
@@ -64,6 +74,7 @@ namespace ThesisAddIn.VSTO.Ui
             _summary.TextAlign = ContentAlignment.MiddleLeft;
             _summary.Text = "格式问题";
             _summary.AccessibleName = "问题数量";
+            _toolTip.SetToolTip(_summary,"当前为演示规则：支持正文中英文字体、字号与部分图表题注格式。图片布局、表格内部样式、流程图和公式尚未自动检查，不保证完整合规。");
 
             _ruleNotice.Dock = DockStyle.Fill;
             _ruleNotice.Text = "演示规则 · 用于验证功能，不代表正式合规结论";
@@ -115,6 +126,7 @@ namespace ThesisAddIn.VSTO.Ui
             _issueList.AccessibleName = "格式问题列表";
             _issueList.SelectedIndexChanged += OnIssueSelected;
             _issueList.CurrentItemInvoked += OnIssueSelected;
+            _issueList.ItemPointerPressed += OnCardPointer;
             _issueList.DrawItem += OnDrawIssueItem;
             _issueList.MeasureItem += OnMeasureIssueItem;
             _issueList.KeyDown += OnIssueListKeyDown;
@@ -146,13 +158,13 @@ namespace ThesisAddIn.VSTO.Ui
                 BackColor = BackColor
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 86F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 31F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 29F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 0F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, IsSuggestion ? 0F : 38F));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F));
 
-            _headerImage = LoadHeaderImage();
+            _headerImage = null;
             var header = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -160,7 +172,7 @@ namespace ThesisAddIn.VSTO.Ui
                 Margin = new Padding(0, 0, 0, 4),
                 Padding = new Padding(0)
             };
-            header.Paint += (sender, args) => PaintHeader(args.Graphics, header.ClientRectangle);
+            // Campus artwork lives in the Ribbon, leaving the index compact.
             header.Controls.Add(_summary);
 
             var searchSurface = new Panel
@@ -201,7 +213,25 @@ namespace ThesisAddIn.VSTO.Ui
             searchSurface.Controls.Add(searchLayout);
 
             layout.Controls.Add(header, 0, 0);
-            layout.Controls.Add(_ruleNotice, 0, 1);
+            _ruleNotice.Visible = false;
+            var batchBar = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0), WrapContents = false };
+            var all = new Button { Text = "全选", AutoSize = true, FlatStyle = FlatStyle.Flat };
+            var none = new Button { Text = "清空", AutoSize = true, FlatStyle = FlatStyle.Flat };
+            var apply = new Button { Text = "修复所选", AutoSize = true, FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(104,31,61), ForeColor = Color.White };
+            var close = new Button { Text = "退出", AutoSize = true, FlatStyle = FlatStyle.Flat };
+            all.Click += (s, e) => Review.SelectAll(true);
+            none.Click += (s, e) => Review.SelectAll(false);
+            apply.Click += (s, e) => OnEvent(ApplyCheckedRequested);
+            close.Click += (s, e) => Review.SetBatch(false);
+            batchBar.Controls.AddRange(new Control[] { all, none, apply, close });
+            batchBar.Visible = false;
+            Review.Changed += (s, e) => {
+                batchBar.Visible = Review.BatchMode;
+                layout.RowStyles[1].Height = Review.BatchMode ? 34F * _uiScale : 0;
+                apply.Enabled = !_isBusy && Review.Checked.Count > 0;
+            };
+            layout.Controls.Add(batchBar, 0, 1);
             layout.Controls.Add(searchSurface, 0, 2);
             layout.Controls.Add(resultsSurface, 0, 3);
             layout.Controls.Add(_status, 0, 4);
@@ -235,7 +265,7 @@ namespace ThesisAddIn.VSTO.Ui
                 }
             }
             _summary.Height = (int)Math.Round(27F * _uiScale);
-            return (int)Math.Round(390F * _uiScale);
+            return (int)Math.Round((IsSuggestion ? 265F : 300F) * _uiScale);
         }
 
         private Padding ScalePadding(Padding value) => new Padding(
@@ -272,9 +302,9 @@ namespace ThesisAddIn.VSTO.Ui
 
         public IList<EngineDiagnostic> Diagnostics => _diagnostics;
         public bool IsBusy => _isBusy;
-        public bool CanFixSelected => !_isBusy && IsFixable(SelectedDiagnostic);
-        public bool CanResolveSelected => !_isBusy && SelectedDiagnostic != null;
-        public bool HasFixableDiagnostics => !_isBusy && _diagnostics.Any(IsFixable);
+        public bool CanFixSelected => !_isBusy && Review.CanRepair(SelectedDiagnostic);
+        public bool CanResolveSelected => !_isBusy && Review.IsRepaired(SelectedDiagnostic);
+        public bool HasFixableDiagnostics => !_isBusy && _diagnostics.Any(Review.CanRepair);
         public bool CanNavigateIssues => !_isBusy && _visibleIndices.Count > 0;
         public bool CanNavigateOccurrences => !_isBusy && GetOccurrenceCount(SelectedDiagnostic) > 1;
 
@@ -305,16 +335,12 @@ namespace ThesisAddIn.VSTO.Ui
         {
             _navigationTimer.Stop();
             _analysisSucceeded = true;
-            _diagnostics.Clear();
-            if (result?.Diagnostics != null)
-                _diagnostics.AddRange(result.Diagnostics.Where(diagnostic => diagnostic != null));
-            _selectedIndex = -1;
-            _selectedOccurrenceIndex = 0;
+            Review.Refresh(result?.Diagnostics);
             ClearSearch();
             RebuildIssueList();
             string baseStatus = _diagnostics.Count == 0
                 ? "未发现已覆盖范围内的格式问题；未覆盖项不会被判为合规。"
-                : "悬停或点击正文黄色标记，可查看对应建议并定位原文。修复与验证操作位于顶部功能区。";
+                : "点击问题定位原文；建议卡内可解决或撤销。";
             string[] unsupported = result?.UnsupportedScopes?.Where(value => !string.IsNullOrWhiteSpace(value))
                 .Select(DescribeUnsupportedScope).Distinct(StringComparer.CurrentCulture).ToArray()
                 ?? Array.Empty<string>();
@@ -457,6 +483,7 @@ namespace ThesisAddIn.VSTO.Ui
                 if (visibleIndex >= 0) _issueList.Invalidate(_issueList.GetItemRectangle(visibleIndex));
                 RaiseStateChanged();
             }
+            Review.Select(selected, location ?? SelectedLocation);
             if (navigateToSource) QueueSourceNavigation();
         }
 
@@ -588,7 +615,7 @@ namespace ThesisAddIn.VSTO.Ui
             int visibleOccurrences = _visibleIndices.Sum(index => GetOccurrenceCount(_diagnostics[index]));
             int totalOccurrences = _diagnostics.Sum(GetOccurrenceCount);
             _summary.Text = string.IsNullOrEmpty(query)
-                ? "格式问题  " + _diagnostics.Count + " 项 · " + totalOccurrences + " 处"
+                ? "待处理 " + _diagnostics.Count(x=>!Review.IsRepaired(x)) + " 项 · 已修复 " + Review.Repaired.Count + " 项"
                 : "检索结果  " + _visibleIndices.Count + " 项 · " + visibleOccurrences + " 处（共 "
                     + _diagnostics.Count + " 项）";
             _emptyResults.Visible = _analysisSucceeded && _visibleIndices.Count == 0;
@@ -616,7 +643,7 @@ namespace ThesisAddIn.VSTO.Ui
                 switch (field)
                 {
                     case "类型": haystack = type; break;
-                    case "期望": haystack = diagnostic.Expected; break;
+                    case "要求": case "期望": haystack = diagnostic.Expected; break;
                     case "实际": haystack = GetActualValues(diagnostic); break;
                     case "位置": haystack = location; break;
                     case "状态": haystack = status; break;
@@ -667,94 +694,116 @@ namespace ThesisAddIn.VSTO.Ui
 
         private void OnMeasureIssueItem(object sender, MeasureItemEventArgs e)
         {
-            if (e.Index < 0 || e.Index >= _visibleIndices.Count)
-            {
-                e.ItemHeight = (int)Math.Ceiling(100 * _uiScale);
-                return;
-            }
-            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[e.Index]];
-            int width = Math.Max(160, (int)(_issueList.ContentWidth / _uiScale) - 8);
-            using (Graphics graphics = _issueList.CreateGraphics())
-            {
-                int left = 15;
-                int right = width - 15;
-                int height = 14 + 24 + 4;
-                using (var smallFont = LogicalFont(8.4F))
-                using (var bodyFont = LogicalFont(9F))
-                {
-                    height += MeasureCardLineHeight(graphics, diagnostic.Expected, left, right, bodyFont) + 4;
-                    height += MeasureCardLineHeight(graphics, GetActualValues(diagnostic), left, right, bodyFont) + 4;
-                    height += MeasureCardLineHeight(graphics,
-                        GetCompactLocation(_visibleIndices[e.Index], diagnostic), left, right, smallFont) + 4;
-                    height += MeasureCardLineHeight(graphics, BuildRecommendation(diagnostic), left, right, smallFont) + 10;
-                }
-                e.ItemHeight = (int)Math.Ceiling(Math.Max(126, height) * _uiScale);
+            if (e.Index < 0 || e.Index >= _visibleIndices.Count) { e.ItemHeight = 90; return; }
+            EngineDiagnostic issue = _diagnostics[_visibleIndices[e.Index]];
+            int width = Math.Max(140, (int)(_issueList.ContentWidth / _uiScale) - 12);
+            using (var font = LogicalFont(8.8F)) {
+                int height = 29;
+                height += MeasureCardLineHeight(e.Graphics, issue.Expected, 12, width-12, font)+2;
+                height += MeasureCardLineHeight(e.Graphics, ActualText(issue), 12, width-12, font)+2;
+                if (!IsSuggestion) height += MeasureCardLineHeight(e.Graphics,
+                    GetCompactLocation(_visibleIndices[e.Index], issue), 12, width-12, font)+2;
+                else height += 30;
+                e.ItemHeight = (int)Math.Ceiling(height * _uiScale);
             }
         }
-
+        private string ActualText(EngineDiagnostic issue) => Review.IsRepaired(issue)
+            ? DisplayValue(issue.Expected) : DisplayValue(GetActualValues(issue));
+        private static string DisplayValue(string value)
+        {
+            switch (value) { case "center": return "居中"; case "left": return "左对齐";
+                case "right": return "右对齐"; case "single": return "单倍行距";
+                case "multiple:360": return "1.5 倍行距"; case "(unknown)": return "未知，需核对";
+                default: return value ?? "未知"; }
+        }
         private void OnDrawIssueItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0 || e.Index >= _visibleIndices.Count) return;
-            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-            GraphicsState state = e.Graphics.Save();
-            try
-            {
+            GraphicsState saved = e.Graphics.Save();
+            try {
                 e.Graphics.ScaleTransform(_uiScale, _uiScale);
-                var bounds = new Rectangle((int)(e.Bounds.X / _uiScale), (int)(e.Bounds.Y / _uiScale),
-                    (int)(e.Bounds.Width / _uiScale), (int)(e.Bounds.Height / _uiScale));
-                DrawIssueCard(e.Graphics, bounds, e.Index, selected);
-            }
-            finally { e.Graphics.Restore(state); }
-            e.DrawFocusRectangle();
+                Rectangle bounds = new Rectangle((int)(e.Bounds.X/_uiScale), (int)(e.Bounds.Y/_uiScale),
+                    (int)(e.Bounds.Width/_uiScale), (int)(e.Bounds.Height/_uiScale));
+                DrawIssueCard(e.Graphics, bounds, e.Index, (e.State & DrawItemState.Selected) != 0);
+            } finally { e.Graphics.Restore(saved); }
         }
-
         private void DrawIssueCard(Graphics graphics, Rectangle bounds, int index, bool selected)
         {
-            EngineDiagnostic diagnostic = _diagnostics[_visibleIndices[index]];
-            Rectangle card = Rectangle.Inflate(bounds, -3, -3);
-            card.Width = Math.Max(1, card.Width);
-            card.Height = Math.Max(1, card.Height);
-            Color fill = selected ? Color.FromArgb(255, 249, 233) : Color.White;
-            Color border = selected ? Color.FromArgb(132, 38, 76) : Color.FromArgb(225, 218, 211);
-            using (GraphicsPath path = RoundedRectangle(card, 7))
-            using (var brush = new SolidBrush(fill))
-            using (var pen = new Pen(border, selected ? 1.5F : 1F))
-            {
+            EngineDiagnostic issue = _diagnostics[_visibleIndices[index]];
+            Rectangle card = Rectangle.Inflate(bounds, -3,-3);
+            Color purple = Color.FromArgb(104,31,61);
+            using (GraphicsPath path = RoundedRectangle(card,6))
+            using (var fill = new SolidBrush(selected ? Color.FromArgb(255,249,233) : Color.White))
+            using (var border = new Pen(selected ? purple : Color.FromArgb(225,218,211), selected?1.5F:1F)) {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                graphics.FillPath(brush, path);
-                graphics.DrawPath(pen, path);
+                graphics.FillPath(fill,path); graphics.DrawPath(border,path);
             }
-            if (selected)
-            {
-                using (var accent = new SolidBrush(Color.FromArgb(132, 38, 76)))
-                    graphics.FillRectangle(accent, card.Left + 1, card.Top + 8, 3, Math.Max(12, card.Height - 16));
-            }
-
-            int left = card.Left + 12;
-            int right = card.Right - 12;
-            float y = card.Top + 10;
-            using (var titleFont = LogicalFont(9.5F, FontStyle.Bold))
-            using (var smallFont = LogicalFont(8.4F))
-            using (var bodyFont = LogicalFont(9F))
-            using (var mutedBrush = new SolidBrush(Color.FromArgb(112, 99, 102)))
-            using (var textBrush = new SolidBrush(ForeColor))
-            using (var accentBrush = new SolidBrush(Color.FromArgb(111, 34, 66)))
-            {
-                string title = DescribeRule(diagnostic.RuleId);
-                string count = GetOccurrenceCount(diagnostic) > 1 ? "共 " + GetOccurrenceCount(diagnostic) + " 处" : "1 处";
-                using (var titleBrush = new SolidBrush(Color.FromArgb(104, 31, 61)))
-                    graphics.DrawString(title, titleFont, titleBrush, left, y);
-                SizeF countSize = graphics.MeasureString(count, smallFont);
-                graphics.DrawString(count, smallFont, mutedBrush, Math.Max(left, right - countSize.Width), y + 2);
-                y += 25;
-
-                DrawCardLine(graphics, "期望", diagnostic.Expected, left, ref y, right, bodyFont, accentBrush);
-                DrawCardLine(graphics, "实际", GetActualValues(diagnostic), left, ref y, right, bodyFont, textBrush);
-                DrawCardLine(graphics, "位置", GetCompactLocation(_visibleIndices[index], diagnostic),
-                    left, ref y, right, smallFont, mutedBrush);
-                DrawCardLine(graphics, "建议", BuildRecommendation(diagnostic), left, ref y, right, smallFont, textBrush);
+            using (var title = LogicalFont(9F,FontStyle.Bold))
+            using (var body = LogicalFont(8.8F))
+            using (var ink = new SolidBrush(ForeColor))
+            using (var accent = new SolidBrush(purple)) {
+                float y = card.Top+7;
+                bool check = Review.Checked.Contains(IssueReviewState.Key(issue));
+                string lead = Review.BatchMode ? (Review.CanRepair(issue) ? (check ? "☑ " : "☐ ") : "— ") : "";
+                string state = Review.IsRepaired(issue) ? " · 已修复" : "";
+                graphics.DrawString(lead+DescribeRule(issue.RuleId)+state,title,accent,card.Left+9,y);
+                y += 22;
+                DrawCardLine(graphics,"要求",DisplayValue(issue.Expected),card.Left+9,ref y,card.Right-9,body,ink);
+                DrawCardLine(graphics,"实际",ActualText(issue),card.Left+9,ref y,card.Right-9,body,ink);
+                if (!IsSuggestion)
+                    DrawCardLine(graphics,"位置",GetCompactLocation(_visibleIndices[index],issue),
+                        card.Left+9,ref y,card.Right-9,body,ink);
+                else {
+                    int buttonY = card.Bottom-28;
+                    DrawAction(graphics,new Rectangle(card.Left+9,buttonY,66,23),"解决",Review.CanRepair(issue));
+                    DrawAction(graphics,new Rectangle(card.Left+83,buttonY,66,23),"撤销",Review.IsRepaired(issue));
+                }
             }
         }
+        private void DrawAction(Graphics graphics, Rectangle rect, string label, bool enabled)
+        {
+            using (var fill = new SolidBrush(enabled?Color.FromArgb(104,31,61):Color.FromArgb(237,233,229)))
+            using (var ink = new SolidBrush(enabled?Color.White:Color.Gray))
+            using (var font = LogicalFont(8.5F)) {
+                graphics.FillRectangle(fill,rect);
+                graphics.DrawString(label,font,ink,rect,new StringFormat { Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center });
+            }
+        }
+        private void OnCardPointer(object sender, CardPointerEventArgs e)
+        {
+            if (_isBusy || e.Index<0 || e.Index>=_visibleIndices.Count) return;
+            int index = _visibleIndices[e.Index];
+            EngineDiagnostic issue = _diagnostics[index];
+            Rectangle bounds = _issueList.GetItemRectangle(e.Index);
+            float x=e.X/_uiScale, y=(e.Y-bounds.Top)/_uiScale, height=bounds.Height/_uiScale;
+            if (Review.BatchMode && x<36) {
+                SelectDiagnostic(index,false); Review.Toggle(issue); e.Handled=true; return;
+            }
+            if (IsSuggestion && y>=height-33) {
+                SelectDiagnostic(index,false);
+                if (x>=12 && x<=80 && Review.CanRepair(issue)) OnEvent(RepairRequested);
+                else if (x>=86 && x<=155 && Review.IsRepaired(issue)) OnEvent(UndoRequested);
+                e.Handled=true;
+            }
+        }
+        private void OnReviewChanged(object sender, EventArgs e)
+        {
+            _analysisSucceeded=true;
+            if (_diagnostics.SequenceEqual(Review.Rows)) {
+                _summary.Text="待处理 "+_diagnostics.Count(x=>!Review.IsRepaired(x))+" 项 · 已修复 "+Review.Repaired.Count+" 项";
+                _issueList.Invalidate(); RaiseStateChanged(); return;
+            }
+            _diagnostics.Clear(); _diagnostics.AddRange(Review.Rows);
+            _selectedIndex = _diagnostics.FindIndex(x=>IssueReviewState.Key(x)==Review.SelectedKey);
+            RebuildIssueList(); RaiseStateChanged();
+        }
+        private void OnReviewSelectionChanged(object sender, EventArgs e)
+        {
+            int index=_diagnostics.FindIndex(x=>IssueReviewState.Key(x)==Review.SelectedKey);
+            if(index>=0) SelectDiagnostic(index,false,Review.SelectedLocation);
+        }
+        internal void BeginBatch() { Review.SetBatch(true); }
+        internal EngineDiagnostic[] CheckedDiagnostics => _diagnostics.Where(x=>Review.Checked.Contains(IssueReviewState.Key(x)) && Review.CanRepair(x)).ToArray();
 
         private static void DrawCardLine(Graphics graphics, string label, string value, int left,
             ref float y, int right, Font font, Brush valueBrush)
@@ -768,7 +817,7 @@ namespace ThesisAddIn.VSTO.Ui
                 graphics.DrawString(label, labelFont, labelBrush, left, y);
                 var text = new RectangleF(left + labelColumnWidth, y, textWidth, rowHeight);
                 graphics.DrawString(value ?? "—", font, valueBrush, text);
-                y += rowHeight + 4;
+                y += rowHeight + 2;
             }
         }
 
@@ -806,6 +855,8 @@ namespace ThesisAddIn.VSTO.Ui
         {
             if (disposing)
             {
+                Review.Changed -= OnReviewChanged;
+                Review.SelectionChanged -= OnReviewSelectionChanged;
                 _navigationTimer.Stop();
                 _navigationTimer.Dispose();
                 _headerImage?.Dispose();
@@ -862,8 +913,7 @@ namespace ThesisAddIn.VSTO.Ui
             string description = DocumentLocator.TryParse(location, out parsed, out error)
                 ? DocumentLocator.Describe(parsed) : location ?? "未知位置";
             if (count <= 1) return description;
-            return "当前第 " + (occurrenceIndex + 1) + "/" + count + " 处：" + description
-                + "；可用功能区“上一处/下一处”浏览。";
+            return description + "（" + (occurrenceIndex + 1) + "/" + count + "）";
         }
 
         private static string GetSource(EngineDiagnostic diagnostic)

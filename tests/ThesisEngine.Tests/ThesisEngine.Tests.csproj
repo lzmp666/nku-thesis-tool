@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/ThesisAddIn.VSTO/Ui/CommentDiagnosticMatcher.cs" Link="Ui/CommentDiagnosticMatcher.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Ui/IssueReviewState.cs" Link="Ui/IssueReviewState.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Ui/IssueListViewport.cs" Link="Ui/IssueListViewport.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/DocxSnapshotFingerprint.cs" Link="Engine/DocxSnapshotFingerprint.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/EngineHostPathResolver.cs" Link="Engine/EngineHostPathResolver.cs" />

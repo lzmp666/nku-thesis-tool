@@ -18,7 +18,7 @@ namespace ThesisAddIn.VSTO.Engine
     /// No document is saved or reopened here, so Word keeps the edits in its normal undo stack
     /// and the author decides when to save the current document.
     /// </summary>
-    public static class WordDocumentSynchronizer
+    public static partial class WordDocumentSynchronizer
     {
         private const string ToolMarker = "[NKU-TOOL-ANNOTATION:v1]";
         private const string ToolBookmarkPrefix = "_NKU_MARK_";
@@ -317,7 +317,7 @@ namespace ThesisAddIn.VSTO.Engine
                 // Keep one native Word comment for each grouped issue. The comment is
                 // anchored to the first occurrence; every occurrence remains highlighted
                 // and the hidden location metadata keeps the issue list and hover in sync.
-                if (occurrences.Length > 0)
+                if (occurrences.Length > 0 && CreateNativeComments)
                 {
                     string anchorLocation = occurrences[0];
                     string visibleText = BuildVisibleCommentText(diagnostic);
@@ -354,7 +354,7 @@ namespace ThesisAddIn.VSTO.Engine
             // This legacy marker identifies an analyzed document, not a separate copy.
             // Write it last; document variables do not create Word undo entries.
             MarkWorkingCopy(document);
-            if (document.Comments.Count > 0) ShowCommentBalloons(document);
+            if (CreateNativeComments && document.Comments.Count > 0) ShowCommentBalloons(document);
         }
 
         private static void StyleComment(Word.Comment comment, string text, int metadataStart)

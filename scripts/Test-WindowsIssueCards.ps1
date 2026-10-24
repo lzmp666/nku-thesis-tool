@@ -1,4 +1,4 @@
-param([string]$AddinOutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\ThesisAddIn.VSTO\bin\Release'))
+﻿param([string]$AddinOutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\ThesisAddIn.VSTO\bin\Release'))
 $ErrorActionPreference = 'Stop'
 # Render isolated controls into bitmaps; no Word COM or user app automation.
 Add-Type -AssemblyName System.Windows.Forms
@@ -13,7 +13,7 @@ try {
     for ($index=0; $index -lt 9; $index++) {
         $diagnostic = New-Object ThesisAddIn.Protocol.EngineDiagnostic
         $diagnostic.RuleId = 'demo/font-size'
-        $diagnostic.Expected = '12pt'
+        $diagnostic.Expected = ([string](12+$index)+'pt')
         $diagnostic.Actual = '10.5pt'
         $diagnostic.Location = ('word/document.xml#paragraph['+$index+']/run[0]')
         $diagnostic.FixLevel = 'auto'

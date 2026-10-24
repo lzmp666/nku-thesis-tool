@@ -32,6 +32,10 @@ namespace ThesisAddIn.VSTO
             @"\[NKU-LOCATION:(?<location>word/document\.xml#paragraph\[\d+\]/run\[\d+\])\]",
             RegexOptions.Compiled);
 
+        private readonly Dictionary<DiagnosticsPane, CustomTaskPane> _suggestions = new Dictionary<DiagnosticsPane, CustomTaskPane>();
+        private readonly Dictionary<DiagnosticsPane, DiagnosticsPane> _searchOwners = new Dictionary<DiagnosticsPane, DiagnosticsPane>();
+        private readonly Dictionary<DiagnosticsPane, Dictionary<string, WordDocumentSynchronizer.RepairRecord>> _repairHistory =
+            new Dictionary<DiagnosticsPane, Dictionary<string, WordDocumentSynchronizer.RepairRecord>>();
         private CustomTaskPane _taskPane;
         private DiagnosticsPane _pane;
         private EngineGateway _gateway;
@@ -120,7 +124,7 @@ namespace ThesisAddIn.VSTO
                 try
                 {
                     Word.Window paneWindow = taskPane.Window as Word.Window;
-                    if (paneWindow != null && paneWindow.Hwnd == windowHandle) return taskPane;
+                    if (taskPane.Title == TaskPaneTitle && paneWindow != null && paneWindow.Hwnd == windowHandle) return taskPane;
                 }
                 catch (Exception)
                 {
@@ -190,7 +194,7 @@ namespace ThesisAddIn.VSTO
                 {
                     CustomTaskPane taskPane = CustomTaskPanes[i];
                     Word.Window paneWindow = taskPane.Window as Word.Window;
-                    if (paneWindow != null && paneWindow.Hwnd == windowHandle)
+                    if (taskPane.Title == TaskPaneTitle && paneWindow != null && paneWindow.Hwnd == windowHandle)
                         return taskPane.Control as DiagnosticsPane;
                 }
             }
@@ -222,6 +226,7 @@ namespace ThesisAddIn.VSTO
             _gateway = EngineGateway.Create(out _gatewayError);
             _operationCancellation = new CancellationTokenSource();
 
+            Application.DocumentOpen += OnDocumentOpened;
             Application.WindowActivate += OnWindowActivate;
             Application.WindowSelectionChange += OnWindowSelectionChange;
             _ribbonTabTracker = new RibbonTabVisibilityTracker();
@@ -242,6 +247,7 @@ namespace ThesisAddIn.VSTO
                 Word.Window activeWindow = Application.ActiveWindow;
                 if (activeWindow != null)
                 {
+                    ClearPersistedToolMarks(activeWindow.Document);
                     EnsureTaskPaneForWindow(activeWindow);
                 }
             }
@@ -271,6 +277,7 @@ namespace ThesisAddIn.VSTO
                     _documentHoverTimer.Dispose();
                     _documentHoverTimer = null;
                 }
+                Application.DocumentOpen -= OnDocumentOpened;
                 Application.WindowActivate -= OnWindowActivate;
                 Application.WindowSelectionChange -= OnWindowSelectionChange;
             }
@@ -349,6 +356,7 @@ namespace ThesisAddIn.VSTO
                 }
 
                 ShowAnalysis(pane, response.Result);
+                ShowSuggestions(pane);
                 pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, operation.Document,
                     operation.SnapshotPath, response.Result));
                 SetStatus(pane, "分析完成：当前文档共 " + response.Result.Diagnostics.Count
@@ -405,85 +413,43 @@ namespace ThesisAddIn.VSTO
             await RunRepair(pane, diagnostic, "当前选中项 " + DiagnosticsPane.DescribeRule(diagnostic.RuleId));
         }
 
-        private async void OnFixAllRequested(object sender, EventArgs e)
+        private void OnFixAllRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
-            WriteStartupLog("收到“预览并修复全部”点击。");
-            await RunRepair(_pane, null, "全部可自动修复项");
+            if (_pane == null || _pane.IsBusy) return;
+            _pane.BeginBatch();
+            SetDiagnosticsPaneVisible(true);
+            ShowSuggestions(_pane);
+            SetStatus(_pane,"勾选需要修复的问题，然后点击“修复所选”。两个区域的勾选同步。不会自动保存原文。");
         }
-
+        private async void OnApplyCheckedRequested(object sender, EventArgs e)
+        {
+            ActivatePaneFromSender(sender);
+            if (_pane == null || _pane.IsBusy) return;
+            EngineDiagnostic[] selected = _pane.CheckedDiagnostics;
+            if(selected.Length==0) { SetStatus(_pane,"请先勾选至少一项可修复问题。"); return; }
+            await RunSelectedRepairs(_pane,selected);
+        }
         private async void OnVerifyResolvedRequested(object sender, EventArgs e)
         {
             ActivatePaneFromSender(sender);
-            DiagnosticsPane pane = sender as DiagnosticsPane ?? _pane;
-            EngineDiagnostic selected = pane?.SelectedDiagnostic;
-            string location = pane?.SelectedLocation;
-            if (selected == null || string.IsNullOrWhiteSpace(location))
-            {
-                SetStatus(pane, "请先从问题列表选择一处，再验证是否已解决。");
-                return;
+            DiagnosticsPane pane = _pane;
+            EngineDiagnostic issue = pane?.SelectedDiagnostic;
+            if(pane == null || pane.IsBusy || issue == null) return;
+            string key=IssueReviewState.Key(issue);
+            if(!GetHistory(pane).TryGetValue(key,out WordDocumentSynchronizer.RepairRecord record)) {
+                SetStatus(pane,"该项没有本次会话的可撤销修复记录。"); return;
             }
-
-            string snapshotPath = null;
-            try
-            {
-                if (!EnsureGateway(pane)) return;
-                DocumentOperationContext operation;
-                string failure;
-                if (!TryCreateSnapshot(pane, out operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-                snapshotPath = operation.SnapshotPath;
-                SetBusy(pane, true, "正在重新检查所选位置…");
-                EngineResponse response = await _gateway.AnalyzeAsync(snapshotPath, GetOperationCancellationToken());
-                if (response == null || !response.Ok || response.Result == null)
-                {
-                    ShowFailure(pane, EngineGateway.DescribeError(response?.Error));
-                    return;
-                }
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
-                string syncError = null;
-                bool synchronized = pane.InvokeOnUiThread(() => WordDocumentSynchronizer.RefreshAnnotations(
-                    operation.Document, operation.SnapshotPath, response.Result, out syncError));
-                if (!synchronized)
-                {
-                    ShowFailure(pane, "无法刷新当前文档标记：" + syncError);
-                    return;
-                }
-
-                bool remains = response.Result.Diagnostics.Any(item =>
-                    string.Equals(item.RuleId, selected.RuleId, StringComparison.Ordinal) &&
-                    string.Equals(item.Expected, selected.Expected, StringComparison.Ordinal) &&
-                    HasOccurrence(item, location));
-                ShowAnalysis(pane, response.Result);
-                pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, operation.Document,
-                    operation.SnapshotPath, response.Result));
-                if (remains)
-                {
-                    pane.SelectByOccurrenceLocation(location, navigateToSource: false);
-                    SetStatus(pane, "重新检查后，该位置仍不符合要求，问题和黄色标记已保留。修改后可再次验证。");
-                }
-                else
-                {
-                    SetStatus(pane, "已重新检查：所选位置不再触发该项规则，黄色标记已清除。改动仍在当前文档中，请由你决定是否保存。");
-                }
-            }
-            catch (Exception exception)
-            {
-                ShowFailure(pane, "验证解决状态失败：" + exception.Message);
-            }
-            finally
-            {
-                SetBusy(pane, false, null);
-                TryDelete(snapshotPath);
-            }
+            Word.Document document; Word.Window window; string error;
+            if(!TryGetDocumentForPane(pane,out document,out window,out error)) { SetStatus(pane,error); return; }
+            SetBusy(pane,true,"正在撤销该项修复…");
+            try {
+                if(!WordDocumentSynchronizer.UndoRepair(document,record,out error)) { SetStatus(pane,error); return; }
+                GetHistory(pane).Remove(key); pane.Review.Reopen(key);
+                await RefreshReviewFromLive(pane,document,window);
+                SetStatus(pane,"已撤销该项格式修复；其他修复和文字编辑保留。尚未保存。");
+            } catch(Exception ex) { SetStatus(pane,"撤销复查未完成："+ex.Message+"。请重新分析。"); }
+            finally { SetBusy(pane,false,null); }
         }
 
         private static bool HasOccurrence(EngineDiagnostic diagnostic, string location)
@@ -506,6 +472,30 @@ namespace ThesisAddIn.VSTO
         /// Word 每个文档窗口都需要自己的任务窗格和诊断列表。启动时只创建首个窗口的
         /// 窗格会导致后来打开的文档没有侧栏；WindowActivate 同时覆盖新窗口和窗口切换。
         /// </summary>
+        private void OnDocumentOpened(Word.Document document) { ClearPersistedToolMarks(document); }
+        private void ClearPersistedToolMarks(Word.Document document)
+        {
+            string snapshot=null;
+            try {
+                snapshot=CreateTemporaryDocxPath("clear-old-marks"); SaveDocumentCopy(document,snapshot);
+                string error;
+                if(!WordDocumentSynchronizer.ClearPreviousToolMarks(document,snapshot,out error))
+                    WriteStartupLog("旧工具标记未清理："+error);
+            } catch(Exception ex) { WriteStartupLog("读取旧标记失败："+ex.Message); }
+            finally { TryDelete(snapshot); }
+        }
+        private void ShowSuggestions(DiagnosticsPane pane)
+        {
+            if(_suggestions.TryGetValue(pane,out CustomTaskPane suggestions)) suggestions.Visible = pane.Review.Rows.Count>0;
+        }
+        private Dictionary<string, WordDocumentSynchronizer.RepairRecord> GetHistory(DiagnosticsPane pane)
+        {
+            if(!_repairHistory.TryGetValue(pane,out var history)) {
+                history=new Dictionary<string, WordDocumentSynchronizer.RepairRecord>(StringComparer.Ordinal);
+                _repairHistory[pane]=history;
+            }
+            return history;
+        }
         private void OnWindowActivate(Word.Document document, Word.Window window)
         {
             EnsureTaskPaneForWindow(window);
@@ -544,7 +534,7 @@ namespace ThesisAddIn.VSTO
                         continue;
                     }
 
-                    if (paneWindow.Hwnd == windowHandle)
+                    if (existingTaskPane.Title == TaskPaneTitle && paneWindow.Hwnd == windowHandle)
                     {
                         _taskPane = existingTaskPane;
                         _pane = existingTaskPane.Control as DiagnosticsPane;
@@ -570,6 +560,18 @@ namespace ThesisAddIn.VSTO
                 _taskPane = taskPane;
                 _pane = pane;
                 pane.CreateControl();
+                var suggestion = new DiagnosticsPane(true,pane.Review);
+                var suggestionPane = CustomTaskPanes.Add(suggestion,"原文建议",window);
+                suggestionPane.Width = suggestion.ConfigureForOfficeWindow(windowHandle);
+                suggestionPane.Visible = false;
+                suggestion.CreateControl();
+                _suggestions[pane]=suggestionPane;
+                _searchOwners[suggestion]=pane;
+                suggestion.DiagnosticSelected += OnDiagnosticSelected;
+                suggestion.RepairRequested += OnFixCurrentRequested;
+                suggestion.UndoRequested += OnVerifyResolvedRequested;
+                suggestion.ApplyCheckedRequested += OnApplyCheckedRequested;
+                suggestion.StateChanged += OnPaneStateChanged;
                 CustomTaskPane trackedTaskPane = taskPane;
                 _ribbonTabTracker?.Track(windowHandle, selected =>
                 {
@@ -629,7 +631,7 @@ namespace ThesisAddIn.VSTO
                 {
                     CustomTaskPane taskPane = CustomTaskPanes[i];
                     Word.Window paneWindow = taskPane.Window as Word.Window;
-                    if (paneWindow != null && paneWindow.Hwnd == windowHandle)
+                    if (taskPane.Title == TaskPaneTitle && paneWindow != null && paneWindow.Hwnd == windowHandle)
                     {
                         // Keep the user's explicit open/closed choice. Ribbon commands can
                         // still work against the pane's state while the search list is hidden.
@@ -650,6 +652,7 @@ namespace ThesisAddIn.VSTO
             var pane = new DiagnosticsPane();
             pane.DiagnosticSelected += OnDiagnosticSelected;
             pane.StateChanged += OnPaneStateChanged;
+            pane.ApplyCheckedRequested += OnApplyCheckedRequested;
             return pane;
         }
 
@@ -668,6 +671,7 @@ namespace ThesisAddIn.VSTO
                 return;
             }
 
+            if(_searchOwners.TryGetValue(pane,out DiagnosticsPane owner)) pane=owner;
             if (object.ReferenceEquals(_pane, pane) && _taskPane != null) return;
 
             _pane = pane;
@@ -687,195 +691,78 @@ namespace ThesisAddIn.VSTO
         /// 修复闭环：临时快照 → 生成计划 → 中文预览确认 → 修改当前 Word 文档 → 重新分析。
         /// 修改留在当前打开的文档中，由作者决定何时保存。
         /// </summary>
-        private async Task RunRepair(DiagnosticsPane pane, EngineDiagnostic diagnostic, string scopeLabel)
+        private Task RunRepair(DiagnosticsPane pane, EngineDiagnostic issue, string scopeLabel) =>
+            RunSelectedRepairs(pane,new[]{issue});
+        private async Task RunSelectedRepairs(DiagnosticsPane pane, EngineDiagnostic[] selected)
         {
-            string workCopy = null;
-            string applyOutput = null;
-            string finalOutput = null;
-            try
-            {
-                WriteStartupLog("收到修复请求：" + scopeLabel + "。");
-                if (!EnsureGateway(pane))
-                {
-                    WriteStartupLog("修复中止：引擎未配置。");
-                    return;
+            string snapshot=null;
+            var applied=new List<KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>>();
+            Word.Document document=null;
+            try {
+                if(pane.IsBusy || !EnsureGateway(pane)) return;
+                DocumentOperationContext operation; string error;
+                if(!TryCreateSnapshot(pane,out operation,out error)) { SetStatus(pane,error); return; }
+                document=operation.Document; snapshot=operation.SnapshotPath;
+                SetBusy(pane,true,"正在核对所选格式并直接修复…");
+                EngineResponse response=await _gateway.PlanAsync(snapshot,null,GetOperationCancellationToken());
+                if(response==null || !response.Ok || response.Plan==null) throw new InvalidDataException(EngineGateway.DescribeError(response?.Error));
+                var groups=new List<KeyValuePair<EngineDiagnostic,List<EnginePatch>>>();
+                foreach(EngineDiagnostic issue in selected) {
+                    if(!pane.Review.CanRepair(issue)) throw new InvalidDataException("所选项不可自动修复，请重新分析。");
+                    var locations=new HashSet<string>(issue.Occurrences!=null && issue.Occurrences.Count>0
+                        ? issue.Occurrences.Select(x=>x.Location) : new[]{issue.Location},StringComparer.Ordinal);
+                    List<EnginePatch> patches=response.Plan.Patches.Where(p=>p.RuleId==issue.RuleId
+                        && p.DesiredAfter==issue.Expected && locations.Contains(p.Location)).ToList();
+                    if(patches.Count!=locations.Count) throw new InvalidDataException("所选项已变化或含不能安全修复的位置，请重新分析；尚未修改原文。");
+                    groups.Add(new KeyValuePair<EngineDiagnostic,List<EnginePatch>>(issue,patches));
                 }
-                EngineGateway gateway = _gateway;
-                CancellationToken cancellationToken = GetOperationCancellationToken();
-
-                DocumentOperationContext operation;
-                string failure;
-                if (!TryCreateSnapshot(pane, out operation, out failure))
-                {
-                    WriteStartupLog("修复中止：临时副本失败 - " + failure);
-                    ShowFailure(pane, failure);
-                    return;
+                if(!TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
+                foreach(var group in groups) {
+                    WordDocumentSynchronizer.RepairRecord record;
+                    if(!WordDocumentSynchronizer.ApplyDirect(document,snapshot,group.Value,out record,out error))
+                        throw new InvalidDataException(error);
+                    string key=IssueReviewState.Key(group.Key);
+                    applied.Add(new KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>(key,record));
                 }
-                workCopy = operation.SnapshotPath;
-
-                if (!pane.InvokeOnUiThread(() => HasAnalysisMarker(operation.Document)))
-                {
-                    ShowFailure(pane, "请先分析当前文档，再在本窗口内修复。");
-                    return;
+                foreach(var item in applied) GetHistory(pane)[item.Key]=item.Value;
+                pane.Review.Complete(selected);
+                // Once written, keep item-level undo available even if re-analysis fails.
+                applied.Clear();
+                await RefreshReviewFromLive(pane,document,operation.Window);
+                SetStatus(pane,"已修复所选 "+selected.Length+" 项；可在建议卡中逐项撤销。改动留在当前文档，未自动保存。");
+            } catch(Exception ex) {
+                // No async work occurs between the live writes. Roll back an incomplete batch.
+                foreach(var item in applied.AsEnumerable().Reverse()) {
+                    string rollback;
+                    if(!WordDocumentSynchronizer.UndoRepair(document,item.Value,out rollback))
+                        WriteStartupLog("回滚未完成："+rollback);
                 }
-
-                SetBusy(pane, true, "正在生成修复计划…");
-                EngineResponse planResponse = await gateway.PlanAsync(workCopy, diagnostic, cancellationToken);
-                if (planResponse == null || !planResponse.Ok || planResponse.Plan == null)
-                {
-                    ShowFailure(pane, EngineGateway.DescribeError(planResponse != null ? planResponse.Error : null));
-                    return;
-                }
-
-                EnginePatchPlan plan = planResponse.Plan;
-                if (plan.Patches.Count == 0)
-                {
-                    SetStatus(pane, "没有可自动修复的项目（" + scopeLabel + "）。这些项目可能需要人工确认，或者已经修复。");
-                    return;
-                }
-
-                WriteStartupLog("修复计划已生成：待修改 " + plan.Patches.Count + " 处，保留 " + plan.Deferred.Count + " 处。");
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
-                DialogResult previewResult = pane.InvokeOnUiThread(() =>
-                {
-                    using (var preview = new FixPreviewDialog(plan, scopeLabel))
-                    {
-                        WriteStartupLog("准备显示修复预览窗口。");
-                        return preview.ShowForOfficeWindow(operation.WindowHandle);
+                SetStatus(pane,"未完成操作："+ex.Message+"。请核对状态后重新分析。");
+                WriteStartupLog("直接修复："+ex);
+            } finally { SetBusy(pane,false,null); TryDelete(snapshot); }
+        }
+        private async Task RefreshReviewFromLive(DiagnosticsPane pane, Word.Document document, Word.Window window)
+        {
+            // Word may finish a background layout/export update just after Save As.
+            // Re-read and re-analyze fresh content; never accept a stale fingerprint.
+            for(int attempt=0; attempt<3; attempt++) {
+                DocumentOperationContext operation; string error;
+                if(!TryCreateSnapshot(pane,out operation,out error)) throw new InvalidDataException(error);
+                try {
+                    EngineResponse response=await _gateway.AnalyzeAsync(operation.SnapshotPath,GetOperationCancellationToken());
+                    if(response==null || !response.Ok || response.Result==null) throw new InvalidDataException(EngineGateway.DescribeError(response?.Error));
+                    if(!TryEnsureSnapshotUnchanged(operation,out error)) {
+                        if(attempt<2) continue;
+                        throw new InvalidDataException(error);
                     }
-                });
-                if (previewResult != DialogResult.OK)
-                {
-                    WriteStartupLog("用户在预览窗口取消。");
-                    SetStatus(pane, "已取消修复，文档没有任何改动。");
+                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,out error))
+                        throw new InvalidDataException(error);
+                    ShowAnalysis(pane,response.Result);
+                    CacheOccurrenceRanges(window.Hwnd,document,operation.SnapshotPath,response.Result);
+                    ShowSuggestions(pane);
+                    WriteStartupLog("直接修复/撤销后复查：剩余 "+response.Result.Diagnostics.Count+" 项。");
                     return;
-                }
-
-                WriteStartupLog("用户确认预览。");
-
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
-                applyOutput = CreateTemporaryDocxPath("repair");
-
-                /*
-                 * The dialogs above are synchronous UI-thread calls. After they return,
-                 * the engine can continue on a worker thread; DiagnosticsPane marshals
-                 * subsequent status and result updates back to the same UI thread.
-                 */
-                WriteStartupLog("开始生成修复中间副本。");
-                SetStatus(pane, "正在更新当前文档…");
-                EngineResponse applyResponse = await gateway.ApplyAsync(workCopy, applyOutput, diagnostic, cancellationToken);
-                if (applyResponse == null || !applyResponse.Ok || applyResponse.Apply == null)
-                {
-                    string applyError = EngineGateway.DescribeError(applyResponse != null ? applyResponse.Error : null);
-                    WriteStartupLog("写入失败：" + applyError);
-                    ShowFailure(pane, applyError);
-                    return;
-                }
-
-                EngineApplyResult applied = applyResponse.Apply;
-                if (applied.Failures != null && applied.Failures.Count > 0)
-                {
-                    string failureSummary = ReportApplyResult(applied);
-                    WriteStartupLog(failureSummary);
-                    ShowFailure(pane, failureSummary + Environment.NewLine + "原始文档未修改，也没有生成部分修复文件。");
-                    return;
-                }
-
-                if (!PathsEqual(applied.OutputPath, applyOutput) || !File.Exists(applyOutput))
-                {
-                    const string invalidOutput = "修复引擎返回的输出路径与本次请求不一致，或未生成修复文件；原始文档保持不变。";
-                    WriteStartupLog(invalidOutput);
-                    ShowFailure(pane, invalidOutput);
-                    return;
-                }
-
-                string applySummary = ReportApplyResult(applied);
-                WriteStartupLog(applySummary);
-
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
-                finalOutput = CreateTemporaryDocxPath("refreshed");
-                SetStatus(pane, "正在复查修复结果并刷新当前文档标记；长文档可能需要一两分钟…");
-                WriteStartupLog("开始重新分析修复结果并刷新标记；剩余待处理 "
-                    + (plan.Deferred != null ? plan.Deferred.Count : 0) + " 项。");
-                EngineResponse refreshed = await gateway.AnnotateAsync(applied.OutputPath, finalOutput, cancellationToken);
-                if (refreshed == null || !refreshed.Ok || refreshed.Result == null || refreshed.Annotation == null
-                    || !PathsEqual(refreshed.Annotation.OutputPath, finalOutput)
-                    || !File.Exists(finalOutput))
-                {
-                    string refreshError = EngineGateway.DescribeError(refreshed != null ? refreshed.Error : null);
-                    if (refreshed != null && refreshed.Ok && refreshed.Annotation != null
-                        && !PathsEqual(refreshed.Annotation.OutputPath, finalOutput))
-                    {
-                        refreshError = "标注引擎返回了与请求不一致的输出路径。";
-                    }
-                    WriteStartupLog("修复结果重新分析或标注失败；Word 原文尚未写入：" + refreshError);
-                    ShowFailure(pane, applySummary + Environment.NewLine + "当前文档尚未修改；刷新批注失败：" + refreshError);
-                    return;
-                }
-
-                WriteStartupLog("修复结果重新分析完成：剩余问题 " + refreshed.Result.Diagnostics.Count
-                    + " 项；将刷新 " + refreshed.Annotation.CommentCount + " 条汇总批注。");
-
-                if (!TryEnsureSnapshotUnchanged(operation, out failure))
-                {
-                    TryDelete(finalOutput);
-                    finalOutput = null;
-                    ShowFailure(pane, failure);
-                    return;
-                }
-
-                string syncError = null;
-                bool synchronized = pane.InvokeOnUiThread(() => WordDocumentSynchronizer.ApplyRepairsAndRefresh(
-                    operation.Document, operation.SnapshotPath, applied.Applied, refreshed.Result, out syncError));
-                if (!synchronized)
-                {
-                    WriteStartupLog("Word 原文修复或标注同步失败：" + syncError);
-                    ShowFailure(pane, applySummary + Environment.NewLine + "Word 当前文档未完成修复："
-                        + syncError + Environment.NewLine + "请检查文档状态后重新分析。当前文档：" + operation.DocumentFullName);
-                    return;
-                }
-
-                Word.Document resultDocument = operation.Document;
-                DiagnosticsPane resultPane = GetPaneForWindow(resultDocument.ActiveWindow);
-                ShowAnalysis(resultPane, refreshed.Result);
-                pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, resultDocument,
-                    operation.SnapshotPath, refreshed.Result));
-                SetStatus(resultPane, applySummary + Environment.NewLine
-                    + "修复已应用到当前 Word 文档，批注已刷新；剩余 " + refreshed.Result.Diagnostics.Count + " 项。\n"
-                    + "改动尚未保存，可用 Ctrl+Z 撤销；完成后按 Ctrl+S 保存当前文档。\n"
-                    + operation.DocumentFullName);
-                SetStatus(pane, "修复完成：已直接修改当前 Word 文档，没有另建结果文档；需要时按 Ctrl+S 保存。\n"
-                    + operation.DocumentFullName);
-                WriteStartupLog("已在当前 Word 文档中直接修复并刷新批注；剩余问题 "
-                    + refreshed.Result.Diagnostics.Count + " 项，等待作者保存。");
-            }
-            catch (Exception exception)
-            {
-                WriteStartupLog("修复过程出现异常：" + exception);
-                ShowFailure(pane, "修复过程出现异常，已停止：" + exception.Message);
-            }
-            finally
-            {
-                SetBusy(pane, false, null);
-                WriteStartupLog("修复操作结束；操作按钮已恢复。");
-                TryDelete(workCopy);
-                TryDelete(applyOutput);
-                TryDelete(finalOutput);
+                } finally { TryDelete(operation.SnapshotPath); }
             }
         }
 
@@ -942,6 +829,10 @@ namespace ThesisAddIn.VSTO
             string locationKey = selectedLocation ?? diagnostic.Location;
             try
             {
+                if (pane.Review.IsRepaired(diagnostic) && GetHistory(pane).TryGetValue(IssueReviewState.Key(diagnostic),out var record)) {
+                    record.Changes[0].Range.Duplicate.Select();
+                    return "已定位到已修复的原文，可撤销该项修复。";
+                }
                 if (window == null || !_occurrenceRangesByWindow.TryGetValue(window.Hwnd,
                     out Dictionary<string, Word.Range> cachedRanges)
                     || !cachedRanges.TryGetValue(locationKey, out Word.Range cachedRange)
@@ -1555,14 +1446,18 @@ namespace ThesisAddIn.VSTO
             if (IsPaneAvailable(pane)) pane.ShowAnalysis(result);
         }
 
-        private static void SetBusy(DiagnosticsPane pane, bool busy, string message)
+        private void SetBusy(DiagnosticsPane pane, bool busy, string message)
         {
             if (IsPaneAvailable(pane)) pane.SetBusy(busy, message);
+            if(pane!=null && _suggestions.TryGetValue(pane,out var host) && host.Control is DiagnosticsPane suggestion
+                && IsPaneAvailable(suggestion)) suggestion.SetBusy(busy,message);
         }
 
-        private static void SetStatus(DiagnosticsPane pane, string message)
+        private void SetStatus(DiagnosticsPane pane, string message)
         {
             if (IsPaneAvailable(pane)) pane.SetStatus(message);
+            if(pane!=null && _suggestions.TryGetValue(pane,out var host) && host.Control is DiagnosticsPane suggestion
+                && IsPaneAvailable(suggestion)) suggestion.SetStatus(message);
         }
 
         /// <summary>

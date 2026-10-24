@@ -60,7 +60,7 @@ namespace ThesisAddIn.VSTO.Ui
     <tabs>
       <tab id=""NkuThesisTab"" label=""论文格式检查"" insertAfterMso=""TabHome"">
         <group id=""NkuThesisIdentity"" label=""南开大学"">
-          <button id=""NkuEmblem"" label="" "" size=""large""
+          <button id=""NkuEmblem"" label=""南开"" size=""normal""
                   getImage=""GetBrandImage"" onAction=""OnBrandInfo""
                   screentip=""NKU Thesis Tool"" supertip=""查看插件信息与南开校园主题。"" />
         </group>
@@ -77,16 +77,16 @@ namespace ThesisAddIn.VSTO.Ui
         </group>
         <group id=""NkuThesisRepair"" label=""修复"">
           <button id=""NkuFixCurrent"" label=""修复当前问题"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
-                  screentip=""预览并修复当前问题""
-                  supertip=""先查看将修改的格式和值，确认后更新当前文档。""
+                  screentip=""直接解决当前格式问题""
+                  supertip=""按当前规则直接修改所选项，可在原文建议中撤销；不会自动保存。""
                   onAction=""OnFixCurrent"" />
-          <button id=""NkuFixAll"" label=""批量修复预览"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
-                  screentip=""预览并修复全部问题""
-                  supertip=""预览所有可修复的问题，确认后一次性更新当前文档。""
+          <button id=""NkuFixAll"" label=""批量修复"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+                  screentip=""选择需要修复的问题""
+                  supertip=""进入勾选模式，在检索列表或原文建议中选择后修复所选项。""
                   onAction=""OnFixAll"" />
-          <button id=""NkuVerifyResolved"" label=""验证已解决"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
-                  screentip=""重新检查当前问题位置""
-                  supertip=""你手动调整后重新分析此位置；确认符合要求才清除标记，仍有问题则保留。""
+          <button id=""NkuVerifyResolved"" label=""撤销当前修复"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+                  screentip=""撤销这一项的格式修复""
+                  supertip=""仅恢复该项修复前的格式，保留其他修复和文字编辑；格式已被手动更改时停止。""
                   onAction=""OnVerifyResolved"" />
         </group>
         <group id=""NkuThesisNavigation"" label=""定位"">
@@ -99,17 +99,10 @@ namespace ThesisAddIn.VSTO.Ui
             <button id=""NkuNextOccurrence"" label=""下一处"" getImage=""GetButtonImage"" getEnabled=""GetEnabled"" onAction=""OnNextOccurrence"" />
           </box>
         </group>
-        <group id=""NkuCampusStyle"" label=""南开 · 学术规范"">
-          <box id=""NkuCampusBrandRow"" boxStyle=""horizontal"">
-          <button id=""NkuCampusPanorama"" label=""校园主题"" size=""large""
-                  getImage=""GetBrandImage"" onAction=""OnBrandInfo""
-                  screentip=""南开校园主题"" supertip=""校园意象、青莲紫与暖金色；点击查看完整主题图。"" />
-          <box id=""NkuCampusBrandCopy"" boxStyle=""vertical"">
-            <labelControl id=""NkuCampusMotto"" label=""允公允能 · 日新月异"" />
-            <labelControl id=""NkuCampusProduct"" getLabel=""GetBuildLabel"" />
-            <labelControl id=""NkuCampusWorkflow"" label=""本页检查 · 预览修复 · 自主保存"" />
-          </box>
-          </box>
+        <group id=""NkuCampusStyle"" label=""南开校园"">
+          <button id=""NkuCampusPanorama"" label=""校园"" size=""large"" getImage=""GetBrandImage"" onAction=""OnBrandInfo""
+                  screentip=""查看校园插图与版本"" />
+          <labelControl id=""NkuCampusProduct"" getLabel=""GetBuildLabel"" />
         </group>
       </tab>
     </tabs>
@@ -223,7 +216,7 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 if (stream == null) return null;
                 using (Image source = Image.FromStream(stream))
-                using (var bitmap = new Bitmap(emblem ? 64 : 192, 64))
+                using (var bitmap = new Bitmap(emblem ? 16 : 96, emblem ? 16 : 32))
                 using (Graphics graphics = Graphics.FromImage(bitmap))
                 {
                     graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
