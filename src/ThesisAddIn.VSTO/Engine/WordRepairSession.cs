@@ -154,10 +154,25 @@ namespace ThesisAddIn.VSTO.Engine
             Word.Range target = AdjacentObjectRange(anchor, ruleId == "demo/picture-fit-width");
             if (ruleId == "demo/picture-fit-width") return target.InlineShapes[1].Width;
             Word.Table table = target.Tables[1];
-            if (table.AllowAutoFit || !table.Uniform) throw new InvalidDataException("表格已不是规则的固定列宽表格。");
-            double width = 0;
-            foreach (Word.Column column in table.Columns) width += column.Width;
-            return width;
+            return ReadTableWidths(table).Sum(width => (double)width);
+        }
+
+        private static float[] ReadTableWidths(Word.Table table)
+        {
+            if (table.AllowAutoFit) throw new InvalidDataException("表格已启用自动调整列宽，已停止缩放。");
+            if (table.Rows.Count == 0 || table.Range.Cells.Count > 2000)
+                throw new InvalidDataException("表格为空或过大，不能安全原位缩放。");
+            var rows = new List<float[]>();
+            foreach (Word.Row row in table.Rows)
+                rows.Add(row.Cells.Cast<Word.Cell>().Select(cell => cell.Width).ToArray());
+            return WordTableGeometry.ReadColumns(rows);
+        }
+
+        private static void WriteTableWidths(Word.Table table, float[] widths, Action markMutation)
+        {
+            foreach (Word.Row row in table.Rows)
+                for (int index = 0; index < widths.Length; index++)
+                { row.Cells[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
         }
 
         private static void ValidateObjectWidth(Word.Range anchor, EnginePatch patch)
@@ -194,10 +209,9 @@ namespace ThesisAddIn.VSTO.Engine
             else
             {
                 Word.Table table = target.Tables[1];
-                float[] widths = table.Columns.Cast<Word.Column>().Select(column => column.Width).ToArray();
+                float[] widths = ReadTableWidths(table);
                 double total = widths.Sum(width => (double)width);
-                for (int index = 0; index < widths.Length; index++)
-                { table.Columns[index + 1].SetWidth((float)(widths[index] * limit / total), Word.WdRulerStyle.wdAdjustNone); markMutation(); }
+                WriteTableWidths(table, widths.Select(width => (float)(width * limit / total)).ToArray(), markMutation);
                 table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints; markMutation();
                 table.PreferredWidth = (float)limit; markMutation();
             }
@@ -228,15 +242,15 @@ namespace ThesisAddIn.VSTO.Engine
             else
             {
                 Word.Table table = target.Tables[1];
-                float[] widths = table.Columns.Cast<Word.Column>().Select(column => column.Width).ToArray();
+                float[] widths = ReadTableWidths(table);
                 var preferredType = table.PreferredWidthType;
                 float preferredWidth = table.PreferredWidth;
                 change.ObjectSignature = () => table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
                     table.PreferredWidthType + "|" + table.PreferredWidth.ToString(CultureInfo.InvariantCulture) + "|" +
-                    string.Join("|", table.Columns.Cast<Word.Column>().Select(column => column.Width.ToString(CultureInfo.InvariantCulture)));
+                    string.Join("|", ReadTableWidths(table).Select(width => width.ToString(CultureInfo.InvariantCulture)));
                 change.RestoreObject = markMutation =>
                 {
-                    for (int index = 0; index < widths.Length; index++) { table.Columns[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
+                    WriteTableWidths(table, widths, markMutation);
                     table.PreferredWidthType = preferredType; markMutation(); table.PreferredWidth = preferredWidth; markMutation();
                 };
             }
