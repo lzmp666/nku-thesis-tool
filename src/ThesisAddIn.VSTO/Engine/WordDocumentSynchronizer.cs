@@ -41,6 +41,8 @@ namespace ThesisAddIn.VSTO.Engine
         private sealed class AnnotationRecord
         {
             public int Index { get; set; }
+            public string Text { get; set; }
+            public Word.Range Scope { get; set; }
             public Dictionary<string, string> OriginalHighlights { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
@@ -82,12 +84,12 @@ namespace ThesisAddIn.VSTO.Engine
 
         /// <summary>Refreshes diagnostic marks in the current document as one undoable Word action.</summary>
         public static bool RefreshAnnotations(Word.Document document, string snapshotPath,
-            EngineAnalysisResult analysis, out string error)
+            EngineAnalysisResult analysis, out string error, Action<string> trace = null)
         {
             return ExecuteUndoable(document, "刷新论文格式批注",
                 () => ValidateAnnotationTargets(document, snapshotPath, analysis), markMutation =>
             {
-                RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation);
+                RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation, trace);
                 document.Saved = false;
             }, out error);
         }
@@ -162,8 +164,13 @@ namespace ThesisAddIn.VSTO.Engine
             dynamic undoRecord = null;
             bool customRecordStarted = false;
             bool mutated = false;
+            bool? screenUpdating = null;
             try
             {
+                // Suspend repaint only during synchronous COM work, never across an await.
+                // Restoring the caller's value also covers validation and rollback failures.
+                screenUpdating = document.Application.ScreenUpdating;
+                document.Application.ScreenUpdating = false;
                 // Validate before opening an undo record. An empty custom record is
                 // absent from Word's undo stack: Undo would affect the preceding edit.
                 validate();
@@ -218,6 +225,11 @@ namespace ThesisAddIn.VSTO.Engine
                     try { undoRecord.EndCustomRecord(); }
                     catch { }
                 }
+                if (screenUpdating.HasValue)
+                {
+                    try { document.Application.ScreenUpdating = screenUpdating.Value; }
+                    catch (System.Runtime.InteropServices.COMException) { }
+                }
             }
         }
 
@@ -230,7 +242,7 @@ namespace ThesisAddIn.VSTO.Engine
         }
 
         private static void RefreshAnnotationsCore(Word.Document document, string snapshotPath,
-            EngineAnalysisResult analysis, Action markMutation)
+            EngineAnalysisResult analysis, Action markMutation, Action<string> trace = null)
         {
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
 
@@ -256,15 +268,56 @@ namespace ThesisAddIn.VSTO.Engine
                 }
             }
 
+            string[] newLocations = GetDiagnosticLocations(analysis).Distinct(StringComparer.Ordinal).ToArray();
+            var wantedLocations = new HashSet<string>(newLocations, StringComparer.Ordinal);
+            var freshOriginalHighlights = new Dictionary<string, int>(StringComparer.Ordinal);
+            // Recover the pre-tool color without clearing/reapplying every yellow range.
+            foreach (string location in newLocations)
+            {
+                string original;
+                if (originalByLocation.TryGetValue(location, out original))
+                    freshOriginalHighlights[location] = (int)HighlightValue(original);
+                else
+                {
+                    _ = GetHighlight(ranges[location]);
+                    freshOriginalHighlights[location] = (int)ranges[location].HighlightColorIndex;
+                }
+            }
+            var retainedComments = new HashSet<int>();
+            var retainedDiagnostics = new HashSet<EngineDiagnostic>();
+            foreach (EngineDiagnostic diagnostic in analysis.Diagnostics ?? new List<EngineDiagnostic>())
+            {
+                string[] occurrences = GetOccurrences(diagnostic).ToArray();
+                if (!CreateNativeComments || occurrences.Length == 0) continue;
+                string desired = NormalizeCommentText(BuildVisibleCommentText(diagnostic) +
+                    BuildHiddenCommentMetadata(diagnostic, occurrences[0], occurrences, freshOriginalHighlights));
+                Word.Range anchor = ranges[occurrences[0]];
+                AnnotationRecord match = existing.FirstOrDefault(record => !retainedComments.Contains(record.Index)
+                    && NormalizeCommentText(record.Text) == desired
+                    && record.Scope.Start == anchor.Start && record.Scope.End == anchor.End);
+                if (match == null) continue;
+                retainedComments.Add(match.Index);
+                retainedDiagnostics.Add(diagnostic);
+            }
             foreach (KeyValuePair<string, string> highlight in originalByLocation)
             {
+                if (wantedLocations.Contains(highlight.Key)) continue;
                 if (string.Equals(GetHighlight(ranges[highlight.Key]), highlight.Value, StringComparison.Ordinal)) continue;
                 SetHighlight(ranges[highlight.Key], highlight.Value);
                 markMutation();
             }
 
+            var retainedMarks = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string location in newLocations)
+            {
+                string name = HighlightBookmarkName(location, freshOriginalHighlights[location]);
+                HighlightBookmarkRecord mark = existingMarks.FirstOrDefault(candidate => candidate.Name == name);
+                if (mark?.Range != null && mark.Range.Start == ranges[location].Start && mark.Range.End == ranges[location].End)
+                    retainedMarks.Add(name);
+            }
             foreach (HighlightBookmarkRecord mark in existingMarks)
             {
+                if (retainedMarks.Contains(mark.Name)) continue;
                 if (mark.Range == null) continue;
                 if ((int)mark.Range.HighlightColorIndex != mark.OriginalHighlight)
                 {
@@ -274,7 +327,8 @@ namespace ThesisAddIn.VSTO.Engine
             }
 
             // Delete in reverse order so the 1-based collection indexes remain valid.
-            foreach (int index in existing.Select(record => record.Index).OrderByDescending(index => index))
+            foreach (int index in existing.Where(record => !retainedComments.Contains(record.Index))
+                .Select(record => record.Index).OrderByDescending(index => index))
             {
                 document.Comments[index].Delete();
                 markMutation();
@@ -282,6 +336,7 @@ namespace ThesisAddIn.VSTO.Engine
 
             foreach (HighlightBookmarkRecord mark in existingMarks)
             {
+                if (retainedMarks.Contains(mark.Name)) continue;
                 if (!document.Bookmarks.Exists(mark.Name)) continue;
                 document.Bookmarks[mark.Name].Delete();
                 markMutation();
@@ -289,14 +344,7 @@ namespace ThesisAddIn.VSTO.Engine
 
             // Comment removal can shift story ranges. Rebuild all targets against the same
             // text snapshot before writing new highlights and anchors.
-            string[] newLocations = GetDiagnosticLocations(analysis).ToArray();
             ranges = BuildRanges(document, snapshotPath, newLocations);
-            var freshOriginalHighlights = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (string location in newLocations.Distinct(StringComparer.Ordinal))
-            {
-                _ = GetHighlight(ranges[location]); // fail closed for mixed or unsupported highlights
-                freshOriginalHighlights[location] = (int)ranges[location].HighlightColorIndex;
-            }
 
             var markedLocations = new HashSet<string>(StringComparer.Ordinal);
             foreach (EngineDiagnostic diagnostic in analysis.Diagnostics ?? new List<EngineDiagnostic>())
@@ -304,7 +352,8 @@ namespace ThesisAddIn.VSTO.Engine
                 string[] occurrences = GetOccurrences(diagnostic).ToArray();
                 foreach (string location in occurrences)
                 {
-                    if (markedLocations.Add(location))
+                    if (markedLocations.Add(location) && !retainedMarks.Contains(
+                        HighlightBookmarkName(location, freshOriginalHighlights[location])))
                         AddHighlightBookmark(document, location, ranges[location],
                             freshOriginalHighlights[location], markMutation);
                     if (ranges[location].HighlightColorIndex != Word.WdColorIndex.wdYellow)
@@ -317,7 +366,7 @@ namespace ThesisAddIn.VSTO.Engine
                 // Keep one native Word comment for each grouped issue. The comment is
                 // anchored to the first occurrence; every occurrence remains highlighted
                 // and the hidden location metadata keeps the issue list and hover in sync.
-                if (occurrences.Length > 0 && CreateNativeComments)
+                if (occurrences.Length > 0 && CreateNativeComments && !retainedDiagnostics.Contains(diagnostic))
                 {
                     string anchorLocation = occurrences[0];
                     string visibleText = BuildVisibleCommentText(diagnostic);
@@ -355,6 +404,11 @@ namespace ThesisAddIn.VSTO.Engine
             // Write it last; document variables do not create Word undo entries.
             MarkWorkingCopy(document);
             if (CreateNativeComments && document.Comments.Count > 0) ShowCommentBalloons(document);
+            else RestoreCommentWidth(document);
+            trace?.Invoke("批注增量更新 retained=" + retainedComments.Count + " removed=" +
+                (existing.Count - retainedComments.Count) + " added=" +
+                ((analysis.Diagnostics?.Count ?? 0) - retainedDiagnostics.Count) +
+                " highlightsRetained=" + retainedMarks.Count);
         }
 
         private static void StyleComment(Word.Comment comment, string text, int metadataStart)
@@ -388,11 +442,49 @@ namespace ThesisAddIn.VSTO.Engine
                 view.ShowRevisionsAndComments = true;
                 view.RevisionsMode = Word.WdRevisionsMode.wdBalloonRevisions;
                 view.RevisionsFilter.Markup = Word.WdRevisionsMarkup.wdRevisionsMarkupAll;
+                SetCompactCommentWidth(view);
             }
             catch (System.Runtime.InteropServices.COMException)
             {
                 // The annotations remain intact when this Word version cannot change its view.
             }
+        }
+
+        private static float? _previousBalloonWidth;
+        private static Word.WdRevisionsBalloonWidthType _previousBalloonWidthType;
+        private static void SetCompactCommentWidth(Word.View view)
+        {
+            // Word documents these as application-global settings. Capture once and
+            // restore on switching to another document, closing this one, or shutdown.
+            if (!_previousBalloonWidth.HasValue)
+            {
+                _previousBalloonWidth = view.RevisionsBalloonWidth;
+                _previousBalloonWidthType = view.RevisionsBalloonWidthType;
+            }
+            view.RevisionsBalloonWidthType = Word.WdRevisionsBalloonWidthType.wdBalloonWidthPoints;
+            view.RevisionsBalloonWidth = 210F;
+        }
+        public static void UpdateCommentWidth(Word.Document document)
+        {
+            try
+            {
+                if (IsWorkingCopy(document) && ReadOwnedAnnotations(document).Count > 0)
+                    SetCompactCommentWidth(document.ActiveWindow.View);
+                else RestoreCommentWidth(document);
+            }
+            catch (System.Runtime.InteropServices.COMException) { }
+        }
+        public static void RestoreCommentWidth(Word.Document document)
+        {
+            if (!_previousBalloonWidth.HasValue || document == null) return;
+            try
+            {
+                Word.View view = document.ActiveWindow.View;
+                view.RevisionsBalloonWidthType = _previousBalloonWidthType;
+                view.RevisionsBalloonWidth = _previousBalloonWidth.Value;
+                _previousBalloonWidth = null;
+            }
+            catch (System.Runtime.InteropServices.COMException) { }
         }
 
         private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document)
@@ -407,7 +499,7 @@ namespace ThesisAddIn.VSTO.Engine
                 if (text.IndexOf(ToolMarker, StringComparison.Ordinal) < 0)
                     continue;
 
-                var record = new AnnotationRecord { Index = index };
+                var record = new AnnotationRecord { Index = index, Text = text, Scope = comment.Scope.Duplicate };
                 MatchCollection matches = OccurrencePattern.Matches(text);
                 foreach (Match match in matches)
                     record.OriginalHighlights[match.Groups["location"].Value] = match.Groups["highlight"].Value;
@@ -431,6 +523,19 @@ namespace ThesisAddIn.VSTO.Engine
             fields.Add("要求：" + DisplayCommentValue(diagnostic.Expected));
             fields.Add("实际：" + DisplayCommentValue(diagnostic.Actual));
             return string.Join(Environment.NewLine, fields) + "。";
+        }
+
+        private static string NormalizeCommentText(string text) =>
+            (text ?? string.Empty).Replace("\r\n", "\r").Replace("\n", "\r").TrimEnd('\r');
+
+        private static Word.WdColorIndex HighlightValue(string name)
+        {
+            foreach (Word.WdColorIndex value in Enum.GetValues(typeof(Word.WdColorIndex)))
+            {
+                try { if (GetHighlightName(value) == name) return value; }
+                catch (InvalidDataException) { }
+            }
+            throw new InvalidDataException("无法恢复原文高亮值：" + name);
         }
 
         private static string DisplayCommentValue(string value)
@@ -526,19 +631,24 @@ namespace ThesisAddIn.VSTO.Engine
         private static void AddHighlightBookmark(Word.Document document, string location, Word.Range range,
             int originalHighlight, Action markMutation)
         {
+            string name = HighlightBookmarkName(location, originalHighlight);
+            if (document.Bookmarks.Exists(name))
+                throw new InvalidDataException("插件的高亮恢复标记已存在；请重新分析后再操作。");
+            object bookmarkRange = range.Duplicate;
+            document.Bookmarks.Add(name, ref bookmarkRange);
+            markMutation();
+        }
+
+        private static string HighlightBookmarkName(string location, int originalHighlight)
+        {
             string locationHash;
             using (SHA256 sha256 = SHA256.Create())
             {
                 byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(location));
                 locationHash = BitConverter.ToString(bytes).Replace("-", string.Empty).Substring(0, 16);
             }
-            string name = ToolBookmarkPrefix + locationHash + "_" +
+            return ToolBookmarkPrefix + locationHash + "_" +
                 originalHighlight.ToString("X8", CultureInfo.InvariantCulture);
-            if (document.Bookmarks.Exists(name))
-                throw new InvalidDataException("插件的高亮恢复标记已存在；请重新分析后再操作。");
-            object bookmarkRange = range.Duplicate;
-            document.Bookmarks.Add(name, ref bookmarkRange);
-            markMutation();
         }
 
         private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
@@ -606,6 +716,13 @@ namespace ThesisAddIn.VSTO.Engine
         private static Word.Range FindNextTextRange(Word.Document document, int cursor, int paragraphEnd, string text)
         {
             if (string.IsNullOrEmpty(text)) return document.Range(cursor, cursor);
+            // Most runs have no annotation reference inside them. Validate a direct span
+            // first; retain literal Find for Word CP offsets containing hidden references.
+            if (text.Length <= paragraphEnd - cursor)
+            {
+                Word.Range direct = document.Range(cursor, cursor + text.Length);
+                if (string.Equals(direct.Text, text, StringComparison.Ordinal)) return direct;
+            }
             int start = -1;
             int consumed = 0;
             while (consumed < text.Length)

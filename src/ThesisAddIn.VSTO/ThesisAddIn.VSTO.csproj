@@ -24,7 +24,7 @@
     <AssemblyName>ThesisAddIn.VSTO</AssemblyName>
     <LoadBehavior>3</LoadBehavior>
     <!-- Bump for each distributable update so VSTO cannot reuse a same-version deployment. -->
-    <ApplicationVersion>1.4.6.1024</ApplicationVersion>
+    <ApplicationVersion>1.4.7.1024</ApplicationVersion>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
     <!-- Never commit a signing private key. Sign only when a developer-local certificate is configured. -->

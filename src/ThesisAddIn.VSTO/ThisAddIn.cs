@@ -229,6 +229,7 @@ namespace ThesisAddIn.VSTO
 
             Application.DocumentOpen += OnDocumentOpened;
             Application.WindowActivate += OnWindowActivate;
+            Application.DocumentBeforeClose += OnDocumentBeforeClose;
             Application.WindowSelectionChange += OnWindowSelectionChange;
             _ribbonTabTracker = new RibbonTabVisibilityTracker();
 
@@ -264,6 +265,8 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Shutdown(object sender, EventArgs e)
         {
+            try { WordDocumentSynchronizer.RestoreCommentWidth(Application.ActiveDocument); }
+            catch (System.Runtime.InteropServices.COMException) { }
             if (_operationCancellation != null)
             {
                 _operationCancellation.Cancel();
@@ -280,6 +283,7 @@ namespace ThesisAddIn.VSTO
                 }
                 Application.DocumentOpen -= OnDocumentOpened;
                 Application.WindowActivate -= OnWindowActivate;
+                Application.DocumentBeforeClose -= OnDocumentBeforeClose;
                 Application.WindowSelectionChange -= OnWindowSelectionChange;
             }
             catch (Exception)
@@ -499,9 +503,14 @@ namespace ThesisAddIn.VSTO
         }
         private void OnWindowActivate(Word.Document document, Word.Window window)
         {
+            WordDocumentSynchronizer.UpdateCommentWidth(document);
             EnsureTaskPaneForWindow(window);
             _issuesVisible = _taskPane != null && _taskPane.Visible;
             _ribbon?.Invalidate();
+        }
+        private void OnDocumentBeforeClose(Word.Document document, ref bool cancel)
+        {
+            WordDocumentSynchronizer.RestoreCommentWidth(document);
         }
 
         private void EnsureTaskPaneForWindow(Word.Window window)
@@ -680,23 +689,30 @@ namespace ThesisAddIn.VSTO
         }
 
         /// <summary>
-        /// 修复闭环：临时快照 → 生成计划 → 中文预览确认 → 修改当前 Word 文档 → 重新分析。
+        /// 修复闭环：临时快照 → 核对计划 → 修改当前 Word 文档 → 重新分析。
         /// 修改留在当前打开的文档中，由作者决定何时保存。
         /// </summary>
         private Task RunRepair(DiagnosticsPane pane, EngineDiagnostic issue, string scopeLabel) =>
             RunSelectedRepairs(pane,new[]{issue});
         private async Task RunSelectedRepairs(DiagnosticsPane pane, EngineDiagnostic[] selected)
         {
+            if(pane.IsBusy || !EnsureGateway(pane)) return;
+            var elapsed = Stopwatch.StartNew();
+            long stage = 0;
             string snapshot=null;
             var applied=new List<KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>>();
             Word.Document document=null;
             try {
-                if(pane.IsBusy || !EnsureGateway(pane)) return;
+                SetBusy(pane,true,"正在核对所选格式并直接修复…");
+                // Render busy feedback before exporting the live Word document on its STA.
+                await Task.Yield();
                 DocumentOperationContext operation; string error;
                 if(!TryCreateSnapshot(pane,out operation,out error)) { SetStatus(pane,error); return; }
                 document=operation.Document; snapshot=operation.SnapshotPath;
-                SetBusy(pane,true,"正在核对所选格式并直接修复…");
+                WriteStartupLog("修复耗时 snapshot="+elapsed.ElapsedMilliseconds+"ms");
+                stage=elapsed.ElapsedMilliseconds;
                 EngineResponse response=await _gateway.PlanAsync(snapshot,null,GetOperationCancellationToken());
+                WriteStartupLog("修复耗时 plan="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 if(response==null || !response.Ok || response.Plan==null) throw new InvalidDataException(EngineGateway.DescribeError(response?.Error));
                 var groups=new List<KeyValuePair<EngineDiagnostic,List<EnginePatch>>>();
                 foreach(EngineDiagnostic issue in selected) {
@@ -708,7 +724,10 @@ namespace ThesisAddIn.VSTO
                     if(patches.Count!=locations.Count) throw new InvalidDataException("所选项已变化或含不能安全修复的位置，请重新分析；尚未修改原文。");
                     groups.Add(new KeyValuePair<EngineDiagnostic,List<EnginePatch>>(issue,patches));
                 }
+                stage=elapsed.ElapsedMilliseconds;
                 if(!TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
+                WriteStartupLog("修复耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
+                stage=elapsed.ElapsedMilliseconds;
                 foreach(var group in groups) {
                     WordDocumentSynchronizer.RepairRecord record;
                     if(!WordDocumentSynchronizer.ApplyDirect(document,snapshot,group.Value,out record,out error))
@@ -720,6 +739,7 @@ namespace ThesisAddIn.VSTO
                 pane.Review.Complete(selected);
                 // Once written, keep item-level undo available even if re-analysis fails.
                 applied.Clear();
+                WriteStartupLog("修复耗时 write="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 await RefreshReviewFromLive(pane,document,operation.Window);
                 SetStatus(pane,"已修复所选 "+selected.Length+" 项；可在建议卡中逐项撤销。改动留在当前文档，未自动保存。");
             } catch(Exception ex) {
@@ -731,27 +751,41 @@ namespace ThesisAddIn.VSTO
                 }
                 SetStatus(pane,"未完成操作："+ex.Message+"。请核对状态后重新分析。");
                 WriteStartupLog("直接修复："+ex);
-            } finally { SetBusy(pane,false,null); TryDelete(snapshot); }
+            } finally {
+                WriteStartupLog("修复耗时 total="+elapsed.ElapsedMilliseconds+"ms selected="+selected.Length);
+                SetBusy(pane,false,null); TryDelete(snapshot);
+            }
         }
         private async Task RefreshReviewFromLive(DiagnosticsPane pane, Word.Document document, Word.Window window)
         {
             // Word may finish a background layout/export update just after Save As.
             // Re-read and re-analyze fresh content; never accept a stale fingerprint.
             for(int attempt=0; attempt<3; attempt++) {
+                var elapsed=Stopwatch.StartNew();
+                long stage=0;
                 DocumentOperationContext operation; string error;
                 if(!TryCreateSnapshot(pane,out operation,out error)) throw new InvalidDataException(error);
+                WriteStartupLog("复查耗时 snapshot="+elapsed.ElapsedMilliseconds+"ms");
+                stage=elapsed.ElapsedMilliseconds;
                 try {
                     EngineResponse response=await _gateway.AnalyzeAsync(operation.SnapshotPath,GetOperationCancellationToken());
+                    WriteStartupLog("复查耗时 analyze="+(elapsed.ElapsedMilliseconds-stage)+"ms");
+                    stage=elapsed.ElapsedMilliseconds;
                     if(response==null || !response.Ok || response.Result==null) throw new InvalidDataException(EngineGateway.DescribeError(response?.Error));
                     if(!TryEnsureSnapshotUnchanged(operation,out error)) {
                         if(attempt<2) continue;
                         throw new InvalidDataException(error);
                     }
-                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,out error))
+                    WriteStartupLog("复查耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
+                    stage=elapsed.ElapsedMilliseconds;
+                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,out error,WriteStartupLog))
                         throw new InvalidDataException(error);
+                    WriteStartupLog("复查耗时 annotations="+(elapsed.ElapsedMilliseconds-stage)+"ms");
+                    stage=elapsed.ElapsedMilliseconds;
                     ShowAnalysis(pane,response.Result);
                     CacheOccurrenceRanges(window.Hwnd,document,operation.SnapshotPath,response.Result);
                     ShowSuggestions(pane);
+                    WriteStartupLog("复查耗时 ui="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     WriteStartupLog("直接修复/撤销后复查：剩余 "+response.Result.Diagnostics.Count+" 项。");
                     return;
                 } finally { TryDelete(operation.SnapshotPath); }
