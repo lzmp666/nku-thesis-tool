@@ -160,7 +160,11 @@ internal static class CaptionObjectLayout
             for (var i = 0; i < cells.Length; i++)
             {
                 var cellWidth = cells[i].Element(W + "tcPr")?.Element(W + "tcW");
-                if ((string?)cellWidth?.Attribute(W + "type") != "dxa" || Number(cellWidth, W + "w") != columns[i]) return null;
+                // tcW is a preferred width. Word may normalize it one twip away
+                // from the actual fixed grid when saving; larger conflicts fail.
+                var preferredCell = Number(cellWidth, W + "w");
+                if ((string?)cellWidth?.Attribute(W + "type") != "dxa" || preferredCell is null || preferredCell <= 0 ||
+                    Math.Abs(preferredCell.Value - columns[i]) > 1) return null;
             }
         }
         return columns;

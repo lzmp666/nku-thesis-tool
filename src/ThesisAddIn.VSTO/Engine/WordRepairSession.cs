@@ -230,8 +230,7 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 Word.Table table = target.Tables[1];
                 float[] widths = ReadTableWidths(table);
-                double total = widths.Sum(width => (double)width);
-                WriteTableWidths(table, widths.Select(width => (float)(width * limit / total)).ToArray(), markMutation);
+                WriteTableWidths(table, WordTableGeometry.ScaleColumns(widths, limit), markMutation);
                 table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints; markMutation();
                 table.PreferredWidth = (float)limit; markMutation();
             }

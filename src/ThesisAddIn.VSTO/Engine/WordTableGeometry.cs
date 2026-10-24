@@ -7,6 +7,22 @@ namespace ThesisAddIn.VSTO.Engine
 {
     internal static class WordTableGeometry
     {
+        internal static float[] ScaleColumns(float[] widths, double targetPoints)
+        {
+            ReadColumns(new[] { widths });
+            if (double.IsNaN(targetPoints) || double.IsInfinity(targetPoints) || targetPoints <= 0 || targetPoints > 1584)
+                throw new InvalidDataException("目标表格宽度无效。");
+            int targetTwips = (int)Math.Round(targetPoints * 20, MidpointRounding.AwayFromZero);
+            double total = widths.Sum(value => (double)value);
+            double[] exact = widths.Select(value => value * targetTwips / total).ToArray();
+            int[] twips = exact.Select(value => (int)Math.Floor(value)).ToArray();
+            int remainder = targetTwips - twips.Sum();
+            foreach (int index in Enumerable.Range(0, widths.Length).OrderByDescending(index => exact[index] - twips[index]).Take(remainder))
+                twips[index]++;
+            if (twips.Any(value => value <= 0)) throw new InvalidDataException("目标列宽过小，已停止缩放。");
+            return twips.Select(value => value / 20f).ToArray();
+        }
+
         internal static bool EquivalentDimensions(double[] expected, double[] actual)
         {
             // Word lays out table widths asynchronously and stores dimensions in

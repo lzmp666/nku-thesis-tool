@@ -167,6 +167,18 @@ public sealed class ObjectLayoutTests
         try { Assert.Empty(WidthPlan(path)); } finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(3999, true)]
+    [InlineData(4001, true)]
+    [InlineData(4002, false)]
+    public void WordCellPreferredWidthRoundingKeepsFixedTableCovered(int preferred, bool supported)
+    {
+        var table = Table.Replace("<w:tcW w:type=\"dxa\" w:w=\"4000\"", $"<w:tcW w:type=\"dxa\" w:w=\"{preferred}\"");
+        var input = Package(Caption("表1.1　合成表") + table);
+        try { Assert.Equal(supported ? 1 : 0, WidthPlan(input).Length); }
+        finally { File.Delete(input); }
+    }
+
     [Fact]
     public void UsesTheObjectsOwnSectionInsteadOfTheLastSectionOfTheDocument()
     {
