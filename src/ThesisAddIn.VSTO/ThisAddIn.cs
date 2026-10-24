@@ -16,7 +16,7 @@ using ThesisAddIn.VSTO.Ui;
 namespace ThesisAddIn.VSTO
 {
     /// <summary>
-    /// Word 侧入口：功能区承载操作命令，右侧问题检索列表与正文批注联动。
+    /// Word 侧入口：功能区承载操作命令，左侧问题检索列表与正文批注联动。
     ///
     /// 重要：Word 会锁住正在编辑的 .docx，引擎无法直接读取，因此所有分析/修复
     /// 都基于 Word 当前内存内容生成的临时快照。分析与修复直接更新当前打开的文档，
@@ -563,7 +563,8 @@ namespace ThesisAddIn.VSTO
             try
             {
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
-                // The right pane is only a searchable issue index; all actions live on the ribbon.
+                // Keep the issue index on the left, separate from native source comments.
+                taskPane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionLeft;
                 taskPane.Width = preferredWidth;
                 taskPane.VisibleChanged += OnTaskPaneVisibleChanged;
                 taskPane.Visible = false;
