@@ -30,15 +30,15 @@ try {
     if($checked.Count -ne 0) { throw 'Suggestion checkbox did not update the same selection.' }
     $state.GetType().GetMethod('SetBatch',$flags).Invoke($state,@($false)) | Out-Null
     $script:repairs=0; $script:undos=0
-    $suggestion.add_RepairRequested({$script:repairs++})
-    $suggestion.add_UndoRequested({$script:undos++})
-    $bounds=$right.GetItemRectangle(0)
-    $click.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,30,$bounds.Bottom-18,0))) | Out-Null
+    $search.add_RepairRequested({$script:repairs++})
+    $search.add_UndoRequested({$script:undos++})
+    $bounds=$left.GetItemRectangle(0)
+    $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,30,$bounds.Bottom-18,0))) | Out-Null
     if($script:repairs -ne 1) { throw 'Solve is not connected to the repair event.' }
-    $selected=$suggestion.SelectedDiagnostic
+    $selected=$search.SelectedDiagnostic
     $key=$assembly.GetType('ThesisAddIn.VSTO.Ui.IssueReviewState').GetMethod('Key',[Reflection.BindingFlags]'Static,NonPublic').Invoke($null,@($selected))
     $state.GetType().GetField('Repaired',$flags).GetValue($state).Add($key) | Out-Null
-    $click.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
+    $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
     if($script:undos -ne 1) { throw 'Undo is not connected to the item undo event.' }
     foreach($row in $state.GetType().GetField('Rows',$flags).GetValue($state)) {
         $rowKey=$assembly.GetType('ThesisAddIn.VSTO.Ui.IssueReviewState').GetMethod('Key',[Reflection.BindingFlags]'Static,NonPublic').Invoke($null,@($row))
@@ -62,5 +62,5 @@ try {
     if($leftViewport.GetType().GetProperty('Offset',$flags).GetValue($leftViewport) -ne 17) { throw 'Revealing a suggestion scrolled the search index.' }
     $bitmap=[Drawing.Bitmap]::new($right.Width,$right.Height)
     try { $right.DrawToBitmap($bitmap,[Drawing.Rectangle]::new(0,0,$right.Width,$right.Height)) } finally { $bitmap.Dispose() }
-    Write-Output 'PASS: both review regions share checkboxes; solve and item undo dispatch real events; compact cards render.'
+    Write-Output 'PASS: search cards dispatch solve and item undo; shared state and viewport preservation verified; compact cards render.'
 } finally { $suggestion.Dispose(); $search.Dispose() }

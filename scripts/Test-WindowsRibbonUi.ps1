@@ -63,11 +63,12 @@ $script:paneVisible = $true
 $ribbon.Invalidate()
 if ($ui.Changes.Count -ne 1 -or $ui.Changes[0] -ne 'NkuShowIssues') { throw 'Visibility invalidated unrelated controls.' }
 $brands = $xml.SelectNodes('//*[@getImage="GetBrandImage"]')
-if ($brands.Count -ne 2) { throw 'Missing emblem or campus graphic.' }
+if ($brands.Count -ne 1 -or $brands[0].id -ne 'NkuEmblem' -or $brands[0].size -ne 'large') { throw 'Expected one readable large emblem and no campus group.' }
+if ($xml.SelectNodes('//*[@id="NkuCampusStyle" or @id="NkuCampusPanorama"]').Count -ne 0) { throw 'Removed campus group remains.' }
 foreach ($brand in $brands) {
     $control = New-Object ControlProbe
     $control.Id = [string]$brand.id
     $picture = $ribbon.GetBrandImage($control)
     if ($null -eq $picture -or [ControlProbe]::Width($picture) -le 0) { throw 'Brand image is invalid.' }
 }
-Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 9 command icons and 2 brand images are valid.'
+Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 9 command icons and one large emblem are valid.'

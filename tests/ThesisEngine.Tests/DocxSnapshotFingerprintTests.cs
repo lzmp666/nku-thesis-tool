@@ -234,6 +234,25 @@ public sealed class DocxSnapshotFingerprintTests
         }
     }
 
+    [Fact]
+    public void IgnoresDerivedWordStatisticsButRetainsOtherApplicationProperties()
+    {
+        var directory=Path.Combine(Path.GetTempPath(),"nku-statistics-"+Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var paths=new[] { "first", "recounted", "edited" }.Select(x=>Path.Combine(directory,x+".docx")).ToArray();
+        try {
+            for(int index=0;index<paths.Length;index++) {
+                WriteWordExportPackage(paths[index],"00112233","11223344");
+                using var archive=ZipFile.Open(paths[index],ZipArchiveMode.Update);
+                using var writer=new StreamWriter(archive.CreateEntry("docProps/app.xml").Open());
+                writer.Write("<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\"><Company>"+(index==2 ? "edited" : "same")+"</Company><Pages>"+index+"</Pages><Words>"+(100+index)+"</Words><TotalTime>"+index+"</TotalTime></Properties>");
+            }
+            Assert.Equal(DocxSnapshotFingerprint.Compute(paths[0]),DocxSnapshotFingerprint.Compute(paths[1]));
+            Assert.Empty(DocxSnapshotFingerprint.GetChangedParts(paths[0],paths[1]));
+            Assert.NotEqual(DocxSnapshotFingerprint.Compute(paths[0]),DocxSnapshotFingerprint.Compute(paths[2]));
+        } finally { foreach(var path in paths) File.Delete(path); Directory.Delete(directory); }
+    }
+
     private static void WriteWordExportPackage(string path, string session, string separatorId,
         string bodyId = "12345678", string font = "宋体", string noteText = "普通脚注")
     {

@@ -703,7 +703,7 @@ namespace ThesisAddIn.VSTO.Ui
                 height += MeasureCardLineHeight(e.Graphics, ActualText(issue), 12, width-12, font)+2;
                 if (!IsSuggestion) height += MeasureCardLineHeight(e.Graphics,
                     GetCompactLocation(_visibleIndices[e.Index], issue), 12, width-12, font)+2;
-                else height += 30;
+                height += 30;
                 e.ItemHeight = (int)Math.Ceiling(height * _uiScale);
             }
         }
@@ -753,7 +753,7 @@ namespace ThesisAddIn.VSTO.Ui
                 if (!IsSuggestion)
                     DrawCardLine(graphics,"位置",GetCompactLocation(_visibleIndices[index],issue),
                         card.Left+9,ref y,card.Right-9,body,ink);
-                else {
+                {
                     int buttonY = card.Bottom-28;
                     DrawAction(graphics,new Rectangle(card.Left+9,buttonY,66,23),"解决",Review.CanRepair(issue));
                     DrawAction(graphics,new Rectangle(card.Left+83,buttonY,66,23),"撤销",Review.IsRepaired(issue));
@@ -779,7 +779,7 @@ namespace ThesisAddIn.VSTO.Ui
             if (Review.BatchMode && x<36) {
                 SelectDiagnostic(index,false); Review.Toggle(issue); e.Handled=true; return;
             }
-            if (IsSuggestion && y>=height-33) {
+            if (y>=height-33) {
                 SelectDiagnostic(index,false);
                 if (x>=12 && x<=80 && Review.CanRepair(issue)) OnEvent(RepairRequested);
                 else if (x>=86 && x<=155 && Review.IsRepaired(issue)) OnEvent(UndoRequested);

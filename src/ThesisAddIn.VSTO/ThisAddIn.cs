@@ -53,6 +53,7 @@ namespace ThesisAddIn.VSTO
         private bool _isNavigatingToDiagnostic;
         private bool _issuesVisible;
         private DateTime _lastNavigationUtc = DateTime.MinValue;
+        private DateTime _lastCommentPollUtc = DateTime.MinValue;
 
         private sealed class DocumentOperationContext
         {
@@ -560,18 +561,7 @@ namespace ThesisAddIn.VSTO
                 _taskPane = taskPane;
                 _pane = pane;
                 pane.CreateControl();
-                var suggestion = new DiagnosticsPane(true,pane.Review);
-                var suggestionPane = CustomTaskPanes.Add(suggestion,"原文建议",window);
-                suggestionPane.Width = suggestion.ConfigureForOfficeWindow(windowHandle);
-                suggestionPane.Visible = false;
-                suggestion.CreateControl();
-                _suggestions[pane]=suggestionPane;
-                _searchOwners[suggestion]=pane;
-                suggestion.DiagnosticSelected += OnDiagnosticSelected;
-                suggestion.RepairRequested += OnFixCurrentRequested;
-                suggestion.UndoRequested += OnVerifyResolvedRequested;
-                suggestion.ApplyCheckedRequested += OnApplyCheckedRequested;
-                suggestion.StateChanged += OnPaneStateChanged;
+                // Native Word balloons provide the connected source annotations.
                 CustomTaskPane trackedTaskPane = taskPane;
                 _ribbonTabTracker?.Track(windowHandle, selected =>
                 {
@@ -653,6 +643,8 @@ namespace ThesisAddIn.VSTO
             pane.DiagnosticSelected += OnDiagnosticSelected;
             pane.StateChanged += OnPaneStateChanged;
             pane.ApplyCheckedRequested += OnApplyCheckedRequested;
+            pane.RepairRequested += OnFixCurrentRequested;
+            pane.UndoRequested += OnVerifyResolvedRequested;
             return pane;
         }
 
@@ -915,6 +907,7 @@ namespace ThesisAddIn.VSTO
             {
                 // Reject task-pane motion and stationary pointers before any Word COM.
                 // Explicit navigation owns the selection briefly, so hover cannot undo it.
+                if (TryHandleResolvedToolComment()) return;
                 System.Drawing.Point cursor = Cursor.Position;
                 if (_isNavigatingToDiagnostic || _pane == null || _pane.IsBusy ||
                     Control.MouseButtons != MouseButtons.None ||
@@ -1027,6 +1020,42 @@ namespace ThesisAddIn.VSTO
                 // 悬停是辅助联动，失败时保留现有卡片，不打断分析和编辑。
                 ResetHoveredRange();
             }
+        }
+
+        // Word exposes comment Done, but no event for its native Resolve button.
+        // Poll only this analyzed window; read text only for resolved comments.
+        private bool TryHandleResolvedToolComment()
+        {
+            if (_pane == null || _pane.IsBusy || _pane.Review.Rows.Count == 0 ||
+                (DateTime.UtcNow - _lastCommentPollUtc).TotalMilliseconds < 750) return false;
+            _lastCommentPollUtc = DateTime.UtcNow;
+            Word.Document document = Application.ActiveDocument;
+            Word.Comments comments = document.Comments;
+            for (int i=1;i<=comments.Count;i++) {
+                Word.Comment comment = comments[i];
+                if (!comment.Done) continue;
+                Word.Range textRange=comment.Range.Duplicate;
+                textRange.TextRetrievalMode.IncludeHiddenText=true;
+                string text=textRange.Text ?? string.Empty;
+                if (!text.Contains("[NKU-TOOL-ANNOTATION:v1]")) continue;
+                Match rule=RuleIdPattern.Match(text);
+                Match location=CommentLocationPattern.Match(text);
+                string expected=CommentDiagnosticMatcher.ReadCommentField(text,"期望值");
+                string actual=CommentDiagnosticMatcher.ReadCommentField(text,"实际值");
+                // Resolving a tool comment is a repair request, not evidence of repair.
+                // Reopen before validation; failed or manual repairs remain visible.
+                comment.Done=false;
+                if (!rule.Success || !location.Success || !_pane.SelectByComment(rule.Groups["id"].Value,
+                    expected,actual,location.Groups["location"].Value,navigateToSource:false)) return false;
+                EngineDiagnostic issue=_pane.SelectedDiagnostic;
+                if (issue == null || !_pane.Review.CanRepair(issue)) {
+                    _pane.SetStatus("该项需要人工核对，未修改原文，也未标记为已解决。"); return false;
+                }
+                WriteStartupLog("Word 原生解决触发格式修复："+issue.RuleId);
+                RunRepair(_pane,issue,"当前问题");
+                return true;
+            }
+            return false;
         }
 
         private void ResetHoveredRange()

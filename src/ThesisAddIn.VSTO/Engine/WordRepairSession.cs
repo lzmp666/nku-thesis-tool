@@ -11,7 +11,7 @@ namespace ThesisAddIn.VSTO.Engine
     public static partial class WordDocumentSynchronizer
     {
         // Actionable cards are hosted by the add-in, not Word's reply/resolve UI.
-        private static readonly bool CreateNativeComments = false;
+        private static readonly bool CreateNativeComments = true;
 
         public sealed class RepairRecord
         {

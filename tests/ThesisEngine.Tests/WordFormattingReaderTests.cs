@@ -414,6 +414,46 @@ public sealed class WordFormattingReaderTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData("Figure 2.1 Example", CaptionKind.Figure)]
+    [InlineData("Fig. 2-1 Example", CaptionKind.Figure)]
+    [InlineData("Table 2.1 Example", CaptionKind.Table)]
+    [InlineData("table 2-1 Example", CaptionKind.Table)]
+    public void EnglishCaptionRepairsUseCaptionValuesAndPreserveText(string text, CaptionKind kind)
+    {
+        var xml=Document("<w:p><w:pPr><w:pStyle w:val=\"Caption\"/><w:jc w:val=\"left\"/><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"360\" w:lineRule=\"auto\"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\"/><w:sz w:val=\"24\"/></w:rPr><w:t>"+text+"</w:t></w:r></w:p>");
+        var styles="<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:styleId=\"Caption\"/></w:styles>";
+        var path=CreatePackage(xml,styles,new[] { ("[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"), ("_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>") });
+        var output=Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".docx");
+        try {
+            var snapshot=new WordFormattingReader().Read(path);
+            Assert.Equal(kind,Assert.Single(snapshot.Paragraphs).Caption);
+            var analysis=new FontSizeAnalyzer().Analyze(snapshot,DemoRuleSet.NkuDraftSample);
+            var plan=PatchEngine.PlanPatches(analysis);
+            Assert.Contains(plan.Patches,p=>p.RuleId==FontSizeAnalyzer.RuleIdCaptionFontSize && p.DesiredAfter=="10.5pt");
+            Assert.DoesNotContain(plan.Patches,p=>p.RuleId==FontSizeAnalyzer.RuleIdFontSize || p.RuleId==FontSizeAnalyzer.RuleIdAsciiFont);
+            var applied=PatchEngine.ApplyPatches(path,plan,output);
+            Assert.True(applied.Succeeded,string.Join("; ",applied.Failures.Select(f=>f.Reason)));
+            var after=Assert.Single(new WordFormattingReader().Read(output).Paragraphs);
+            Assert.Equal(text,after.Text);
+            Assert.Equal(10.5,Assert.Single(after.Runs).FontSizePt);
+            Assert.Equal("Arial",after.Runs[0].AsciiFont); // Do not invent an English-caption font requirement.
+            Assert.Equal("center",after.ParagraphFormatting!.Alignment);
+            Assert.Equal("single",after.ParagraphFormatting.LineSpacing);
+            Assert.Empty(PatchEngine.PlanPatches(new FontSizeAnalyzer().Analyze(new WordFormattingReader().Read(output),DemoRuleSet.NkuDraftSample)).Patches);
+        } finally { File.Delete(path); File.Delete(output); }
+    }
+
+    [Theory]
+    [InlineData("Figure 2.1 is discussed in this paragraph.")]
+    [InlineData("Table 2.1 summarizes the observations.")]
+    public void EnglishProseMentioningAnObjectWithoutAStyleOrAdjacentObjectIsNotACaption(string text)
+    {
+        var path=CreatePackage(Document("<w:p><w:r><w:t>"+text+"</w:t></w:r></w:p>"));
+        try { Assert.Null(Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Caption); }
+        finally { File.Delete(path); }
+    }
+
     private static string CreatePackage(string document, string? styles = null, IEnumerable<(string Name, string Xml)>? entries = null)
     {
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.docx");

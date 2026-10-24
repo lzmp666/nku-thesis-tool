@@ -368,7 +368,7 @@ namespace ThesisAddIn.VSTO.Engine
             body.ParagraphFormat.SpaceBefore = 0;
             body.ParagraphFormat.SpaceAfter = 3;
             body.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
-            foreach (string label in new[] { "要求参考来源：", "规则：", "期望值：", "实际值：" })
+            foreach (string label in new[] { "要求：", "实际：" })
             {
                 int offset = text.IndexOf(label, StringComparison.Ordinal);
                 if (offset < 0) continue;
@@ -428,12 +428,19 @@ namespace ThesisAddIn.VSTO.Engine
         private static string BuildVisibleCommentText(EngineDiagnostic diagnostic)
         {
             var fields = new List<string>();
-            string source = GetSourceReference(diagnostic);
-            if (!string.IsNullOrWhiteSpace(source)) fields.Add("要求参考来源：" + source);
-            fields.Add("规则：" + (diagnostic.RuleId ?? "未知"));
-            fields.Add("期望值：" + (diagnostic.Expected ?? "未知"));
-            fields.Add("实际值：" + (diagnostic.Actual ?? "未知"));
+            fields.Add("要求：" + DisplayCommentValue(diagnostic.Expected));
+            fields.Add("实际：" + DisplayCommentValue(diagnostic.Actual));
             return string.Join(Environment.NewLine, fields) + "。";
+        }
+
+        private static string DisplayCommentValue(string value)
+        {
+            switch(value) {
+                case "center": return "居中"; case "left": return "左对齐";
+                case "single": return "单倍行距"; case "multiple:360": return "1.5 倍行距";
+                case "(unknown)": return "未知，需核对";
+                default: return value ?? "未知";
+            }
         }
 
         private static string GetSourceReference(EngineDiagnostic diagnostic)
@@ -461,6 +468,9 @@ namespace ThesisAddIn.VSTO.Engine
         {
             var metadata = new StringBuilder();
             metadata.Append(ToolMarker);
+            // Retain the stable machine fields as hidden metadata for source linking.
+            metadata.Append("\r规则：").Append(diagnostic.RuleId).Append("\r期望值：").Append(diagnostic.Expected)
+                .Append("\r实际值：").Append(diagnostic.Actual).Append("\r");
             metadata.Append("[NKU-LOCATION:").Append(anchorLocation).Append(']');
             if (originalHighlights.TryGetValue(anchorLocation, out int original))
                 metadata.Append("[NKU-HIGHLIGHT:").Append(GetHighlightName((Word.WdColorIndex)original)).Append(']');

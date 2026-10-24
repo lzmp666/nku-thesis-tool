@@ -60,7 +60,7 @@ namespace ThesisAddIn.VSTO.Ui
     <tabs>
       <tab id=""NkuThesisTab"" label=""论文格式检查"" insertAfterMso=""TabHome"">
         <group id=""NkuThesisIdentity"" label=""南开大学"">
-          <button id=""NkuEmblem"" label=""南开"" size=""normal""
+          <button id=""NkuEmblem"" label=""南开大学"" size=""large""
                   getImage=""GetBrandImage"" onAction=""OnBrandInfo""
                   screentip=""NKU Thesis Tool"" supertip=""查看插件信息与南开校园主题。"" />
         </group>
@@ -78,11 +78,11 @@ namespace ThesisAddIn.VSTO.Ui
         <group id=""NkuThesisRepair"" label=""修复"">
           <button id=""NkuFixCurrent"" label=""修复当前问题"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
                   screentip=""直接解决当前格式问题""
-                  supertip=""按当前规则直接修改所选项，可在原文建议中撤销；不会自动保存。""
+                  supertip=""按当前规则直接修改所选项，可在问题检索中撤销；不会自动保存。""
                   onAction=""OnFixCurrent"" />
           <button id=""NkuFixAll"" label=""批量修复"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
                   screentip=""选择需要修复的问题""
-                  supertip=""进入勾选模式，在检索列表或原文建议中选择后修复所选项。""
+                  supertip=""进入勾选模式，在检索列表中选择后修复所选项。""
                   onAction=""OnFixAll"" />
           <button id=""NkuVerifyResolved"" label=""撤销当前修复"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
                   screentip=""撤销这一项的格式修复""
@@ -98,11 +98,6 @@ namespace ThesisAddIn.VSTO.Ui
             <button id=""NkuPreviousOccurrence"" label=""上一处"" getImage=""GetButtonImage"" getEnabled=""GetEnabled"" onAction=""OnPreviousOccurrence"" />
             <button id=""NkuNextOccurrence"" label=""下一处"" getImage=""GetButtonImage"" getEnabled=""GetEnabled"" onAction=""OnNextOccurrence"" />
           </box>
-        </group>
-        <group id=""NkuCampusStyle"" label=""南开校园"">
-          <button id=""NkuCampusPanorama"" label=""校园"" size=""large"" getImage=""GetBrandImage"" onAction=""OnBrandInfo""
-                  screentip=""查看校园插图与版本"" />
-          <labelControl id=""NkuCampusProduct"" getLabel=""GetBuildLabel"" />
         </group>
       </tab>
     </tabs>
@@ -216,7 +211,7 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 if (stream == null) return null;
                 using (Image source = Image.FromStream(stream))
-                using (var bitmap = new Bitmap(emblem ? 16 : 96, emblem ? 16 : 32))
+                using (var bitmap = new Bitmap(emblem ? 32 : 96, 32))
                 using (Graphics graphics = Graphics.FromImage(bitmap))
                 {
                     graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;

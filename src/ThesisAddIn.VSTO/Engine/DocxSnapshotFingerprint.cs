@@ -102,6 +102,13 @@ namespace ThesisAddIn.VSTO.Engine
                 // but do not fingerprint serialization-only whitespace between elements.
                 var root = XDocument.Load(reader).Root;
                 if (root == null) throw new InvalidDataException("快照 XML 部件缺少根元素：" + entry.FullName);
+                if (string.Equals(entry.FullName,"docProps/app.xml",StringComparison.OrdinalIgnoreCase)) {
+                    // Word updates these derived statistics asynchronously after Save As.
+                    // Keep all other application properties (for example Company) protected.
+                    XNamespace ep="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
+                    foreach (string name in new[] { "TotalTime", "Pages", "Words", "Characters", "Lines", "Paragraphs", "CharactersWithSpaces" })
+                        root.Elements(ep+name).Remove();
+                }
                 if (entry.FullName.StartsWith("word/", StringComparison.Ordinal)) NormalizeExportMetadata(root, entry.FullName);
                 if (string.Equals(entry.FullName, "word/comments.xml", StringComparison.OrdinalIgnoreCase))
                     NormalizeOwnedCommentPresentation(root);

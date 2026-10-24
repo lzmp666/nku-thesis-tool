@@ -54,7 +54,7 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 string.Equals(p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value,
                     "Caption", StringComparison.OrdinalIgnoreCase) &&
                 GetCaptionKind(string.Concat(p.Descendants(W + "t").Select(t => t.Value))) is null))
-            unsupported.Add("captions whose labels do not match the configured Chinese 图/表 pattern");
+            unsupported.Add("captions whose labels do not match configured 图/表 or Figure/Fig./Table numbering");
         if (body.Descendants(W + "drawing").Any() || body.Descendants(W + "pict").Any())
             unsupported.Add("images (visual quality and layout are not analyzed)");
         if (document.Descendants(W + "txbxContent").Any()) unsupported.Add("textboxes");
@@ -292,6 +292,10 @@ public sealed class WordFormattingReader : IDemoDocumentReader
     private static CaptionKind? GetCaptionKind(string paragraphText)
     {
         var text = paragraphText.TrimStart();
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^(?:Figure|Fig\.)\s+[0-9]+(?:[.\-][0-9]+)*(?=\s|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Figure;
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^Table\s+[0-9]+(?:[.\-][0-9]+)*(?=\s|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Table;
         if (System.Text.RegularExpressions.Regex.IsMatch(text,
                 @"^图\s*(?:[A-Z]|[0-9一二三四五六七八九十]+)([.\-—][0-9一二三四五六七八九十]+)*",
                 System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Figure;
