@@ -280,11 +280,17 @@ namespace ThesisAddIn.VSTO.Engine
             // Ignore unrelated Flat OPC properties/styles/statistics. A changed image
             // must block item undo; another format repair must not block it.
             XNamespace package = "http://schemas.microsoft.com/office/2006/xmlPackage";
-            XDocument xml = XDocument.Parse(picture.Range.WordOpenXML);
+            // A range consisting solely of the object marker can omit media
+            // payloads. Export its image-only paragraph to include dependencies.
+            XDocument xml = XDocument.Parse(picture.Range.Paragraphs[1].Range.WordOpenXML);
             string media = string.Join("|", xml.Descendants(package + "part")
                 .Where(part => ((string)part.Attribute(package + "contentType") ?? "").StartsWith("image/", StringComparison.Ordinal))
-                .Select(part => part.Element(package + "binaryData")?.Value ?? "").OrderBy(value => value, StringComparer.Ordinal));
-            if (string.IsNullOrWhiteSpace(media)) throw new InvalidDataException("无法核对图片内容，已停止撤销。");
+                .Select(part => part.Element(package + "binaryData")?.Value ?? "")
+                .Concat(xml.Descendants(XName.Get("binData", "http://schemas.openxmlformats.org/wordprocessingml/2006/main")).Select(element => element.Value))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => Convert.ToBase64String(Convert.FromBase64String(value)))
+                .OrderBy(value => value, StringComparer.Ordinal));
+            if (string.IsNullOrWhiteSpace(media)) throw new InvalidDataException("无法核对图片内容，已停止撤销。图片段落部件数：" + xml.Descendants(package + "part").Count());
             using (SHA256 hash = SHA256.Create()) return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(media)));
         }
     }
