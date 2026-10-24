@@ -23,6 +23,8 @@
     <RootNamespace>ThesisAddIn.VSTO</RootNamespace>
     <AssemblyName>ThesisAddIn.VSTO</AssemblyName>
     <LoadBehavior>3</LoadBehavior>
+    <!-- Bump for each distributable update so VSTO cannot reuse a same-version deployment. -->
+    <ApplicationVersion>1.4.11.1025</ApplicationVersion>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
     <!-- Never commit a signing private key. Sign only when a developer-local certificate is configured. -->
@@ -67,6 +69,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
@@ -181,14 +184,34 @@
       <DependentUpon>ThisAddIn.Designer.xml</DependentUpon>
     </Compile>
     <Compile Include="Engine\DocumentLocator.cs" />
+    <Compile Include="Engine\WordDocumentSynchronizer.cs" />
+    <Compile Include="Engine\WordRepairSession.cs" />
+    <Compile Include="Engine\WordTableGeometry.cs" />
+    <Compile Include="Engine\WordParagraphValueMapper.cs" />
     <Compile Include="Engine\DocxSnapshotFingerprint.cs" />
     <Compile Include="Engine\FlatOpcPackageWriter.cs" />
     <Compile Include="Engine\EngineGateway.cs" />
     <Compile Include="Engine\EngineHostPathResolver.cs" />
     <Compile Include="Ui\DiagnosticsPane.cs" />
+    <Compile Include="Ui\RibbonTabVisibilityTracker.cs" />
+    <Compile Include="Ui\StableIssueListBox.cs" />
+    <Compile Include="Ui\IssueListViewport.cs" />
+    <Compile Include="Ui\IssueReviewState.cs" />
     <Compile Include="Ui\CommentDiagnosticMatcher.cs" />
     <Compile Include="Ui\FixPreviewDialog.cs" />
     <Compile Include="Ui\ThesisRibbon.cs" />
+    <EmbeddedResource Include="Assets\nku-emblem-official.jpg">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-emblem-official.jpg</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\nku-campus-panorama-v2.png">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-campus-panorama-v2.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\nku-campus-header.png">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-campus-header.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\nku-ribbon-icons.png">
+      <LogicalName>ThesisAddIn.VSTO.Assets.nku-ribbon-icons.png</LogicalName>
+    </EmbeddedResource>
     <AppDesigner Include="Properties\" />
   </ItemGroup>
 

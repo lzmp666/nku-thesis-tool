@@ -8,6 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.1">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -18,9 +19,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/ThesisAddIn.VSTO/Ui/CommentDiagnosticMatcher.cs" Link="Ui/CommentDiagnosticMatcher.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Ui/IssueReviewState.cs" Link="Ui/IssueReviewState.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Ui/IssueListViewport.cs" Link="Ui/IssueListViewport.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/DocxSnapshotFingerprint.cs" Link="Engine/DocxSnapshotFingerprint.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/EngineHostPathResolver.cs" Link="Engine/EngineHostPathResolver.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/FlatOpcPackageWriter.cs" Link="Engine/FlatOpcPackageWriter.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/WordParagraphValueMapper.cs" Link="Engine/WordParagraphValueMapper.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/WordTableGeometry.cs" Link="Engine/WordTableGeometry.cs" />
   </ItemGroup>
 </Project>
 

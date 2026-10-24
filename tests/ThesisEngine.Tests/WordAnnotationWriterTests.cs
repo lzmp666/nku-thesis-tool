@@ -12,6 +12,107 @@ public sealed class WordAnnotationWriterTests
     private static readonly XNamespace Ct = "http://schemas.openxmlformats.org/package/2006/content-types";
 
     [Fact]
+    public void GroupedDiagnosticCreatesOneCommentAndHighlightsEveryOccurrence()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            var diagnostic = new Diagnostic("demo/east-asian-font", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体、雅黑", "auto", "统一改为宋体。")
+            {
+                Occurrences = new[]
+                {
+                    new DiagnosticOccurrence("word/document.xml#paragraph[1]/run[0]", "黑体"),
+                    new DiagnosticOccurrence("word/document.xml#paragraph[2]/run[0]", "雅黑")
+                }
+            };
+
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, new[] { diagnostic });
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var document = ReadXml(archive, "word/document.xml");
+            var paragraphs = document.Descendants(W + "body").Single().Elements(W + "p").ToArray();
+            Assert.Equal("yellow", (string?)paragraphs[1].Descendants(W + "highlight").Single().Attribute(W + "val"));
+            Assert.Equal("yellow", (string?)paragraphs[2].Descendants(W + "highlight").Single().Attribute(W + "val"));
+            Assert.Single(document.Descendants(W + "commentRangeStart"));
+            Assert.Single(document.Descendants(W + "commentRangeEnd"));
+
+            var comments = ReadXml(archive, "word/comments.xml");
+            var comment = Assert.Single(comments.Root!.Elements(W + "comment"));
+            var hidden = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[1]/run[0]|absent]", hidden);
+            Assert.Contains("[NKU-OCCURRENCE:word/document.xml#paragraph[2]/run[0]|absent]", hidden);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public void CommentShowsApprovedSourceAndHumanReadableRuleName()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        const string source = "南开大学研究生学位论文写作规范（2026版）第4.7节表4.6（M26-036）";
+        try
+        {
+            var diagnostic = new Diagnostic("NKU-REQ-042", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "manual",
+                source + "：中文字体应为「宋体」，实际为「黑体」。");
+
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, new[] { diagnostic });
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var comments = ReadXml(archive, "word/comments.xml");
+            var comment = Assert.Single(comments.Root!.Elements(W + "comment"));
+            var visibleText = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            Assert.Equal("要求参考来源：" + source + "；格式项：中文字体；期望值：宋体；实际值：黑体。", visibleText);
+            Assert.DoesNotContain("NKU-REQ-042", visibleText);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public void CommentShowsDemoRuleSourceWithoutExposingInternalRuleId()
+    {
+        var root = FindRepositoryRoot();
+        var inputPath = Path.Combine(root.FullName, "tests", "fixtures", "synthetic", "demo", "known_issues_sample.docx");
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            var diagnostic = new Diagnostic("demo/caption-font-size", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "10.5pt", "12pt", "auto",
+                "依据：南开大学《研究生学位论文写作规范（2026版）》第 4.7 节表 4.6。图题字号不符。");
+
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, new[] { diagnostic });
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var comment = Assert.Single(ReadXml(archive, "word/comments.xml").Root!.Elements(W + "comment"));
+            var visibleText = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            Assert.Contains("要求参考来源：南开大学《研究生学位论文写作规范（2026版）》第 4.7 节表 4.6", visibleText);
+            Assert.Contains("格式项：图表题注字号", visibleText);
+            Assert.DoesNotContain("demo/caption-font-size", visibleText);
+        }
+        finally
+        {
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
     public void AnnotatesExistingSyntheticDemoFixture()
     {
         var root = FindRepositoryRoot();
@@ -23,9 +124,9 @@ public sealed class WordAnnotationWriterTests
             var originalText = ReadTextRuns(inputPath);
             var diagnostics = new[]
             {
-                new Diagnostic("demo/east-asian-font", "warning", "word/document.xml#paragraph[0]/run[0]", "宋体", "黑体", "auto", "请改为宋体。"),
-                new Diagnostic("demo/western-font", "warning", "word/document.xml#paragraph[1]/run[0]", "Times New Roman", "Arial", "auto", "请改为 Times New Roman。"),
-                new Diagnostic("demo/font-size", "warning", "word/document.xml#paragraph[2]/run[0]", "12pt", "10.5pt", "auto", "请调整字号。")
+                new Diagnostic("demo/east-asian-font", "warning", "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "auto", "请改为宋体。"),
+                new Diagnostic("demo/western-font", "warning", "word/document.xml#paragraph[2]/run[0]", "Times New Roman", "Arial", "auto", "请改为 Times New Roman。"),
+                new Diagnostic("demo/font-size", "warning", "word/document.xml#paragraph[3]/run[0]", "12pt", "10.5pt", "auto", "请调整字号。")
             };
 
             WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, diagnostics);
@@ -41,8 +142,8 @@ public sealed class WordAnnotationWriterTests
             var document = ReadXml(archive, "word/document.xml");
             var body = document.Descendants(W + "body").Single();
             var paragraphs = body.Elements(W + "p").ToArray();
-            Assert.Equal(3, paragraphs.Length);
-            Assert.All(paragraphs, paragraph =>
+            Assert.Equal(5, paragraphs.Length);
+            Assert.All(paragraphs.Skip(1).Take(3), paragraph =>
             {
                 Assert.Single(paragraph.Elements(W + "commentRangeStart"));
                 Assert.Single(paragraph.Elements(W + "commentRangeEnd"));
@@ -71,15 +172,17 @@ public sealed class WordAnnotationWriterTests
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value))))
                 .ToArray();
             Assert.Equal(3, commentTexts.Length);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/east-asian-font；期望值：宋体；实际值：黑体。", commentTexts);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/western-font；期望值：Times New Roman；实际值：Arial。", commentTexts);
-            Assert.Contains("要求参考来源：2026版第4.7节表4.6；规则：demo/font-size；期望值：12pt；实际值：10.5pt。", commentTexts);
+            const string source = "要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）；";
+            Assert.Contains(source + "格式项：中文字体；期望值：宋体；实际值：黑体。", commentTexts);
+            Assert.Contains(source + "格式项：西文字体；期望值：Times New Roman；实际值：Arial。", commentTexts);
+            Assert.Contains(source + "格式项：字号；期望值：12pt；实际值：10.5pt。", commentTexts);
+            Assert.DoesNotContain(commentTexts, text => text.Contains("demo/", StringComparison.Ordinal));
             var hiddenLocations = commentElements
                 .SelectMany(comment => comment.Descendants(W + "r")
                     .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
                     .SelectMany(run => run.Elements(W + "t").Select(element => element.Value)))
                 .ToArray();
-            Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[0]/run[0]]", hiddenLocations);
+            Assert.Contains("[NKU-LOCATION:word/document.xml#paragraph[1]/run[0]]", hiddenLocations);
             Assert.Contains("[NKU-TOOL-ANNOTATION:v1]", hiddenLocations);
             Assert.Contains("[NKU-HIGHLIGHT:absent]", hiddenLocations);
             Assert.DoesNotContain("NKU-LOCATION", string.Join("", commentTexts));
@@ -139,7 +242,9 @@ public sealed class WordAnnotationWriterTests
             Assert.Equal(new[] { "0", "1", "2" }, comments.Root!.Elements(W + "comment")
                 .Select(element => (string?)element.Attribute(W + "id")).ToArray());
             var commentText = string.Join(" ", comments.Descendants(W + "t").Select(element => element.Value));
-            Assert.Contains("2026版第4.7节表4.6", commentText);
+            Assert.Contains("要求参考来源：演示规则（仅用于验证插件流程，不代表正式标准）", commentText);
+            Assert.Contains("格式项：中文字体", commentText);
+            Assert.DoesNotContain("2026版第4.7节表4.6", commentText);
             Assert.Contains("期望值：宋体；实际值：黑体", commentText);
             Assert.DoesNotContain("修改建议：", commentText);
             Assert.DoesNotContain("检测提示：", commentText);
@@ -161,6 +266,50 @@ public sealed class WordAnnotationWriterTests
         {
             File.Delete(inputPath);
             if (File.Exists(outputPath)) File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
+    public void ResolvesDiagnosticLocationsAcrossTableCellParagraphs()
+    {
+        const string documentXml = """
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p><w:r><w:t>Before table</w:t></w:r></w:p>
+                <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Table cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+                <w:p><w:r><w:t>After table</w:t></w:r></w:p>
+                <w:sectPr />
+              </w:body>
+            </w:document>
+            """;
+        var inputPath = CreatePackage(documentXml);
+        var outputPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        var refreshedPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            var diagnostic = new Diagnostic("demo/font-size", "warning",
+                "word/document.xml#paragraph[1]/run[0]", "宋体", "黑体", "auto", "请改为宋体。");
+            WordAnnotationWriter.WriteAnnotatedCopy(inputPath, outputPath, [diagnostic]);
+
+            using var archive = ZipFile.OpenRead(outputPath);
+            var document = ReadXml(archive, "word/document.xml");
+            var tableRun = Assert.Single(document.Descendants(W + "tbl").Descendants(W + "r"), run => run.Descendants(W + "t").Any());
+            var followingRun = Assert.Single(document.Descendants(W + "body").Elements(W + "p").Last().Elements(W + "r"));
+            Assert.Equal("Table cell", string.Concat(tableRun.Descendants(W + "t").Select(text => text.Value)));
+            Assert.Equal("yellow", (string?)tableRun.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val"));
+            Assert.Equal("After table", string.Concat(followingRun.Descendants(W + "t").Select(text => text.Value)));
+            Assert.Null(followingRun.Element(W + "rPr")?.Element(W + "highlight"));
+            WordAnnotationWriter.WriteAnnotatedCopy(outputPath, refreshedPath, Array.Empty<Diagnostic>());
+            using var refreshedArchive = ZipFile.OpenRead(refreshedPath);
+            var refreshed = ReadXml(refreshedArchive, "word/document.xml");
+            Assert.Empty(refreshed.Descendants(W + "highlight"));
+            Assert.Empty(refreshed.Descendants(W + "commentRangeStart"));
+        }
+        finally
+        {
+            File.Delete(inputPath);
+            if (File.Exists(outputPath)) File.Delete(outputPath);
+            if (File.Exists(refreshedPath)) File.Delete(refreshedPath);
         }
     }
 
@@ -234,7 +383,7 @@ public sealed class WordAnnotationWriterTests
         }
     }
 
-    private static string CreatePackage()
+    private static string CreatePackage(string? documentXml = null)
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -250,7 +399,7 @@ public sealed class WordAnnotationWriterTests
               <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml" />
             </Relationships>
             """);
-        Add(archive, "word/document.xml", """
+        Add(archive, "word/document.xml", documentXml ?? """
             <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
               <w:body><w:p><w:r><w:rPr><w:rFonts w:ascii="Arial" /><w:sz w:val="28" /><w:highlight w:val="pink" /><w:u w:val="single" /></w:rPr><w:t>原文内容</w:t></w:r></w:p><w:sectPr /></w:body>
             </w:document>

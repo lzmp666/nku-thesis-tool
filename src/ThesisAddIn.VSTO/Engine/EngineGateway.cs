@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ThesisAddIn.Protocol;
@@ -48,7 +49,10 @@ namespace ThesisAddIn.VSTO.Engine
                 return null;
             }
 
-            return new EngineGateway(new EngineProtocolClient(EngineProcessOptions.ForDotnet(hostPath)));
+            // Full documents may contain hundreds of grouped occurrences. Re-analyzing
+            // and annotating that result is more expensive than a single format check.
+            return new EngineGateway(new EngineProtocolClient(
+                EngineProcessOptions.ForDotnet(hostPath, TimeSpan.FromMinutes(2))));
         }
 
         public EngineResponse Analyze(string documentPath)
@@ -81,7 +85,7 @@ namespace ThesisAddIn.VSTO.Engine
             return _client.AnalyzeAsync(documentPath, cancellationToken);
         }
 
-        /// <summary>分析文档并在独立输出副本中创建或刷新工具批注。</summary>
+        /// <summary>分析文档并生成用于新建或刷新工作副本的工具批注。</summary>
         public Task<EngineResponse> AnnotateAsync(
             string documentPath,
             string outputPath,
@@ -110,7 +114,8 @@ namespace ThesisAddIn.VSTO.Engine
             return _client.Plan(
                 documentPath,
                 diagnostic != null ? diagnostic.RuleId : null,
-                diagnostic != null ? diagnostic.Location : null);
+                diagnostic != null ? diagnostic.Location : null,
+                GetLocations(diagnostic));
         }
 
         public Task<EngineResponse> PlanAsync(
@@ -122,17 +127,19 @@ namespace ThesisAddIn.VSTO.Engine
                 documentPath,
                 diagnostic != null ? diagnostic.RuleId : null,
                 diagnostic != null ? diagnostic.Location : null,
+                GetLocations(diagnostic),
                 cancellationToken);
         }
 
-        /// <summary>执行修复并另存为新文件；diagnostic 为 null 时修复全部可自动项。</summary>
+        /// <summary>执行修复并写入调用方提供的临时输出路径；diagnostic 为 null 时修复全部可自动项。</summary>
         public EngineResponse Apply(string documentPath, string outputPath, EngineDiagnostic diagnostic)
         {
             return _client.Apply(
                 documentPath,
                 outputPath,
                 diagnostic != null ? diagnostic.RuleId : null,
-                diagnostic != null ? diagnostic.Location : null);
+                diagnostic != null ? diagnostic.Location : null,
+                GetLocations(diagnostic));
         }
 
         public Task<EngineResponse> ApplyAsync(
@@ -146,7 +153,17 @@ namespace ThesisAddIn.VSTO.Engine
                 outputPath,
                 diagnostic != null ? diagnostic.RuleId : null,
                 diagnostic != null ? diagnostic.Location : null,
+                GetLocations(diagnostic),
                 cancellationToken);
+        }
+
+        private static System.Collections.Generic.IReadOnlyList<string> GetLocations(EngineDiagnostic diagnostic)
+        {
+            if (diagnostic == null)
+                return null;
+            if (diagnostic.Occurrences != null && diagnostic.Occurrences.Count > 0)
+                return diagnostic.Occurrences.Select(occurrence => occurrence.Location).Distinct(StringComparer.Ordinal).ToArray();
+            return new[] { diagnostic.Location };
         }
 
         public static string DescribeError(EngineError error)

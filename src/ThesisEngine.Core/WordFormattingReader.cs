@@ -26,7 +26,15 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var styles = TryReadXml(archive, "word/styles.xml", "styles");
         var theme = TryReadXml(archive, "word/theme/theme1.xml", "theme", ThemeNamespace);
         var defaults = ReadDefaults(styles, theme);
+        var paragraphDefaults = ReadParagraphFormatting(
+            styles?.Root?.Element(W + "docDefaults")?.Element(W + "pPrDefault")?.Element(W + "pPr"));
         var styleMap = ReadStyles(styles, theme, defaults.EastAsiaLanguage);
+        // Word omits pStyle for its default paragraph style when serializing
+        // an open document. Its ID may be localized/renamed (for example a1).
+        var defaultParagraphStyle = styles?.Root?.Elements(W + "style")
+            .FirstOrDefault(style => (string?)style.Attribute(W + "type") == "paragraph" &&
+                new[] { "1", "true", "on" }.Contains((string?)style.Attribute(W + "default")))
+            ?.Attribute(W + "styleId")?.Value;
         var body = document.Root?.Element(W + "body")
             ?? throw new InvalidDataException("Missing Word document body.");
 
@@ -38,7 +46,17 @@ public sealed class WordFormattingReader : IDemoDocumentReader
             unsupported.Add("footnotes");
         if (archive.Entries.Any(e => e.FullName.StartsWith("word/endnotes", StringComparison.Ordinal)))
             unsupported.Add("endnotes");
-        if (body.Descendants(W + "tbl").Any()) unsupported.Add("tables");
+        if (body.Descendants(W + "tbl").Any())
+        {
+            unsupported.Add("tables (cell formatting rules are not configured)");
+        }
+        if (body.Descendants(W + "p").Any(p =>
+                IsCaptionStyle(p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value,
+                    styleMap, new HashSet<string>(StringComparer.Ordinal)) &&
+                GetCaptionKind(string.Concat(p.Descendants(W + "t").Select(t => t.Value))) is null))
+            unsupported.Add("captions whose labels do not match configured 图/表 or Figure/Fig./Table numbering");
+        if (body.Descendants(W + "drawing").Any() || body.Descendants(W + "pict").Any())
+            unsupported.Add("images (visual quality and complex layout are not analyzed; only paired inline-picture width is supported)");
         if (document.Descendants(W + "txbxContent").Any()) unsupported.Add("textboxes");
         if (body.Descendants(W + "sdt").Any()) unsupported.Add("content controls");
         if (body.Descendants(W + "customXml").Any()) unsupported.Add("custom XML content");
@@ -54,19 +72,38 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         if (body.Descendants(W + "p").Any(p => p.Parent != body && !p.Ancestors(W + "tbl").Any()))
             unsupported.Add("nested body paragraphs");
 
+        // Paragraph positions are flattened in document order, including table cells.
+        // This keeps engine locations aligned with Word.Document.Paragraphs in documents
+        // that contain tables. Text boxes are separate Word stories and remain unsupported.
+        var sourceParagraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var paragraphs = new List<ParagraphSnapshot>();
         var scopeInputs = new List<BodyScopeInput>();
         var paragraphIndex = 0;
-        foreach (var paragraph in body.Elements(W + "p"))
+        foreach (var paragraph in sourceParagraphs)
         {
             var paragraphProperties = paragraph.Element(W + "pPr");
-            var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
+            var paragraphStyle = paragraphProperties?.Element(W + "pStyle")?.Attribute(W + "val")?.Value
+                ?? defaultParagraphStyle;
             var paragraphResolution = ResolveStyle(paragraphStyle, styleMap, default, new HashSet<string>(StringComparer.Ordinal), "paragraph");
             var inherited = Merge(defaults, paragraphResolution.Formatting);
+            var paragraphStyleResolution = ResolveParagraphStyle(paragraphStyle, styleMap,
+                new HashSet<string>(StringComparer.Ordinal));
+            var paragraphFormatting = Merge(paragraphDefaults, paragraphStyleResolution.Formatting);
+            paragraphFormatting = Merge(paragraphFormatting, ReadParagraphFormatting(paragraphProperties));
             var isHeading = HasOutlineLevel(paragraphProperties) ||
                 IsHeadingStyleId(paragraphStyle) ||
                 (paragraphStyle is not null && styleMap.TryGetValue(paragraphStyle, out var paragraphStyleDefinition) && paragraphStyleDefinition.IsHeading);
             var paragraphText = string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value));
+            var isTableCell = paragraph.Ancestors(W + "tc").Any();
+            var isCaptionStyle = IsCaptionStyle(paragraphStyle, styleMap, new HashSet<string>(StringComparer.Ordinal));
+            var captionKind = GetCaptionKind(paragraphText);
+            var isCaption = isCaptionStyle || captionKind is not null &&
+                IsAdjacentToFigureOrTable(paragraph, captionKind.Value, body);
+            if (!isCaption) captionKind = null;
+            var hasEquation = paragraph.Descendants(XName.Get("oMath", MathNamespace)).Any() ||
+                paragraph.Descendants(XName.Get("oMathPara", MathNamespace)).Any();
             var hasUnsupportedInlineContent = paragraph.Descendants().Any(element =>
                 element.Name == W + "hyperlink" || element.Name == W + "sdt" || element.Name == W + "customXml" ||
                 element.Name == W + "altChunk" || element.Name == W + "smartTag" || element.Name == W + "fldSimple" ||
@@ -92,8 +129,16 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                     effective.SizePt, text, effective.Ascii, effective.HAnsi,
                     !paragraphResolution.IsResolved || !characterResolution.IsResolved));
             }
-            paragraphs.Add(new ParagraphSnapshot(paragraphIndex, runs));
-            scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading, hasUnsupportedInlineContent));
+            paragraphs.Add(new ParagraphSnapshot(paragraphIndex, runs)
+            {
+                Text = paragraphText,
+                Caption = captionKind,
+                CaptionPlacementCorrect = captionKind is null ? null : ResolveCaptionPlacement(paragraph, captionKind.Value, body),
+                CaptionObjectWidth = captionKind is null ? null : CaptionObjectLayout.Read(paragraph, captionKind.Value, styles),
+                ParagraphFormatting = ToSnapshot(paragraphFormatting, paragraphStyleResolution.IsResolved)
+            });
+            scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading,
+                hasUnsupportedInlineContent, isTableCell, isCaption, hasEquation));
             paragraphIndex++;
         }
 
@@ -166,7 +211,10 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 (HasOutlineLevel(paragraphProperties) || IsHeadingStyleId(id));
             map[id] = new StyleDefinition(type,
                 style.Element(W + "basedOn")?.Attribute(W + "val")?.Value,
-                ReadRunProperties(style.Element(W + "rPr"), theme, defaultLanguage), isHeading);
+                ReadRunProperties(style.Element(W + "rPr"), theme, defaultLanguage),
+                ReadParagraphFormatting(paragraphProperties), isHeading,
+                string.Equals(id, "Caption", StringComparison.OrdinalIgnoreCase) ||
+                new[] { "Caption", "题注" }.Contains((string?)style.Element(W + "name")?.Attribute(W + "val"), StringComparer.OrdinalIgnoreCase));
         }
         return map;
     }
@@ -182,6 +230,137 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var parentType = style.Type ?? expectedType;
         var parent = ResolveStyle(style.BasedOn, styles, defaults, seen, parentType);
         return new StyleResolution(Merge(parent.Formatting, style.Formatting), parent.IsResolved);
+    }
+
+    private static bool IsCaptionStyle(string? id, IReadOnlyDictionary<string, StyleDefinition> styles, HashSet<string> seen)
+    {
+        if (string.Equals(id, "Caption", StringComparison.OrdinalIgnoreCase)) return true;
+        return id is not null && seen.Add(id) && styles.TryGetValue(id, out var style) && style.Type == "paragraph" &&
+            (style.IsCaption || IsCaptionStyle(style.BasedOn, styles, seen));
+    }
+
+    private static ParagraphStyleResolution ResolveParagraphStyle(string? id,
+        IReadOnlyDictionary<string, StyleDefinition> styles, HashSet<string> seen)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return new ParagraphStyleResolution(default, true);
+        if (!styles.TryGetValue(id, out var style) || !seen.Add(id))
+            return new ParagraphStyleResolution(default, false);
+        var parent = ResolveParagraphStyle(style.BasedOn, styles, seen);
+        return new ParagraphStyleResolution(Merge(parent.Formatting, style.ParagraphFormatting), parent.IsResolved);
+    }
+
+    private static ParagraphFormatting ReadParagraphFormatting(XElement? properties)
+    {
+        if (properties is null) return default;
+        var alignment = properties.Element(W + "jc")?.Attribute(W + "val")?.Value;
+        var spacing = properties.Element(W + "spacing");
+        var before = ParseTwips(spacing?.Attribute(W + "before")?.Value);
+        var after = ParseTwips(spacing?.Attribute(W + "after")?.Value);
+        var lineValue = spacing?.Attribute(W + "line")?.Value;
+        var lineRule = spacing?.Attribute(W + "lineRule")?.Value;
+        string? lineSpacing = null;
+        if (int.TryParse(lineValue, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var line) && line > 0)
+        {
+            lineRule ??= "auto";
+            lineSpacing = lineRule switch
+            {
+                "auto" when line == 240 => "single",
+                "auto" => $"multiple:{line.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                "exact" => $"exact:{line.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                "atLeast" => $"atLeast:{line.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                _ => null
+            };
+        }
+        return new ParagraphFormatting(alignment, before, after, lineSpacing,
+            alignment is not null, before is not null, after is not null, lineSpacing is not null);
+    }
+
+    private static double? ParseTwips(string? value) =>
+        int.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var twips)
+            ? twips / 20.0
+            : null;
+
+    private static ParagraphFormatting Merge(ParagraphFormatting inherited, ParagraphFormatting direct) => new(
+        direct.AlignmentSpecified ? direct.Alignment : inherited.Alignment,
+        direct.SpaceBeforeSpecified ? direct.SpaceBeforePt : inherited.SpaceBeforePt,
+        direct.SpaceAfterSpecified ? direct.SpaceAfterPt : inherited.SpaceAfterPt,
+        direct.LineSpacingSpecified ? direct.LineSpacing : inherited.LineSpacing,
+        direct.AlignmentSpecified || inherited.AlignmentSpecified,
+        direct.SpaceBeforeSpecified || inherited.SpaceBeforeSpecified,
+        direct.SpaceAfterSpecified || inherited.SpaceAfterSpecified,
+        direct.LineSpacingSpecified || inherited.LineSpacingSpecified);
+
+    private static ParagraphFormattingSnapshot ToSnapshot(ParagraphFormatting formatting, bool styleResolved) => new(
+        formatting.Alignment ?? "left",
+        formatting.SpaceBeforePt ?? 0,
+        formatting.SpaceAfterPt ?? 0,
+        formatting.LineSpacing ?? "single",
+        !styleResolved);
+
+    private static CaptionKind? GetCaptionKind(string paragraphText)
+    {
+        var text = paragraphText.TrimStart();
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^(?:Figure|Fig\.)\s+[0-9]+(?:[.\-][0-9]+)*(?=\s|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Figure;
+        if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^Table\s+[0-9]+(?:[.\-][0-9]+)*(?=\s|$)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Table;
+        if (System.Text.RegularExpressions.Regex.IsMatch(text,
+                @"^图\s*(?:[A-Z]|[0-9一二三四五六七八九十]+)([.\-—][0-9一二三四五六七八九十]+)*",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Figure;
+        if (System.Text.RegularExpressions.Regex.IsMatch(text,
+                @"^表\s*(?:[A-Z]|[0-9一二三四五六七八九十]+)([.\-—][0-9一二三四五六七八九十]+)*",
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant)) return CaptionKind.Table;
+        return null;
+    }
+
+    private static bool? ResolveCaptionPlacement(XElement paragraph, CaptionKind kind, XElement body)
+    {
+        if (paragraph.Parent != body) return null;
+        var elements = body.Elements().ToArray();
+        var index = Array.IndexOf(elements, paragraph);
+        if (index < 0) return null;
+        var step = kind == CaptionKind.Table ? 1 : -1;
+        for (var position = index + step; position >= 0 && position < elements.Length; position += step)
+        {
+            var candidate = elements[position];
+            if (candidate.Name == W + "p" &&
+                string.IsNullOrWhiteSpace(string.Concat(candidate.Descendants(W + "t").Select(t => t.Value))) &&
+                !candidate.Descendants(W + "drawing").Any() && !candidate.Descendants(W + "pict").Any())
+                continue;
+            return kind == CaptionKind.Table
+                ? candidate.Name == W + "tbl"
+                : candidate.Name == W + "p" && (candidate.Descendants(W + "drawing").Any() || candidate.Descendants(W + "pict").Any());
+        }
+        return false;
+    }
+
+    private static bool IsAdjacentToFigureOrTable(XElement paragraph, CaptionKind kind, XElement body)
+    {
+        if (paragraph.Parent != body) return false;
+        var elements = body.Elements().ToArray();
+        var index = Array.IndexOf(elements, paragraph);
+        if (index < 0) return false;
+
+        foreach (var direction in new[] { -1, 1 })
+        {
+            for (var position = index + direction; position >= 0 && position < elements.Length; position += direction)
+            {
+                var candidate = elements[position];
+                if (candidate.Name == W + "p" &&
+                    string.IsNullOrWhiteSpace(string.Concat(candidate.Descendants(W + "t").Select(t => t.Value))) &&
+                    !candidate.Descendants(W + "drawing").Any() && !candidate.Descendants(W + "pict").Any())
+                    continue;
+
+                if (kind == CaptionKind.Table && candidate.Name == W + "tbl") return true;
+                if (kind == CaptionKind.Figure && candidate.Name == W + "p" &&
+                    (candidate.Descendants(W + "drawing").Any() || candidate.Descendants(W + "pict").Any())) return true;
+                break;
+            }
+        }
+
+        return false;
     }
 
     private static Formatting Merge(Formatting inherited, Formatting direct) => new(
@@ -286,6 +465,17 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         bool AsciiSpecified = false,
         bool HAnsiSpecified = false,
         bool SizeSpecified = false);
+    private readonly record struct ParagraphFormatting(
+        string? Alignment,
+        double? SpaceBeforePt,
+        double? SpaceAfterPt,
+        string? LineSpacing,
+        bool AlignmentSpecified = false,
+        bool SpaceBeforeSpecified = false,
+        bool SpaceAfterSpecified = false,
+        bool LineSpacingSpecified = false);
     private readonly record struct StyleResolution(Formatting Formatting, bool IsResolved);
-    private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting, bool IsHeading);
+    private readonly record struct ParagraphStyleResolution(ParagraphFormatting Formatting, bool IsResolved);
+    private sealed record StyleDefinition(string? Type, string? BasedOn, Formatting Formatting,
+        ParagraphFormatting ParagraphFormatting, bool IsHeading, bool IsCaption);
 }

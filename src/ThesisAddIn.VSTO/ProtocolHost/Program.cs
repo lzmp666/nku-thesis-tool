@@ -125,12 +125,18 @@ EngineResponse Annotate(EngineRequest request, string fullPath)
 
 static List<Patch> SelectPatches(PatchPlan plan, EngineRequest request)
 {
-    if (string.IsNullOrWhiteSpace(request.RuleId) && string.IsNullOrWhiteSpace(request.Location))
+    if (string.IsNullOrWhiteSpace(request.RuleId) && string.IsNullOrWhiteSpace(request.Location) &&
+        (request.Locations == null || request.Locations.Count == 0))
         return plan.Patches.ToList();
+
+    var locations = request.Locations?.Where(location => !string.IsNullOrWhiteSpace(location))
+        .ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
+    if (locations.Count == 0 && !string.IsNullOrWhiteSpace(request.Location))
+        locations.Add(request.Location);
 
     return plan.Patches.Where(patch =>
         (string.IsNullOrWhiteSpace(request.RuleId) || string.Equals(patch.RuleId, request.RuleId, StringComparison.OrdinalIgnoreCase)) &&
-        (string.IsNullOrWhiteSpace(request.Location) || string.Equals(patch.Location, request.Location, StringComparison.Ordinal)))
+        (locations.Count == 0 || locations.Contains(patch.Location)))
         .ToList();
 }
 
@@ -234,7 +240,8 @@ static class ProtocolHostResponse
     {
         var selectedKeys = selected.Select(patch => patch.RuleId + "|" + patch.Location).ToList();
         var deferred = plan.DeferredDiagnostics.ToList();
-        bool filtered = !string.IsNullOrWhiteSpace(request.RuleId) || !string.IsNullOrWhiteSpace(request.Location);
+        bool filtered = !string.IsNullOrWhiteSpace(request.RuleId) || !string.IsNullOrWhiteSpace(request.Location) ||
+            request.Locations is { Count: > 0 };
         if (filtered)
         {
             deferred.AddRange((analysis.Diagnostics ?? Array.Empty<Diagnostic>()).Where(diagnostic =>
@@ -260,7 +267,10 @@ static class ProtocolHostResponse
         Expected = diagnostic.Expected,
         Actual = diagnostic.Actual,
         FixLevel = diagnostic.FixLevel,
-        Message = diagnostic.Message
+        Message = diagnostic.Message,
+        Occurrences = (diagnostic.Occurrences ?? Array.Empty<DiagnosticOccurrence>())
+            .Select(occurrence => new EngineDiagnosticOccurrence { Location = occurrence.Location, Actual = occurrence.Actual })
+            .ToList()
     };
 
     public static EnginePatch ToPatchTransfer(Patch patch) => new()

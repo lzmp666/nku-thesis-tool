@@ -21,7 +21,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -InstallRo
 
 脚本会先预检，再将文件放入目标目录，并写入 `HKCU\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO` 与当前用户的 `THESIS_ENGINE_PROTOCOL_HOST` 环境变量。它保留安装前同名注册值/环境变量供卸载恢复。已存在但不含本工具安装记录的目录不会被覆盖。
 
-安装后关闭并重新启动 Word。在 Word 功能区打开“论文格式检查”，再从 `samples` 目录打开 `known_issues_sample.docx` 或 `clean_sample.docx`。它们都是人工合成内容，不构成规范合规结论。完整步骤见包内及安装目录中的 `docs/word-acceptance.md`。
+安装后关闭并重新启动 Word。在 Word 功能区打开“论文格式检查”，先从 `samples/full-thesis` 打开 `synthetic_complete_thesis.docx` 做完整论文验收；该人工合成稿约 14 页，含中英文摘要、六章正文、图、表和公式，并预设三处文字格式问题。`samples` 根目录的 `known_issues_sample.docx` 与 `clean_sample.docx` 可用于快速验证。所有样例都不构成规范合规结论。完整步骤见包内及安装目录中的 `docs/word-acceptance.md`。
 
 ## 更新与卸载
 
