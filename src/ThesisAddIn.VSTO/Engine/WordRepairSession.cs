@@ -145,20 +145,28 @@ namespace ThesisAddIn.VSTO.Engine
         private static Word.Range AdjacentObjectRange(Word.Range anchor, bool picture)
         {
             Word.Paragraph paragraph = anchor.Paragraphs[1];
+            string observed = "";
             for (int index = 0; index < 32; index++)
             {
                 paragraph = picture ? paragraph.Previous() : paragraph.Next();
                 if (paragraph == null) break;
                 Word.Range candidate = paragraph.Range;
-                if (picture && candidate.InlineShapes.Count == 1 && candidate.Tables.Count == 0 &&
-                    string.IsNullOrWhiteSpace((candidate.Text ?? "").Replace("\u0001", "").TrimEnd('\r')))
-                    return candidate;
+                observed = "（行内对象 " + candidate.InlineShapes.Count + "，表格 " + candidate.Tables.Count + "）";
+                if (picture && candidate.InlineShapes.Count == 1 && candidate.Tables.Count == 0)
+                {
+                    // Word's object placeholder is not a portable text character.
+                    // Inspect the ranges around the actual object instead.
+                    Word.Range shape = candidate.InlineShapes[1].Range;
+                    Word.Range before = candidate.Duplicate, after = candidate.Duplicate;
+                    before.End = shape.Start; after.Start = shape.End;
+                    if (string.IsNullOrWhiteSpace(before.Text) && string.IsNullOrWhiteSpace(after.Text)) return candidate;
+                }
                 if (!picture && candidate.Tables.Count == 1 && candidate.Tables[1].NestingLevel == 1)
                     return candidate;
                 if (candidate.InlineShapes.Count != 0 || candidate.Tables.Count != 0 ||
                     !string.IsNullOrWhiteSpace((candidate.Text ?? "").TrimEnd('\r'))) break;
             }
-            throw new InvalidDataException("题注旁没有唯一、可安全定位的图片或简单表格，已停止修改。");
+            throw new InvalidDataException("题注旁没有唯一、可安全定位的图片或简单表格，已停止修改。" + observed);
         }
 
         private static double ObjectWidth(Word.Range anchor, string ruleId)
