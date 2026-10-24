@@ -44,12 +44,22 @@ namespace ThesisAddIn.VSTO.Engine
         public static bool ApplyDirect(Word.Document document, string snapshot,
             IReadOnlyList<EnginePatch> patches, out RepairRecord record, out string error)
         {
+            return ApplyDirectWithRanges(document, snapshot, patches, null, out record, out error);
+        }
+
+        internal static Dictionary<string, Word.Range> GetRepairRanges(Word.Document document, string snapshot,
+            IEnumerable<EnginePatch> patches) => BuildRanges(document, snapshot, patches.Select(p => p.Location));
+
+        internal static bool ApplyDirectWithRanges(Word.Document document, string snapshot,
+            IReadOnlyList<EnginePatch> patches, Dictionary<string, Word.Range> verifiedRanges,
+            out RepairRecord record, out string error)
+        {
             var captured = new RepairRecord();
             Dictionary<string, Word.Range> ranges = null;
             bool success = ExecuteUndoable(document, "解决选中的格式问题", () =>
             {
                 if (patches == null || patches.Count == 0) throw new InvalidDataException("没有选中可修复的格式。");
-                ranges = BuildRanges(document, snapshot, patches.Select(p => p.Location));
+                ranges = verifiedRanges ?? BuildRanges(document, snapshot, patches.Select(p => p.Location));
                 foreach (EnginePatch patch in patches)
                 {
                     Word.Range range = ranges[patch.Location];

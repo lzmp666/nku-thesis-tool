@@ -771,19 +771,15 @@ namespace ThesisAddIn.VSTO.Engine
                 Word.Range target = document.Range(cursor, paragraphEnd);
                 Word.Find find = target.Find;
                 find.ClearFormatting();
-                find.Text = chunk.Replace("^", "^^");
-                find.Forward = true;
-                find.Wrap = Word.WdFindWrap.wdFindStop;
-                find.Format = false;
-                find.MatchCase = true;
-                find.MatchWholeWord = false;
-                find.MatchWildcards = false;
-                find.MatchSoundsLike = false;
-                find.MatchAllWordForms = false;
                 find.MatchFuzzy = false;
                 find.IgnoreSpace = false;
                 find.IgnorePunct = false;
-                if (!find.Execute() || !string.Equals(target.Text, chunk, StringComparison.Ordinal)
+                // Supply the common Find options in one COM call. Keep every literal
+                // matching constraint and the final exact-text/gap checks unchanged.
+                if (!find.Execute(FindText: chunk.Replace("^", "^^"), Forward: true,
+                    Wrap: Word.WdFindWrap.wdFindStop, Format: false, MatchCase: true,
+                    MatchWholeWord: false, MatchWildcards: false, MatchSoundsLike: false,
+                    MatchAllWordForms: false) || !string.Equals(target.Text, chunk, StringComparison.Ordinal)
                     || !string.IsNullOrEmpty(document.Range(cursor, target.Start).Text))
                     throw new InvalidDataException("无法精确定位原文片段，已停止修改。");
                 if (start < 0) start = target.Start;

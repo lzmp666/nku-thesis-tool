@@ -728,13 +728,23 @@ namespace ThesisAddIn.VSTO
                 if(!TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
                 WriteStartupLog("修复耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 stage=elapsed.ElapsedMilliseconds;
-                foreach(var group in groups) {
-                    WordDocumentSynchronizer.RepairRecord record;
-                    if(!WordDocumentSynchronizer.ApplyDirect(document,snapshot,group.Value,out record,out error))
-                        throw new InvalidDataException(error);
-                    string key=IssueReviewState.Key(group.Key);
-                    applied.Add(new KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>(key,record));
-                }
+                // No awaits or text/annotation mutations occur between these writes.
+                // Map the union once, retain per-group before/after validation and undo,
+                // and repaint once for the entire batch instead of after every group.
+                bool previousScreenUpdating=document.Application.ScreenUpdating;
+                try {
+                    document.Application.ScreenUpdating=false;
+                    var repairRanges=WordDocumentSynchronizer.GetRepairRanges(document,snapshot,
+                        groups.SelectMany(group=>group.Value));
+                    foreach(var group in groups) {
+                        WordDocumentSynchronizer.RepairRecord record;
+                        if(!WordDocumentSynchronizer.ApplyDirectWithRanges(document,snapshot,group.Value,
+                            repairRanges,out record,out error))
+                            throw new InvalidDataException(error);
+                        string key=IssueReviewState.Key(group.Key);
+                        applied.Add(new KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>(key,record));
+                    }
+                } finally { document.Application.ScreenUpdating=previousScreenUpdating; }
                 foreach(var item in applied) GetHistory(pane)[item.Key]=item.Value;
                 pane.Review.Complete(selected);
                 // Once written, keep item-level undo available even if re-analysis fails.
