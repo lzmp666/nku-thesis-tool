@@ -6,6 +6,15 @@ namespace ThesisEngine.Tests;
 public sealed class CooperativeRepairRunnerTests
 {
     [Fact]
+    public async Task ConsecutiveSingleLocationRulesStillYieldBetweenGroups()
+    {
+        int yields = 0;
+        for (int group = 0; group < 12; group++)
+            await CooperativeRepairRunner.RunAsync(new[] { group }, () => { }, value => { },
+                () => { yields++; return Task.CompletedTask; });
+        Assert.Equal(12, yields);
+    }
+    [Fact]
     public async Task UserEditDuringYieldStopsBeforeTheNextWrite()
     {
         bool edited = false;

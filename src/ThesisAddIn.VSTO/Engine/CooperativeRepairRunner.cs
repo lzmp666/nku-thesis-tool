@@ -22,8 +22,10 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 write(work[index]);
                 count++;
-                if (index + 1 == work.Count) break;
-                if (count < 4 && slice.ElapsedMilliseconds < 40) continue;
+                // Also yield after the LAST item: callers may immediately start
+                // another rule group. Otherwise many one-location rules form one
+                // long synchronous block even though every group awaits this method.
+                if (index + 1 < work.Count && count < 4 && slice.ElapsedMilliseconds < 40) continue;
                 progress?.Invoke(index + 1);
                 await yield();
                 // A user edit/cancellation during the yield must stop BEFORE
