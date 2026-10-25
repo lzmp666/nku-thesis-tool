@@ -114,7 +114,7 @@ namespace ThesisAddIn.VSTO.Engine
                         } else throw new InvalidDataException("原文恢复标记缺失。");
                     }
                     record.Comment.Delete(); mark();
-                    }, out error);
+                    }, out error, suspendRepaint:false);
                     if (!ok) throw new InvalidDataException(error);
                 }, () => Task.Delay(1));
                 return Tuple.Create(true, (string)null);
@@ -169,7 +169,7 @@ namespace ThesisAddIn.VSTO.Engine
                     }
                 }
                 document.Saved = false;
-            }, out error);
+            }, out error, suspendRepaint:false);
             record = success ? captured : null;
             return success;
         }
@@ -200,7 +200,7 @@ namespace ThesisAddIn.VSTO.Engine
                     markMutation();
                 }
                 document.Saved = false;
-            }, out error);
+            }, out error, suspendRepaint:false);
         }
         private static string FormatSignature(FormatChange change)
         {

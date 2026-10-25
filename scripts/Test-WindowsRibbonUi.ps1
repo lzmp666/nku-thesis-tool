@@ -31,6 +31,7 @@ $action = [Action]{}
 $navigate = [Action[int]]{ param($direction) }
 $show = [Action[bool]]{ param($value) }
 $ribbon = [ThesisAddIn.VSTO.Ui.ThesisRibbon]::new($action,$action,$action,$action,$navigate,$navigate,$show,$visibleCallback,$state,$state,$state,$state,$state)
+$ribbon.GetType().GetProperty('CanUndoBatch',[Reflection.BindingFlags]'Instance,NonPublic').SetValue($ribbon,$state)
 $ui = New-Object UiProbe
 $ribbon.OnRibbonLoad($ui)
 [xml]$deployment = Get-Content -LiteralPath (Join-Path $AddinOutputDirectory 'ThesisAddIn.VSTO.vsto') -Raw
@@ -46,12 +47,12 @@ $ribbon.Invalidate()
 if ($ui.Changes.Count -ne 0) { throw 'Unchanged state invalidated controls.' }
 $script:enabled = $true
 $ribbon.Invalidate()
-if ($ui.Changes.Count -ne 7) { throw 'Expected only the seven state-dependent buttons to invalidate.' }
+if ($ui.Changes.Count -ne 8) { throw 'Expected only the eight state-dependent buttons to invalidate.' }
 $ui.Changes.Clear()
 $before = $script:reads
 [xml]$xml = $ribbon.GetCustomUI('Microsoft.Word.Document')
 $buttons = $xml.SelectNodes('//*[@getImage="GetButtonImage"]')
-if ($buttons.Count -ne 10) { throw 'Missing command icons.' }
+if ($buttons.Count -ne 11) { throw 'Missing command icons.' }
 foreach ($button in $buttons) {
     $control = New-Object ControlProbe
     $control.Id = [string]$button.id
@@ -71,4 +72,4 @@ foreach ($brand in $brands) {
     $picture = $ribbon.GetBrandImage($control)
     if ($null -eq $picture -or [ControlProbe]::Width($picture) -le 0) { throw 'Brand image is invalid.' }
 }
-Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 10 command icons and one large emblem are valid.'
+Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 11 command icons and one large emblem are valid.'

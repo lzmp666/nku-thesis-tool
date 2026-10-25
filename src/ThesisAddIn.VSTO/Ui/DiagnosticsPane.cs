@@ -28,6 +28,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Image _headerImage;
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<int> _visibleIndices = new List<int>();
+        private readonly List<string> _visibleKeys = new List<string>();
         private int _selectedIndex = -1;
         private int _selectedOccurrenceIndex;
         private bool _isBusy;
@@ -43,6 +44,7 @@ namespace ThesisAddIn.VSTO.Ui
         public event EventHandler RepairRequested;
         public event EventHandler UndoRequested;
         public event EventHandler ApplyCheckedRequested;
+        public event EventHandler UndoCheckedRequested;
         public event EventHandler DiagnosticSelected;
         public event EventHandler StateChanged;
 
@@ -223,13 +225,15 @@ namespace ThesisAddIn.VSTO.Ui
             var close = new Button { Text = "退出", AutoSize = true, FlatStyle = FlatStyle.Flat };
             all.Click += (s, e) => Review.SelectAll(true);
             none.Click += (s, e) => Review.SelectAll(false);
-            apply.Click += (s, e) => OnEvent(ApplyCheckedRequested);
+            apply.Click += (s, e) => { if (!_isBusy) OnEvent(Review.BatchUndoMode ? UndoCheckedRequested : ApplyCheckedRequested); };
             close.Click += (s, e) => Review.SetBatch(false);
             batchBar.Controls.AddRange(new Control[] { all, none, apply, close });
             batchBar.Visible = false;
             Review.Changed += (s, e) => {
-                batchBar.Visible = Review.BatchMode;
-                layout.RowStyles[1].Height = Review.BatchMode ? 34F * _uiScale : 0;
+                if (batchBar.Visible != Review.BatchMode) batchBar.Visible = Review.BatchMode;
+                float height = Review.BatchMode ? 34F * _uiScale : 0;
+                if (layout.RowStyles[1].Height != height) layout.RowStyles[1].Height = height;
+                apply.Text = Review.BatchUndoMode ? "撤销所选" : "修复所选";
                 apply.Enabled = !_isBusy && Review.Checked.Count > 0;
             };
             layout.Controls.Add(batchBar, 0, 1);
@@ -306,6 +310,7 @@ namespace ThesisAddIn.VSTO.Ui
         public bool CanFixSelected => !_isBusy && Review.CanRepair(SelectedDiagnostic);
         public bool CanResolveSelected => !_isBusy && Review.IsRepaired(SelectedDiagnostic);
         public bool HasFixableDiagnostics => !_isBusy && _diagnostics.Any(Review.CanRepair);
+        public bool HasUndoableDiagnostics => !_isBusy && _diagnostics.Any(Review.IsRepaired);
         public bool CanNavigateIssues => !_isBusy && _visibleIndices.Count > 0;
         public bool CanNavigateOccurrences => !_isBusy && GetOccurrenceCount(SelectedDiagnostic) > 1;
 
@@ -341,8 +346,6 @@ namespace ThesisAddIn.VSTO.Ui
             _navigationTimer.Stop();
             _analysisSucceeded = true;
             Review.Refresh(result?.Diagnostics);
-            ClearSearch();
-            RebuildIssueList();
             string baseStatus = _diagnostics.Count == 0
                 ? "未发现已覆盖范围内的格式问题；未覆盖项不会被判为合规。"
                 : "点击问题定位原文；建议卡内可解决或撤销。";
@@ -474,12 +477,11 @@ namespace ThesisAddIn.VSTO.Ui
                 _updatingList = true;
                 try
                 {
-                    int firstVisible = _issueList.TopIndex;
+                    int offset = _issueList.ScrollOffset;
                     if (_issueList.SelectedIndex != visibleIndex)
                         _issueList.SelectedIndex = visibleIndex;
                     // Body/comment hover must not scroll the searchable index either.
-                    if (firstVisible >= 0 && firstVisible < _issueList.Items.Count &&
-                        _issueList.TopIndex != firstVisible) _issueList.TopIndex = firstVisible;
+                    _issueList.RestoreScrollOffset(offset);
                 }
                 finally { _updatingList = false; }
             }
@@ -598,20 +600,26 @@ namespace ThesisAddIn.VSTO.Ui
         private void RebuildIssueList()
         {
             string query = _isShowingPlaceholder ? string.Empty : (_searchBox.Text ?? string.Empty).Trim();
-            _visibleIndices.Clear();
-            _issueList.BeginUpdate();
-            try
-            {
-                _issueList.Items.Clear();
-                for (int index = 0; index < _diagnostics.Count; index++)
-                {
-                    EngineDiagnostic diagnostic = _diagnostics[index];
-                    if (!Matches(diagnostic, query)) continue;
-                    _visibleIndices.Add(index);
-                    _issueList.Items.Add(BuildIssueLabel(diagnostic));
+            var next = Enumerable.Range(0,_diagnostics.Count).Where(index => Matches(_diagnostics[index],query)).ToArray();
+            string[] keys = next.Select(index => IssueReviewState.Key(_diagnostics[index])).ToArray();
+            int offset = _issueList.ScrollOffset;
+            bool unchanged = _visibleKeys.SequenceEqual(keys);
+            _updatingList = true;
+            try {
+                _visibleIndices.Clear(); _visibleIndices.AddRange(next);
+                if (!unchanged) {
+                    _visibleKeys.Clear(); _visibleKeys.AddRange(keys);
+                    _issueList.BeginUpdate();
+                    try {
+                        _issueList.Items.Clear();
+                        foreach (int index in next) _issueList.Items.Add(BuildIssueLabel(_diagnostics[index]));
+                    } finally { _issueList.EndUpdate(); }
+                } else {
+                    for (int i=0;i<next.Length;i++) _issueList.Items[i]=BuildIssueLabel(_diagnostics[next[i]]);
+                    _issueList.RefreshLayout();
                 }
-            }
-            finally { _issueList.EndUpdate(); }
+                _issueList.RestoreScrollOffset(offset);
+            } finally { _updatingList=false; }
 
             int selectedVisibleIndex = _visibleIndices.IndexOf(_selectedIndex);
             if (selectedVisibleIndex >= 0)
@@ -755,7 +763,7 @@ namespace ThesisAddIn.VSTO.Ui
             using (var accent = new SolidBrush(purple)) {
                 float y = card.Top+7;
                 bool check = Review.Checked.Contains(IssueReviewState.Key(issue));
-                string lead = Review.BatchMode ? (Review.CanRepair(issue) ? (check ? "☑ " : "☐ ") : "— ") : "";
+                string lead = Review.BatchMode ? (Review.CanSelectForBatch(issue) ? (check ? "☑ " : "☐ ") : "— ") : "";
                 string state = Review.IsRepaired(issue) ? " · 已修复" : "";
                 graphics.DrawString(lead+DescribeRule(issue.RuleId)+state,title,accent,card.Left+9,y);
                 y += 22;
@@ -818,7 +826,9 @@ namespace ThesisAddIn.VSTO.Ui
             }
         }
         internal void BeginBatch() { Review.SetBatch(true); }
+        internal void BeginUndoBatch() { Review.SetBatchMode(true,true); }
         internal EngineDiagnostic[] CheckedDiagnostics => _diagnostics.Where(x=>Review.Checked.Contains(IssueReviewState.Key(x)) && Review.CanRepair(x)).ToArray();
+        internal EngineDiagnostic[] CheckedUndoDiagnostics => _diagnostics.Where(x=>Review.Checked.Contains(IssueReviewState.Key(x)) && Review.IsRepaired(x)).ToArray();
 
         private static void DrawCardLine(Graphics graphics, string label, string value, int left,
             ref float y, int right, Font font, Brush valueBrush)

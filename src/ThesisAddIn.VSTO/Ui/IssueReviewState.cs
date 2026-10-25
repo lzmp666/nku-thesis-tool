@@ -13,6 +13,7 @@ namespace ThesisAddIn.VSTO.Ui
         internal readonly HashSet<string> Repaired = new HashSet<string>(StringComparer.Ordinal);
         internal readonly HashSet<string> Checked = new HashSet<string>(StringComparer.Ordinal);
         internal bool BatchMode { get; private set; }
+        internal bool BatchUndoMode { get; private set; }
         internal string SelectedKey { get; private set; } = string.Empty;
         internal string SelectedLocation { get; private set; } = string.Empty;
         internal event EventHandler? Changed;
@@ -22,6 +23,7 @@ namespace ThesisAddIn.VSTO.Ui
         internal bool IsRepaired(EngineDiagnostic issue) => Repaired.Contains(Key(issue));
         internal bool CanRepair(EngineDiagnostic issue) => issue != null && !IsRepaired(issue)
             && string.Equals(issue.FixLevel, "auto", StringComparison.OrdinalIgnoreCase);
+        internal bool CanSelectForBatch(EngineDiagnostic issue) => BatchUndoMode ? IsRepaired(issue) : CanRepair(issue);
         internal void Refresh(IEnumerable<EngineDiagnostic> active)
         {
             var incoming = (active ?? Enumerable.Empty<EngineDiagnostic>()).Where(x => x != null)
@@ -37,7 +39,7 @@ namespace ThesisAddIn.VSTO.Ui
             }
             rows.AddRange(incoming.Values);
             Rows.Clear(); Rows.AddRange(rows);
-            Checked.RemoveWhere(key => !Rows.Any(row => Key(row) == key && CanRepair(row)));
+            Checked.RemoveWhere(key => !Rows.Any(row => Key(row) == key && CanSelectForBatch(row)));
             Changed?.Invoke(this, EventArgs.Empty);
         }
         private static EngineDiagnostic Merge(IEnumerable<EngineDiagnostic> group)
@@ -55,17 +57,26 @@ namespace ThesisAddIn.VSTO.Ui
             foreach (EngineDiagnostic issue in issues) { Repaired.Add(Key(issue)); Checked.Remove(Key(issue)); }
             Changed?.Invoke(this, EventArgs.Empty);
         }
-        internal void Reopen(string key) { Repaired.Remove(key); Checked.Remove(key); Changed?.Invoke(this, EventArgs.Empty); }
-        internal void SetBatch(bool value) { BatchMode = value; Changed?.Invoke(this, EventArgs.Empty); }
+        internal void Reopen(string key) => ReopenMany(new[]{key});
+        internal void ReopenMany(IEnumerable<string> keys) {
+            foreach (string key in keys) { Repaired.Remove(key); Checked.Remove(key); }
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+        internal void SetBatch(bool value) => SetBatchMode(value, false);
+        internal void SetBatchMode(bool value, bool undo) {
+            if (BatchMode == value && BatchUndoMode == (value && undo)) return;
+            BatchMode = value; BatchUndoMode = value && undo; Checked.Clear();
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
         internal void Toggle(EngineDiagnostic issue)
         {
-            if (!BatchMode || !CanRepair(issue)) return;
+            if (!BatchMode || !CanSelectForBatch(issue)) return;
             string key = Key(issue); if (!Checked.Add(key)) Checked.Remove(key);
             Changed?.Invoke(this, EventArgs.Empty);
         }
         internal void SelectAll(bool value)
         {
-            foreach (EngineDiagnostic row in Rows.Where(CanRepair))
+            foreach (EngineDiagnostic row in Rows.Where(CanSelectForBatch))
                 if (value) Checked.Add(Key(row)); else Checked.Remove(Key(row));
             Changed?.Invoke(this, EventArgs.Empty);
         }

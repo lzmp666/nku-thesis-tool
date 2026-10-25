@@ -51,6 +51,31 @@ try {
     $query.Text=''
     if($left.Items.Count -ne 3) { throw 'Busy search did not restore all rows.' }
     $search.SetBusy($false,$null)
+    # An equivalent fresh analysis must retain both search text and the exact
+    # pixel scroll offset, with no transient clear/selection reset.
+    $search.Height=210; $search.PerformLayout()
+    $view=$left.GetType().GetField('_viewport',$flags).GetValue($left)
+    $left.GetType().GetMethod('RestoreScrollOffset',$flags).Invoke($left,@(17)) | Out-Null
+    $search.ShowAnalysis($analysis)
+    if($view.GetType().GetProperty('Offset',$flags).GetValue($view) -ne 17) { throw 'Equivalent analysis moved the list viewport.' }
+    $fontQuery=[string]::Concat([char]0x5B57,[char]0x4F53)
+    $query.Text=$fontQuery
+    $search.ShowAnalysis($analysis)
+    if($query.Text -ne $fontQuery -or $left.Items.Count -ne 2) { throw 'Re-analysis reset the active search.' }
+    $query.Text=''
+    $completeArgs=New-Object object[] 1
+    $completeArgs[0]=[ThesisAddIn.Protocol.EngineDiagnostic[]]@($selected)
+    $state.GetType().GetMethod('Complete',$flags).Invoke($state,$completeArgs) | Out-Null
+    $search.GetType().GetMethod('BeginUndoBatch',$flags).Invoke($search,@()) | Out-Null
+    $state.GetType().GetMethod('SelectAll',$flags).Invoke($state,@($true)) | Out-Null
+    if($checked.Count -ne 1) { throw 'Undo batch did not select only completed items.' }
+    $script:batchUndo=0
+    $search.add_UndoCheckedRequested({$script:batchUndo++})
+    $applyButton=$search.Controls[0].GetControlFromPosition(0,1).Controls[2]
+    if($null -eq $applyButton -or -not $applyButton.Enabled) { throw 'Undo batch action is unavailable.' }
+    $applyButton.PerformClick()
+    if($script:batchUndo -ne 1) { throw 'Undo batch action did not dispatch.' }
+    $state.GetType().GetMethod('SetBatch',$flags).Invoke($state,@($false)) | Out-Null
     foreach($row in $state.GetType().GetField('Rows',$flags).GetValue($state)) {
         $rowKey=$assembly.GetType('ThesisAddIn.VSTO.Ui.IssueReviewState').GetMethod('Key',[Reflection.BindingFlags]'Static,NonPublic').Invoke($null,@($row))
         $state.GetType().GetField('Repaired',$flags).GetValue($state).Add($rowKey) | Out-Null

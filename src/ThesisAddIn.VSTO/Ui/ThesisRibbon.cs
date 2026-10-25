@@ -30,6 +30,8 @@ namespace ThesisAddIn.VSTO.Ui
         private Office.IRibbonUI _ribbonUi;
         private int _stateMask = -1;
         internal Action FormatObjects { get; set; }
+        internal Action UndoBatch { get; set; }
+        internal Func<bool> CanUndoBatch { get; set; }
         private readonly Dictionary<string, stdole.IPictureDisp> _images =
             new Dictionary<string, stdole.IPictureDisp>(StringComparer.Ordinal);
 
@@ -93,6 +95,9 @@ namespace ThesisAddIn.VSTO.Ui
                   screentip=""图片与表格排版选项""
                   supertip=""为配对图表设置居中、限宽、表内中英文字体字号、单元格对齐、三线表及重复表头；作者选项不作为校级合规结论。""
                   onAction=""OnFormatObjects"" />
+          <button id=""NkuUndoBatch"" label=""批量撤销"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+                  screentip=""勾选并撤销已修复项"" supertip=""在左侧勾选已修复项，再点撤销所选；保留其他修复和文字编辑。""
+                  onAction=""OnUndoBatch"" />
         </group>
         <group id=""NkuThesisNavigation"" label=""定位"">
           <box id=""NkuIssueNavigation"" boxStyle=""vertical"">
@@ -120,8 +125,9 @@ namespace ThesisAddIn.VSTO.Ui
         {
             int state = (SafeGet(_canFixCurrent) ? 1 : 0) | (SafeGet(_canFixAll) ? 2 : 0)
                 | (SafeGet(_canVerifyResolved) ? 4 : 0) | (SafeGet(_canNavigateIssue) ? 8 : 0)
-                | (SafeGet(_canNavigateOccurrence) ? 16 : 0) | (SafeGet(_isIssuesVisible) ? 32 : 0);
-            int changed = _stateMask < 0 ? 63 : _stateMask ^ state;
+                | (SafeGet(_canNavigateOccurrence) ? 16 : 0) | (SafeGet(_isIssuesVisible) ? 32 : 0)
+                | (SafeGet(CanUndoBatch) ? 64 : 0);
+            int changed = _stateMask < 0 ? 127 : _stateMask ^ state;
             _stateMask = state;
             if (_ribbonUi == null || changed == 0) return;
             try
@@ -142,6 +148,7 @@ namespace ThesisAddIn.VSTO.Ui
                     _ribbonUi.InvalidateControl("NkuNextOccurrence");
                 }
                 if ((changed & 32) != 0) _ribbonUi.InvalidateControl("NkuShowIssues");
+                if ((changed & 64) != 0) _ribbonUi.InvalidateControl("NkuUndoBatch");
             }
             catch (COMException) { }
         }
@@ -153,6 +160,7 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NkuFixCurrent": return (_stateMask & 1) != 0;
                 case "NkuFixAll": return (_stateMask & 2) != 0;
                 case "NkuVerifyResolved": return (_stateMask & 4) != 0;
+                case "NkuUndoBatch": return (_stateMask & 64) != 0;
                 case "NkuPreviousIssue":
                 case "NkuNextIssue": return (_stateMask & 8) != 0;
                 case "NkuPreviousOccurrence":
@@ -178,6 +186,7 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NkuFixAll": index = 3; break;
                 case "NkuFormatObjects": index = 3; break;
                 case "NkuVerifyResolved": index = 4; break;
+                case "NkuUndoBatch": index = 4; break;
                 case "NkuPreviousIssue": index = 5; break;
                 case "NkuNextIssue": index = 6; break;
                 case "NkuPreviousOccurrence": index = 7; break;
@@ -293,6 +302,7 @@ namespace ThesisAddIn.VSTO.Ui
         public void OnFixCurrent(Office.IRibbonControl control) => _fixCurrent();
         public void OnFixAll(Office.IRibbonControl control) => _fixAll();
         public void OnFormatObjects(Office.IRibbonControl control) => FormatObjects?.Invoke();
+        public void OnUndoBatch(Office.IRibbonControl control) => UndoBatch?.Invoke();
         public void OnVerifyResolved(Office.IRibbonControl control) => _verifyResolved();
         public void OnPreviousIssue(Office.IRibbonControl control) => _navigateIssue(-1);
         public void OnNextIssue(Office.IRibbonControl control) => _navigateIssue(1);

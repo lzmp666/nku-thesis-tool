@@ -46,6 +46,9 @@ namespace ThesisAddIn.VSTO.Ui
         }
         public Collection<string> Items { get; }
         public int ContentWidth => Math.Max(1, ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
+        internal int ScrollOffset => _viewport.Offset;
+        internal void RestoreScrollOffset(int offset) { _scrollTimer.Stop(); _targetOffset=offset; SetOffset(offset); }
+        internal void RefreshLayout() => MeasureCards();
         public event EventHandler SelectedIndexChanged;
         public event EventHandler CurrentItemInvoked;
         internal event EventHandler<CardPointerEventArgs> ItemPointerPressed;
@@ -129,6 +132,7 @@ namespace ThesisAddIn.VSTO.Ui
             int previous = _viewport.SelectedIndex;
             int oldOffset = _viewport.Offset;
             bool changed = _viewport.Select(index, ensureVisible);
+            if (!changed && oldOffset == _viewport.Offset) return;
             if (oldOffset != _viewport.Offset)
             {
                 _targetOffset = _viewport.Offset;
@@ -146,19 +150,20 @@ namespace ThesisAddIn.VSTO.Ui
                 SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
             }
         }
+        protected override void OnPaintBackground(PaintEventArgs e) { /* Painted atomically in the buffered foreground. */ }
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.Clear(BackColor);
             if (_updateDepth > 0) return;
+            using (var background = new SolidBrush(BackColor)) e.Graphics.FillRectangle(background,e.ClipRectangle);
             var state = e.Graphics.Save();
             try
             {
-                e.Graphics.SetClip(new Rectangle(0, 0, ContentWidth, ClientSize.Height));
+                e.Graphics.SetClip(new Rectangle(0, 0, ContentWidth, ClientSize.Height),System.Drawing.Drawing2D.CombineMode.Intersect);
                 for (int index = Math.Max(0, _viewport.TopIndex); index < _viewport.Count; index++)
                 {
                     Rectangle bounds = GetItemRectangle(index);
                     if (bounds.Top >= ClientSize.Height) break;
-                    if (bounds.Bottom <= 0) continue;
+                    if (bounds.Bottom <= 0 || !bounds.IntersectsWith(e.ClipRectangle)) continue;
                     DrawItemState flags = index == SelectedIndex ? DrawItemState.Selected : DrawItemState.None;
                     if (Focused && index == SelectedIndex) flags |= DrawItemState.Focus;
                     DrawItem?.Invoke(this, new DrawItemEventArgs(e.Graphics, Font, bounds, index, flags, ForeColor, BackColor));

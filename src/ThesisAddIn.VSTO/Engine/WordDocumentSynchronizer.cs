@@ -173,7 +173,7 @@ namespace ThesisAddIn.VSTO.Engine
         }
 
         private static bool ExecuteUndoable(Word.Document document, string actionName,
-            Action validate, Action<Action> action, out string error)
+            Action validate, Action<Action> action, out string error, bool suspendRepaint = true)
         {
             error = null;
             if (document == null)
@@ -190,8 +190,10 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 // Suspend repaint only during synchronous COM work, never across an await.
                 // Restoring the caller's value also covers validation and rollback failures.
-                screenUpdating = document.Application.ScreenUpdating;
-                document.Application.ScreenUpdating = false;
+                if (suspendRepaint) {
+                    screenUpdating = document.Application.ScreenUpdating;
+                    if (screenUpdating.Value) document.Application.ScreenUpdating = false;
+                }
                 // Validate before opening an undo record. An empty custom record is
                 // absent from Word's undo stack: Undo would affect the preceding edit.
                 validate();
@@ -520,6 +522,19 @@ namespace ThesisAddIn.VSTO.Engine
                 _previousBalloonWidth = null;
             }
             catch (System.Runtime.InteropServices.COMException) { }
+        }
+
+        public static void CollapseEmptyCommentArea(Word.Document document)
+        {
+            try {
+                // Never hide human comments or revisions when cleaning our last annotation.
+                if (document.Comments.Count!=0 || document.Revisions.Count!=0) return;
+                Word.View view=document.ActiveWindow.View;
+                if (view.RevisionsMode!=Word.WdRevisionsMode.wdInLineRevisions)
+                    view.RevisionsMode=Word.WdRevisionsMode.wdInLineRevisions;
+                if (view.ShowComments) view.ShowComments=false;
+                RestoreCommentWidth(document);
+            } catch (System.Runtime.InteropServices.COMException) { }
         }
 
         private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document, Func<string,bool> keep = null)

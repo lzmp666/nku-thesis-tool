@@ -60,7 +60,8 @@ namespace ThesisAddIn.VSTO
         private bool _isNavigatingToDiagnostic;
         private bool _issuesVisible;
         private DateTime _lastNavigationUtc = DateTime.MinValue;
-        private DateTime _lastCommentPollUtc = DateTime.MinValue;
+        private readonly DocumentInteractionGate _interactionGate = new DocumentInteractionGate();
+        private Word.Comment _resolveCandidate;
 
         private sealed class DocumentOperationContext
         {
@@ -95,6 +96,8 @@ namespace ThesisAddIn.VSTO
                 () => _pane?.CanNavigateIssues == true,
                 () => _pane?.CanNavigateOccurrences == true);
             _ribbon.FormatObjects = OnRibbonFormatObjects;
+            _ribbon.UndoBatch = OnRibbonUndoBatch;
+            _ribbon.CanUndoBatch = () => _pane?.HasUndoableDiagnostics == true;
             return _ribbon;
         }
 
@@ -409,6 +412,7 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
+                if (response.Result.Diagnostics.Count==0) WordDocumentSynchronizer.CollapseEmptyCommentArea(operation.Document);
                 ShowAnalysis(pane, response.Result);
                 ShowSuggestions(pane);
                 _occurrenceRangesByWindow[operation.WindowHandle] = analyzedRanges;
@@ -489,6 +493,52 @@ namespace ThesisAddIn.VSTO
             EngineDiagnostic[] selected = _pane.CheckedDiagnostics;
             if(selected.Length==0) { SetStatus(_pane,"请先勾选至少一项可修复问题。"); return; }
             await RunSelectedRepairs(_pane,selected);
+        }
+        private void OnRibbonUndoBatch()
+        {
+            EnsureTaskPaneForWindow(Application.ActiveWindow);
+            if (_pane == null || _pane.IsBusy) return;
+            _pane.BeginUndoBatch(); SetDiagnosticsPaneVisible(true);
+            SetStatus(_pane,"勾选已修复项，再点“撤销所选”；仅恢复所选格式，不会自动保存。");
+        }
+        private async void OnUndoCheckedRequested(object sender, EventArgs e)
+        {
+            ActivatePaneFromSender(sender);
+            DiagnosticsPane pane=_pane;
+            if (pane==null || pane.IsBusy) return;
+            var selected=pane.CheckedUndoDiagnostics.Reverse().ToArray();
+            if (selected.Length==0) { SetStatus(pane,"请勾选至少一项已修复问题。"); return; }
+            Word.Document document; Word.Window window; string error;
+            if (!TryGetDocumentForPane(pane,out document,out window,out error)) { SetStatus(pane,error); return; }
+            var reopened=new List<string>(); var failures=new List<string>();
+            var elapsed=Stopwatch.StartNew();
+            SetBusy(pane,true,"正在撤销所选格式修复…");
+            try {
+                var history=GetHistory(pane);
+                await CooperativeRepairRunner.RunAsync(selected, () => {
+                    Word.Document current; Word.Window currentWindow; string reason;
+                    if (!TryGetDocumentForPane(pane,out current,out currentWindow,out reason) || current!=document)
+                        throw new InvalidDataException(reason ?? "文档窗口已变化。");
+                }, issue => {
+                    string key=IssueReviewState.Key(issue), reason;
+                    if (!history.TryGetValue(key,out var record)) { failures.Add(DiagnosticsPane.DescribeRule(issue.RuleId)+"：没有本次会话记录"); return; }
+                    if (!WordDocumentSynchronizer.UndoRepair(document,record,out reason)) {
+                        failures.Add(DiagnosticsPane.DescribeRule(issue.RuleId)+"："+reason); return;
+                    }
+                    history.Remove(key); reopened.Add(key);
+                    SetStatus(pane,"已撤销 "+reopened.Count+" / "+selected.Length+" 项…");
+                }, () => Task.Delay(1));
+                pane.Review.ReopenMany(reopened);
+                await RefreshReviewFromLive(pane,document,window);
+                SetStatus(pane,"已撤销 "+reopened.Count+" 项；保留 "+failures.Count+" 项。尚未保存。"+
+                    (failures.Count>0 ? Environment.NewLine+string.Join(Environment.NewLine,failures) : ""));
+            } catch(Exception ex) {
+                pane.Review.ReopenMany(reopened);
+                SetStatus(pane,"已撤销 "+reopened.Count+" 项；后续操作停止："+ex.Message+"。请重新分析。");
+            } finally {
+                SetBusy(pane,false,null);
+                WriteStartupLog("批量撤销 total="+elapsed.ElapsedMilliseconds+"ms restored="+reopened.Count+" skipped="+failures.Count);
+            }
         }
         private async void OnVerifyResolvedRequested(object sender, EventArgs e)
         {
@@ -724,6 +774,7 @@ namespace ThesisAddIn.VSTO
             pane.ApplyCheckedRequested += OnApplyCheckedRequested;
             pane.RepairRequested += OnFixCurrentRequested;
             pane.UndoRequested += OnVerifyResolvedRequested;
+            pane.UndoCheckedRequested += OnUndoCheckedRequested;
             return pane;
         }
 
@@ -899,6 +950,7 @@ namespace ThesisAddIn.VSTO
                     if (!unchanged && !WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,
                         out error,out refreshedRanges,WriteStartupLog,cached)) throw new InvalidDataException(error);
                     if (unchanged) WriteStartupLog("复查诊断未变化，保留其余批注及原文范围；跳过全文批注扫描。");
+                    if (response.Result.Diagnostics.Count==0) WordDocumentSynchronizer.CollapseEmptyCommentArea(document);
                     WriteStartupLog("复查耗时 annotations="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;
                     ShowAnalysis(pane,response.Result);
@@ -1039,7 +1091,8 @@ namespace ThesisAddIn.VSTO
             string actual;
             string location;
             int matchCount;
-            if (!TryReadIssueFromComments(range, out ruleId, out expected, out actual, out location, out matchCount))
+            if (!TryReadIssueFromComments(range, out ruleId, out expected, out actual, out location, out matchCount,
+                comment => _resolveCandidate=comment))
             {
                 return;
             }
@@ -1064,12 +1117,14 @@ namespace ThesisAddIn.VSTO
             {
                 // Reject task-pane motion and stationary pointers before any Word COM.
                 // Explicit navigation owns the selection briefly, so hover cannot undo it.
-                if (TryHandleResolvedToolComment()) return;
                 System.Drawing.Point cursor = Cursor.Position;
+                bool hoverReady=_interactionGate.Observe(cursor.X,cursor.Y,Control.MouseButtons!=MouseButtons.None,DateTime.UtcNow);
                 if (_isNavigatingToDiagnostic || _pane == null || _pane.IsBusy ||
                     Control.MouseButtons != MouseButtons.None ||
                     (DateTime.UtcNow - _lastNavigationUtc).TotalMilliseconds < 700) return;
                 if (_pane.IsHandleCreated && _pane.RectangleToScreen(_pane.ClientRectangle).Contains(cursor)) return;
+                if (_resolveCandidate!=null && _interactionGate.CanCheckResolve(DateTime.UtcNow) && TryHandleResolvedToolComment()) return;
+                if (!hoverReady || !_pane.Review.Rows.Any(row=>!_pane.Review.IsRepaired(row))) return;
                 if (cursor.X == _lastHoveredCursorX && cursor.Y == _lastHoveredCursorY) return;
 
                 Word.Window window = Application.ActiveWindow;
@@ -1110,6 +1165,12 @@ namespace ThesisAddIn.VSTO
                 }
 
                 Word.Range range = window.RangeFromPoint(cursor.X, cursor.Y) as Word.Range;
+                if (range!=null && range.StoryType==Word.WdStoryType.wdCommentsStory) {
+                    string id, expectedValue, actualValue, source; int count;
+                    TryReadIssueFromComments(range,out id,out expectedValue,out actualValue,out source,out count,
+                        comment=>_resolveCandidate=comment);
+                    return;
+                }
                 // Hover sync is for the document body only. Word can return an
                 // obscured comment-story range under our task-pane buttons.
                 // Native comment clicks are handled by WindowSelectionChange.
@@ -1135,36 +1196,11 @@ namespace ThesisAddIn.VSTO
                     return;
                 }
 
-                string ruleId;
-                string expected;
-                string actual;
                 string location;
-                int matchCount;
-                if (TryReadIssueFromComments(range, out ruleId, out expected, out actual, out location, out matchCount))
+                if (TryReadHoveredOccurrence(windowHandle, range, out location)
+                    && _pane.SelectByOccurrenceLocation(location,navigateToSource:false))
                 {
-                    string commentKey = location + "\u001f" + ruleId + "\u001f" + expected + "\u001f" + actual;
-                    if (!string.Equals(commentKey, _lastHoveredCommentKey, StringComparison.Ordinal)
-                        && _pane.SelectByComment(ruleId, expected, actual, location, navigateToSource: false))
-                    {
-                        _lastHoveredCommentKey = commentKey;
-                        WriteStartupLog("悬停联动：story=" + range.StoryType + "; start=" + range.Start
-                            + "; end=" + range.End + "; location=" + location);
-                        if (matchCount > 1)
-                        {
-                            _pane.SetStatus("此处有多条批注，已关联第一项；可用功能区上一项/下一项浏览。");
-                        }
-                    }
-                }
-                else if (TryReadHoveredOccurrence(windowHandle, range, out location))
-                {
-                    string occurrenceKey = "occurrence\u001f" + location;
-                    if (!string.Equals(occurrenceKey, _lastHoveredCommentKey, StringComparison.Ordinal)
-                        && _pane.SelectByOccurrenceLocation(location, navigateToSource: false))
-                    {
-                        _lastHoveredCommentKey = occurrenceKey;
-                        WriteStartupLog("合并问题悬停联动：window=" + windowHandle + "; location=" + location);
-                        _pane.SetStatus("当前合并问题位置：" + DescribeLocation(location) + "。可用功能区上一处/下一处浏览同一要求的其他位置。");
-                    }
+                    _lastHoveredCommentKey="occurrence\u001f"+location;
                 }
                 else
                 {
@@ -1183,18 +1219,15 @@ namespace ThesisAddIn.VSTO
         // Poll only this analyzed window; read text only for resolved comments.
         private bool TryHandleResolvedToolComment()
         {
-            if (_pane == null || _pane.IsBusy || _pane.Review.Rows.Count == 0 ||
-                (DateTime.UtcNow - _lastCommentPollUtc).TotalMilliseconds < 750) return false;
-            _lastCommentPollUtc = DateTime.UtcNow;
-            Word.Document document = Application.ActiveDocument;
-            Word.Comments comments = document.Comments;
-            for (int i=1;i<=comments.Count;i++) {
-                Word.Comment comment = comments[i];
-                if (!comment.Done) continue;
+            if (_pane == null || _pane.IsBusy || _resolveCandidate==null) return false;
+            try {
+                Word.Comment comment = _resolveCandidate;
+                if (comment.Range.Document!=Application.ActiveDocument) { _resolveCandidate=null; return false; }
+                if (!comment.Done) return false;
                 Word.Range textRange=comment.Range.Duplicate;
                 textRange.TextRetrievalMode.IncludeHiddenText=true;
                 string text=textRange.Text ?? string.Empty;
-                if (!text.Contains("[NKU-TOOL-ANNOTATION:v1]")) continue;
+                if (!text.Contains("[NKU-TOOL-ANNOTATION:v1]")) { _resolveCandidate=null; return false; }
                 Match rule=RuleIdPattern.Match(text);
                 Match location=CommentLocationPattern.Match(text);
                 string expected=CommentDiagnosticMatcher.ReadCommentField(text,"期望值");
@@ -1211,7 +1244,7 @@ namespace ThesisAddIn.VSTO
                 WriteStartupLog("Word 原生解决触发格式修复："+issue.RuleId);
                 RunRepair(_pane,issue,"当前问题");
                 return true;
-            }
+            } catch (System.Runtime.InteropServices.COMException) { _resolveCandidate=null; }
             return false;
         }
 
@@ -1283,7 +1316,7 @@ namespace ThesisAddIn.VSTO
             out string expected,
             out string actual,
             out string location,
-            out int matchCount)
+            out int matchCount, Action<Word.Comment> matched = null)
         {
             ruleId = null;
             expected = null;
@@ -1324,6 +1357,7 @@ namespace ThesisAddIn.VSTO
                     Match locationMatch = CommentLocationPattern.Match(text);
                     if (ruleMatch.Success && expectedValue.Length > 0 && actualValue.Length > 0)
                     {
+                        if (matches.Count==0) matched?.Invoke(comment);
                         matches.Add(new[]
                         {
                             ruleMatch.Groups["id"].Value.Trim(),
