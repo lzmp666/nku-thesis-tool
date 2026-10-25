@@ -87,7 +87,43 @@ namespace ThesisAddIn.VSTO
                 () => _pane?.CanResolveSelected == true,
                 () => _pane?.CanNavigateIssues == true,
                 () => _pane?.CanNavigateOccurrences == true);
+            _ribbon.FormatObjects = OnRibbonFormatObjects;
             return _ribbon;
+        }
+
+        private async void OnRibbonFormatObjects()
+        {
+            DiagnosticsPane pane = null;
+            try {
+                Word.Window window = Application.ActiveWindow;
+                EnsureTaskPaneForWindow(window);
+                pane = FindTaskPaneForWindow(window)?.Control as DiagnosticsPane;
+                if (pane == null || pane.IsBusy) return;
+                Word.Document document = window.Document;
+                if (document.TrackRevisions) throw new InvalidDataException("当前启用了修订，请先由作者决定如何处理修订，再应用图表排版。");
+                ObjectFormattingSettings settings;
+                using (var dialog = new ObjectFormattingDialog()) {
+                    if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+                    settings = dialog.Settings;
+                }
+                SetBusy(pane, true, "正在处理配对图表…");
+                await Task.Yield();
+                string report = await WordDocumentSynchronizer.FormatObjectsAsync(document, settings,
+                    message => SetStatus(pane, message), () => {
+                        GetOperationCancellationToken().ThrowIfCancellationRequested();
+                        if (window.Document != document || document.ReadOnly ||
+                            document.ProtectionType != Word.WdProtectionType.wdNoProtection)
+                            throw new InvalidDataException("目标文档状态已改变，停止排版。");
+                    }, WriteStartupLog);
+                WriteStartupLog(report);
+                await RefreshReviewFromLive(pane, document, window);
+                SetStatus(pane, report.Replace("\r\n", "；"));
+                System.Windows.Forms.MessageBox.Show(report, "图表排版结果", System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Information);
+            } catch (Exception exception) {
+                WriteStartupLog("图表排版未完成：" + exception);
+                if (pane != null) SetStatus(pane, "图表排版未完成：" + exception.Message);
+            } finally { if (pane != null) SetBusy(pane, false, null); }
         }
 
         private void SetDiagnosticsPaneVisible(bool visible)
@@ -351,8 +387,9 @@ namespace ThesisAddIn.VSTO
                 }
 
                 string syncError = null;
+                Dictionary<string, Word.Range> analyzedRanges = null;
                 bool synchronized = pane.InvokeOnUiThread(() => WordDocumentSynchronizer.RefreshAnnotations(
-                    operation.Document, operation.SnapshotPath, response.Result, out syncError));
+                    operation.Document, operation.SnapshotPath, response.Result, out syncError, out analyzedRanges));
                 if (!synchronized)
                 {
                     WriteStartupLog("刷新当前文档格式标记失败：" + syncError);
@@ -362,8 +399,7 @@ namespace ThesisAddIn.VSTO
 
                 ShowAnalysis(pane, response.Result);
                 ShowSuggestions(pane);
-                pane.InvokeOnUiThread(() => CacheOccurrenceRanges(operation.WindowHandle, operation.Document,
-                    operation.SnapshotPath, response.Result));
+                _occurrenceRangesByWindow[operation.WindowHandle] = analyzedRanges;
                 SetStatus(pane, "分析完成：当前文档共 " + response.Result.Diagnostics.Count
                     + " 项问题，原文黄色标记已在本窗口更新。可用 Ctrl+Z 撤销标记；完成后自行保存。");
                 WriteStartupLog("已在当前 Word 文档刷新标注，问题数 " + response.Result.Diagnostics.Count
@@ -729,23 +765,32 @@ namespace ThesisAddIn.VSTO
                 if(!TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
                 WriteStartupLog("修复耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 stage=elapsed.ElapsedMilliseconds;
-                // No awaits or text/annotation mutations occur between these writes.
-                // Map the union once, retain per-group before/after validation and undo,
-                // and repaint once for the entire batch instead of after every group.
-                bool previousScreenUpdating=document.Application.ScreenUpdating;
-                try {
-                    document.Application.ScreenUpdating=false;
-                    var repairRanges=WordDocumentSynchronizer.GetRepairRanges(document,snapshot,
-                        groups.SelectMany(group=>group.Value));
-                    foreach(var group in groups) {
-                        WordDocumentSynchronizer.RepairRecord record;
-                        if(!WordDocumentSynchronizer.ApplyDirectWithRanges(document,snapshot,group.Value,
-                            repairRanges,out record,out error))
-                            throw new InvalidDataException(error);
-                        string key=IssueReviewState.Key(group.Key);
-                        applied.Add(new KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>(key,record));
-                    }
-                } finally { document.Application.ScreenUpdating=previousScreenUpdating; }
+                Dictionary<string, Word.Range> cached;
+                _occurrenceRangesByWindow.TryGetValue(operation.WindowHandle, out cached);
+                var repairRanges=WordDocumentSynchronizer.GetRepairRanges(document,snapshot,
+                    groups.SelectMany(group=>group.Value), cached);
+                WriteStartupLog("修复耗时 map="+(elapsed.ElapsedMilliseconds-stage)+"ms");
+                string bodyText = document.Content.Text;
+                foreach(var group in groups) {
+                    long groupStart = elapsed.ElapsedMilliseconds;
+                    var aggregate = new WordDocumentSynchronizer.RepairRecord();
+                    string key=IssueReviewState.Key(group.Key);
+                    applied.Add(new KeyValuePair<string,WordDocumentSynchronizer.RepairRecord>(key,aggregate));
+                    await CooperativeRepairRunner.RunAsync(group.Value, () => {
+                        GetOperationCancellationToken().ThrowIfCancellationRequested();
+                        if (operation.Window.Document != document || document.ReadOnly ||
+                            document.ProtectionType != Word.WdProtectionType.wdNoProtection || document.Content.Text != bodyText)
+                            throw new InvalidDataException("修复间隙原文已被编辑或文档状态改变，已停止后续写入。");
+                    }, patch => {
+                        WordDocumentSynchronizer.RepairRecord part;
+                        if(!WordDocumentSynchronizer.ApplyDirectWithRanges(document,snapshot,new[]{patch},
+                            repairRanges,out part,out error)) throw new InvalidDataException(error);
+                        aggregate.Append(part);
+                    }, () => Task.Delay(1), completed => SetStatus(pane,
+                        "正在修复“"+DiagnosticsPane.DescribeRule(group.Key.RuleId)+"” "+completed+"/"+group.Value.Count+" 处…"));
+                    WriteStartupLog("修复分项 rule="+group.Key.RuleId+" count="+group.Value.Count+" write="+
+                        (elapsed.ElapsedMilliseconds-groupStart)+"ms");
+                }
                 foreach(var item in applied) GetHistory(pane)[item.Key]=item.Value;
                 pane.Review.Complete(selected);
                 // Once written, keep item-level undo available even if re-analysis fails.
@@ -754,8 +799,10 @@ namespace ThesisAddIn.VSTO
                 await RefreshReviewFromLive(pane,document,operation.Window);
                 SetStatus(pane,"已修复所选 "+selected.Length+" 项；可在建议卡中逐项撤销。改动留在当前文档，未自动保存。");
             } catch(Exception ex) {
-                // No async work occurs between the live writes. Roll back an incomplete batch.
+                // Roll back completed chunks only if their target text/format is still
+                // unchanged. A user's intervening edit is never blindly overwritten.
                 foreach(var item in applied.AsEnumerable().Reverse()) {
+                    if (item.Value.Count == 0) continue;
                     string rollback;
                     if(!WordDocumentSynchronizer.UndoRepair(document,item.Value,out rollback))
                         WriteStartupLog("回滚未完成："+rollback);
@@ -790,8 +837,10 @@ namespace ThesisAddIn.VSTO
                     WriteStartupLog("复查耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;
                     Dictionary<string, Word.Range> refreshedRanges;
+                    Dictionary<string, Word.Range> cached;
+                    _occurrenceRangesByWindow.TryGetValue(window.Hwnd, out cached);
                     if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,
-                        out error,out refreshedRanges,WriteStartupLog))
+                        out error,out refreshedRanges,WriteStartupLog,cached))
                         throw new InvalidDataException(error);
                     WriteStartupLog("复查耗时 annotations="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;

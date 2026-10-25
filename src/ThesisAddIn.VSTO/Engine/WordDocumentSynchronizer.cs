@@ -100,12 +100,12 @@ namespace ThesisAddIn.VSTO.Engine
 
         public static bool RefreshAnnotations(Word.Document document, string snapshotPath,
             EngineAnalysisResult analysis, out string error, out Dictionary<string, Word.Range> ranges,
-            Action<string> trace = null)
+            Action<string> trace = null, Dictionary<string, Word.Range> cached = null)
         {
             AnnotationRefreshState prepared = null;
             Dictionary<string, Word.Range> updated = null;
             bool success = ExecuteUndoable(document, "刷新论文格式批注",
-                () => prepared = PrepareAnnotationRefresh(document, snapshotPath, analysis), markMutation =>
+                () => prepared = PrepareAnnotationRefresh(document, snapshotPath, analysis, cached), markMutation =>
             {
                 updated = RefreshAnnotationsCore(document, snapshotPath, analysis, markMutation, trace, prepared);
                 document.Saved = false;
@@ -262,7 +262,7 @@ namespace ThesisAddIn.VSTO.Engine
         }
 
         private static AnnotationRefreshState PrepareAnnotationRefresh(Word.Document document, string snapshotPath,
-            EngineAnalysisResult analysis)
+            EngineAnalysisResult analysis, Dictionary<string, Word.Range> cached = null)
         {
             if (analysis == null) throw new ArgumentNullException(nameof(analysis));
             List<AnnotationRecord> existing = ReadOwnedAnnotations(document);
@@ -274,7 +274,7 @@ namespace ThesisAddIn.VSTO.Engine
             foreach (string location in GetDiagnosticLocations(analysis))
                 locations.Add(location);
 
-            Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath, locations);
+            Dictionary<string, Word.Range> ranges = BuildRanges(document, snapshotPath, locations, cached);
             return new AnnotationRefreshState { Comments = existing, Marks = existingMarks, Ranges = ranges,
                 Texts = ranges.ToDictionary(pair => pair.Key, pair => pair.Value.Text, StringComparer.Ordinal) };
         }
@@ -686,7 +686,7 @@ namespace ThesisAddIn.VSTO.Engine
         }
 
         private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
-            IEnumerable<string> requestedLocations)
+            IEnumerable<string> requestedLocations, Dictionary<string, Word.Range> cached = null)
         {
             Dictionary<int, XmlParagraph> paragraphs = ReadXmlParagraphs(snapshotPath);
             int paragraphCount = document.Paragraphs.Count;
@@ -732,6 +732,27 @@ namespace ThesisAddIn.VSTO.Engine
                     throw new InvalidDataException("第 " + (paragraphIndex + 1) + " 段包含无法安全映射的 Word 内容，未修改文档。");
 
                 int cursor = paragraphRange.Start;
+                // A cache hit is accepted only after matching the live paragraph,
+                // exact run text AND prefix. Live ranges follow Word's hidden comment
+                // reference CPs; offsets calculated from plain string lengths do not.
+                bool allCached = cached != null && requested.Value.All(runIndex => {
+                    string location = "word/document.xml#paragraph[" + paragraphIndex + "]/run[" + runIndex + "]";
+                    Word.Range candidate;
+                    if (!cached.TryGetValue(location, out candidate) || candidate == null) return false;
+                    try {
+                        return candidate.Start >= paragraphRange.Start && candidate.End <= paragraphRange.End &&
+                            candidate.Text == paragraphRuns[runIndex].Text &&
+                            document.Range(paragraphRange.Start, candidate.Start).Text ==
+                                string.Concat(paragraphRuns.Take(runIndex).Select(run => run.Text));
+                    } catch (System.Runtime.InteropServices.COMException) { return false; }
+                });
+                if (allCached) {
+                    foreach (int runIndex in requested.Value) {
+                        string location = "word/document.xml#paragraph[" + paragraphIndex + "]/run[" + runIndex + "]";
+                        result.Add(location, cached[location]);
+                    }
+                    continue;
+                }
                 for (int runIndex = 0; runIndex <= requested.Value.Max(); runIndex++)
                 {
                     // Word's internal positions include annotation reference marks,

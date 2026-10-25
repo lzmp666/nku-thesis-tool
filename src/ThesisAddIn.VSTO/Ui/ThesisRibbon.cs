@@ -29,6 +29,7 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Func<bool> _canNavigateOccurrence;
         private Office.IRibbonUI _ribbonUi;
         private int _stateMask = -1;
+        internal Action FormatObjects { get; set; }
         private readonly Dictionary<string, stdole.IPictureDisp> _images =
             new Dictionary<string, stdole.IPictureDisp>(StringComparer.Ordinal);
 
@@ -72,7 +73,7 @@ namespace ThesisAddIn.VSTO.Ui
           <toggleButton id=""NkuShowIssues"" getLabel=""GetIssuesLabel"" size=""large""
                         getImage=""GetButtonImage"" getPressed=""GetIssuesPressed""
                         screentip=""打开或关闭问题检索列表""
-                        supertip=""在当前 Word 窗口显示或隐藏右侧问题检索列表。""
+                        supertip=""在当前 Word 窗口显示或隐藏左侧问题检索列表。""
                         onAction=""OnToggleIssues"" />
         </group>
         <group id=""NkuThesisRepair"" label=""修复"">
@@ -88,6 +89,10 @@ namespace ThesisAddIn.VSTO.Ui
                   screentip=""撤销这一项的格式修复""
                   supertip=""仅恢复该项修复前的格式，保留其他修复和文字编辑；格式已被手动更改时停止。""
                   onAction=""OnVerifyResolved"" />
+          <button id=""NkuFormatObjects"" label=""图表排版"" getImage=""GetButtonImage""
+                  screentip=""图片与表格排版选项""
+                  supertip=""为配对图表设置居中、限宽、表内中英文字体字号、单元格对齐、三线表及重复表头；作者选项不作为校级合规结论。""
+                  onAction=""OnFormatObjects"" />
         </group>
         <group id=""NkuThesisNavigation"" label=""定位"">
           <box id=""NkuIssueNavigation"" boxStyle=""vertical"">
@@ -171,6 +176,7 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NkuShowIssues": index = 1; break;
                 case "NkuFixCurrent": index = 2; break;
                 case "NkuFixAll": index = 3; break;
+                case "NkuFormatObjects": index = 3; break;
                 case "NkuVerifyResolved": index = 4; break;
                 case "NkuPreviousIssue": index = 5; break;
                 case "NkuNextIssue": index = 6; break;
@@ -286,6 +292,7 @@ namespace ThesisAddIn.VSTO.Ui
         public void OnAnalyzeCurrent(Office.IRibbonControl control) => _analyze();
         public void OnFixCurrent(Office.IRibbonControl control) => _fixCurrent();
         public void OnFixAll(Office.IRibbonControl control) => _fixAll();
+        public void OnFormatObjects(Office.IRibbonControl control) => FormatObjects?.Invoke();
         public void OnVerifyResolved(Office.IRibbonControl control) => _verifyResolved();
         public void OnPreviousIssue(Office.IRibbonControl control) => _navigateIssue(-1);
         public void OnNextIssue(Office.IRibbonControl control) => _navigateIssue(1);

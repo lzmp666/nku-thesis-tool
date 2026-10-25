@@ -51,7 +51,7 @@ $ui.Changes.Clear()
 $before = $script:reads
 [xml]$xml = $ribbon.GetCustomUI('Microsoft.Word.Document')
 $buttons = $xml.SelectNodes('//*[@getImage="GetButtonImage"]')
-if ($buttons.Count -ne 9) { throw 'Missing command icons.' }
+if ($buttons.Count -ne 10) { throw 'Missing command icons.' }
 foreach ($button in $buttons) {
     $control = New-Object ControlProbe
     $control.Id = [string]$button.id
@@ -71,4 +71,4 @@ foreach ($brand in $brands) {
     $picture = $ribbon.GetBrandImage($control)
     if ($null -eq $picture -or [ControlProbe]::Width($picture) -le 0) { throw 'Brand image is invalid.' }
 }
-Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 9 command icons and one large emblem are valid.'
+Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 10 command icons and one large emblem are valid.'

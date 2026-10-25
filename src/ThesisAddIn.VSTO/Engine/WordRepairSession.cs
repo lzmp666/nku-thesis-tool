@@ -20,6 +20,7 @@ namespace ThesisAddIn.VSTO.Engine
         {
             internal readonly List<FormatChange> Changes = new List<FormatChange>();
             public int Count => Changes.Count;
+            internal void Append(RepairRecord part) { Changes.AddRange(part.Changes); }
         }
         internal sealed class FormatChange
         {
@@ -48,7 +49,8 @@ namespace ThesisAddIn.VSTO.Engine
         }
 
         internal static Dictionary<string, Word.Range> GetRepairRanges(Word.Document document, string snapshot,
-            IEnumerable<EnginePatch> patches) => BuildRanges(document, snapshot, patches.Select(p => p.Location));
+            IEnumerable<EnginePatch> patches, Dictionary<string, Word.Range> cached = null) =>
+            BuildRanges(document, snapshot, patches.Select(p => p.Location), cached);
 
         internal static bool ApplyDirectWithRanges(Word.Document document, string snapshot,
             IReadOnlyList<EnginePatch> patches, Dictionary<string, Word.Range> verifiedRanges,
@@ -64,8 +66,15 @@ namespace ThesisAddIn.VSTO.Engine
                 {
                     Word.Range range = ranges[patch.Location];
                     ValidatePatch(range, patch);
-                    var change = new FormatChange { Range = range.Duplicate, Font = range.Font.Duplicate,
-                        Paragraph = range.ParagraphFormat.Duplicate, RuleId = patch.RuleId, Text = range.Text };
+                    // Duplicating both complete COM format objects for every property
+                    // needlessly makes Word resolve paragraph and character formatting.
+                    bool paragraphProperty = patch.RuleId == "demo/caption-alignment" ||
+                        patch.RuleId == "demo/caption-line-spacing" || patch.RuleId == "demo/caption-space-before" ||
+                        patch.RuleId == "demo/caption-space-after";
+                    var change = new FormatChange { Range = range.Duplicate,
+                        Font = !paragraphProperty && !IsObjectWidth(patch.RuleId) ? range.Font.Duplicate : null,
+                        Paragraph = paragraphProperty ? range.ParagraphFormat.Duplicate : null,
+                        RuleId = patch.RuleId, Text = range.Text };
                     CaptureObjectChange(change);
                     captured.Changes.Add(change);
                 }
@@ -200,9 +209,10 @@ namespace ThesisAddIn.VSTO.Engine
 
         private static void WriteTableWidths(Word.Table table, float[] widths, Action markMutation)
         {
-            foreach (Word.Row row in table.Rows)
-                for (int index = 0; index < widths.Length; index++)
-                { row.Cells[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
+            // ReadTableWidths has already rejected merged/nonuniform columns. Set
+            // each COLUMN once, rather than forcing one layout per cell in every row.
+            for (int index = 0; index < widths.Length; index++)
+            { table.Columns[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
         }
 
         private static void ValidateObjectWidth(Word.Range anchor, EnginePatch patch)
