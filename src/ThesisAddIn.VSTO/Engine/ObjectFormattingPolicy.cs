@@ -16,7 +16,7 @@ namespace ThesisAddIn.VSTO.Engine
     internal static class ObjectFormattingPolicy
     {
         private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-        internal static string TableRejection(string flatOpc)
+        internal static string TableRejection(string flatOpc, string targetText = null)
         {
             var xml = XDocument.Parse(flatOpc);
             XNamespace package = "http://schemas.microsoft.com/office/2006/xmlPackage";
@@ -26,8 +26,14 @@ namespace ThesisAddIn.VSTO.Engine
             // containing unrelated tables. Only inspect its document body.
             var scope = main?.Element(package + "xmlData") ?? xml.Root;
             var tables = scope.DescendantsAndSelf(W + "tbl").ToArray();
-            if (tables.Length != 1) return "嵌套表格";
+            if (targetText != null) {
+                string text = targetText.Replace("\r", "").Replace("\a", "").Replace("\v", "");
+                tables = tables.Where(table => !table.Ancestors(W + "tbl").Any() &&
+                    string.Concat(table.Descendants(W + "t").Select(value => value.Value)) == text).ToArray();
+            }
+            if (tables.Length != 1) return "无法唯一匹配表格正文（匹配 " + tables.Length + " 张表）";
             var table = tables[0];
+            if (table.Descendants(W + "tbl").Any()) return "嵌套表格";
             if (table.Descendants().Any(e => e.Name.Namespace == W &&
                 new[] { "gridSpan", "vMerge", "hMerge", "gridBefore", "gridAfter", "ins", "del",
                     "tblPrChange", "tcPrChange", "fldChar", "fldSimple", "drawing", "pict", "sdt" }.Contains(e.Name.LocalName)))

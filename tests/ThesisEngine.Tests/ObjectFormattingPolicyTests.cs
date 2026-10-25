@@ -56,4 +56,15 @@ public sealed class ObjectFormattingPolicyTests
                 new XElement(package + "xmlData", new XElement(XName.Get("glossaryDocument", W), Table()))));
         Assert.Null(ObjectFormattingPolicy.TableRejection(xml.ToString()));
     }
+
+    [Fact]
+    public void SelectionWithPeerTablesMustMatchExactlyOneAuthoredTextStream()
+    {
+        var first = Table(); var other = Table(); other.Descendants(XName.Get("t", W)).First().Value = "Other";
+        var body = new XElement(XName.Get("body", W), first, other);
+        Assert.Null(ObjectFormattingPolicy.TableRejection(body.ToString(), "名称\r\aValue\r\a样本\r\a12.3\r\a"));
+        Assert.NotNull(ObjectFormattingPolicy.TableRejection(body.ToString(), "unrelated"));
+        other.Descendants(XName.Get("t", W)).First().Value = "名称";
+        Assert.NotNull(ObjectFormattingPolicy.TableRejection(body.ToString(), "名称Value样本12.3"));
+    }
 }

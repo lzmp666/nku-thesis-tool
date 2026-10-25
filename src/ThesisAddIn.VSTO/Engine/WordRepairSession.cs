@@ -84,7 +84,13 @@ namespace ThesisAddIn.VSTO.Engine
                         string name = HighlightBookmarkName(item.Key, original);
                         if (document.Bookmarks.Exists(name)) {
                             Word.Bookmark bookmark = document.Bookmarks[name];
-                            if (bookmark.Range.Start != range.Start || bookmark.Range.End != range.End)
+                            Word.Range stored = bookmark.Range;
+                            // Adding a native comment can extend the recovery bookmark
+                            // over invisible reference CPs. Formatting ranges must exclude
+                            // those CPs, but cleanup may accept a text-identical envelope.
+                            if (stored.Start > range.Start || stored.End < range.End || stored.Text != range.Text ||
+                                !string.IsNullOrEmpty(document.Range(stored.Start, range.Start).Text) ||
+                                !string.IsNullOrEmpty(document.Range(range.End, stored.End).Text))
                                 throw new InvalidDataException("原文恢复标记的范围已变化。");
                             // Preserve a highlight the author changed during the repair.
                             if (range.HighlightColorIndex == Word.WdColorIndex.wdYellow) {

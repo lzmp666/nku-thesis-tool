@@ -49,7 +49,7 @@ namespace ThesisAddIn.VSTO.Engine
                 if (table.NestingLevel != 1) { skipped.Add("表格：嵌套表格"); continue; }
                 Word.Range caption = FindObjectCaption(table.Range.Paragraphs[1], false);
                 if (caption == null) { skipped.Add("表格：没有上方唯一表题，需人工确认对应关系/题注位置"); continue; }
-                string rejection = ObjectFormattingPolicy.TableRejection(table.Range.WordOpenXML);
+                string rejection = ObjectFormattingPolicy.TableRejection(table.Range.WordOpenXML, table.Range.Text);
                 if (rejection != null) { skipped.Add((caption.Text ?? "表格").Trim() + "：" + rejection); continue; }
                 work.Add(new ObjectWork { Table = table, Caption = caption, Name = "表格 " + (caption.Text ?? "").Trim() });
             }
@@ -61,7 +61,7 @@ namespace ThesisAddIn.VSTO.Engine
                 var timer = Stopwatch.StartNew();
                 string error;
                 bool success = ExecuteUndoable(document, "图表排版：" + item.Name, () => {
-                    if (item.Table != null && ObjectFormattingPolicy.TableRejection(item.Table.Range.WordOpenXML) != null)
+                    if (item.Table != null && ObjectFormattingPolicy.TableRejection(item.Table.Range.WordOpenXML, item.Table.Range.Text) != null)
                         throw new InvalidDataException("表格结构已变化。");
                 }, mark => {
                     string originalText = item.Table?.Range.Text ?? item.Picture.Range.Paragraphs[1].Range.Text;
