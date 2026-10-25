@@ -511,14 +511,19 @@ namespace ThesisAddIn.VSTO
             Word.Document document; Word.Window window; string error;
             if (!TryGetDocumentForPane(pane,out document,out window,out error)) { SetStatus(pane,error); return; }
             var reopened=new List<string>(); var failures=new List<string>();
+            int originalHandle=window.Hwnd;
+            string originalName=document.FullName;
             var elapsed=Stopwatch.StartNew();
             SetBusy(pane,true,"正在撤销所选格式修复…");
             try {
                 var history=GetHistory(pane);
                 await CooperativeRepairRunner.RunAsync(selected, () => {
-                    Word.Document current; Word.Window currentWindow; string reason;
-                    if (!TryGetDocumentForPane(pane,out current,out currentWindow,out reason) || current!=document)
-                        throw new InvalidDataException(reason ?? "文档窗口已变化。");
+                    // Word can expose another RCW for the same document after a
+                    // yielded message. Keep the bound window and stable identity;
+                    // each UndoRepair separately validates target text and format.
+                    if (window.Hwnd!=originalHandle || !string.Equals(window.Document.FullName,originalName,StringComparison.OrdinalIgnoreCase)
+                        || document.ReadOnly || document.ProtectionType!=Word.WdProtectionType.wdNoProtection)
+                        throw new InvalidDataException("文档窗口已变化，或文档不可编辑。");
                 }, issue => {
                     string key=IssueReviewState.Key(issue), reason;
                     if (!history.TryGetValue(key,out var record)) { failures.Add(DiagnosticsPane.DescribeRule(issue.RuleId)+"：没有本次会话记录"); return; }
@@ -533,6 +538,7 @@ namespace ThesisAddIn.VSTO
                 SetStatus(pane,"已撤销 "+reopened.Count+" 项；保留 "+failures.Count+" 项。尚未保存。"+
                     (failures.Count>0 ? Environment.NewLine+string.Join(Environment.NewLine,failures) : ""));
             } catch(Exception ex) {
+                WriteStartupLog("批量撤销复查中止："+ex);
                 pane.Review.ReopenMany(reopened);
                 SetStatus(pane,"已撤销 "+reopened.Count+" 项；后续操作停止："+ex.Message+"。请重新分析。");
             } finally {

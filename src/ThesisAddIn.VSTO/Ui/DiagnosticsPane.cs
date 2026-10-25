@@ -25,6 +25,8 @@ namespace ThesisAddIn.VSTO.Ui
         private readonly Label _status = new Label();
         private readonly ToolTip _toolTip = new ToolTip();
         private readonly Timer _navigationTimer = new Timer { Interval = 100 };
+        private FlowLayoutPanel _batchBar;
+        private Button _batchApply;
         private readonly Image _headerImage;
         private readonly List<EngineDiagnostic> _diagnostics = new List<EngineDiagnostic>();
         private readonly List<int> _visibleIndices = new List<int>();
@@ -218,10 +220,12 @@ namespace ThesisAddIn.VSTO.Ui
             layout.Controls.Add(header, 0, 0);
             _ruleNotice.Visible = false;
             var batchBar = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = new Padding(0), WrapContents = false };
+            _batchBar=batchBar;
             var all = new Button { Text = "全选", AutoSize = true, FlatStyle = FlatStyle.Flat };
             var none = new Button { Text = "清空", AutoSize = true, FlatStyle = FlatStyle.Flat };
             var apply = new Button { Text = "修复所选", AutoSize = true, FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(104,31,61), ForeColor = Color.White };
+            _batchApply=apply;
             var close = new Button { Text = "退出", AutoSize = true, FlatStyle = FlatStyle.Flat };
             all.Click += (s, e) => Review.SelectAll(true);
             none.Click += (s, e) => Review.SelectAll(false);
@@ -319,6 +323,8 @@ namespace ThesisAddIn.VSTO.Ui
             InvokeOnUiThread(() =>
             {
                 _isBusy = busy;
+                foreach (Control command in _batchBar.Controls) command.Enabled=!busy;
+                _batchApply.Enabled=!busy && Review.Checked.Count>0;
                 if (busy) _navigationTimer.Stop();
                 // Keep search/scroll/selection responsive while writes and rechecks
                 // are in progress. Only commands that mutate Word are blocked.
