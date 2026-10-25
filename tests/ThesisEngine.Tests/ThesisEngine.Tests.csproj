@@ -27,6 +27,7 @@
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/WordParagraphValueMapper.cs" Link="Engine/WordParagraphValueMapper.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/WordTableGeometry.cs" Link="Engine/WordTableGeometry.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/CooperativeRepairRunner.cs" Link="Engine/CooperativeRepairRunner.cs" />
+    <Compile Include="../../src/ThesisAddIn.VSTO/Engine/DiagnosticSetComparer.cs" Link="Engine/DiagnosticSetComparer.cs" />
     <Compile Include="../../src/ThesisAddIn.VSTO/Engine/ObjectFormattingPolicy.cs" Link="Engine/ObjectFormattingPolicy.cs" />
   </ItemGroup>
 </Project>

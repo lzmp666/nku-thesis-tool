@@ -1,5 +1,8 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ThesisAddIn.VSTO.Engine;
 
@@ -8,13 +11,15 @@ namespace ThesisAddIn.VSTO.Ui
     internal sealed class ObjectFormattingDialog : Form
     {
         internal readonly ObjectFormattingSettings Settings = new ObjectFormattingSettings();
+        private readonly List<Font> _displayFonts = new List<Font>();
         internal ObjectFormattingDialog()
         {
             Text = "图表排版 · 当前文档";
+            AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Microsoft YaHei UI", 9F);
             BackColor = Color.FromArgb(250, 247, 241);
             ForeColor = Color.FromArgb(44, 39, 42);
-            ClientSize = new Size(570, 465);
+            ClientSize = new Size(570, 500);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -53,5 +58,27 @@ namespace ThesisAddIn.VSTO.Ui
                 Margin = new Padding(0,3,0,3) };
             check.CheckedChanged += (s,e) => set(check.Checked); parent.Controls.Add(check);
         }
+        internal DialogResult ShowForOfficeWindow(int handle)
+        {
+            uint dpi = 96;
+            try { dpi = GetDpiForWindow(new IntPtr(handle)); } catch (EntryPointNotFoundException) { }
+            float scale = Math.Max(1F, Math.Min(4F, dpi / 96F));
+            var controls = new List<Control>(); Collect(this, controls);
+            Font[] fonts = controls.Select(control => control.Font).ToArray();
+            Scale(new SizeF(scale, scale));
+            for (int index = 0; index < controls.Count; index++) {
+                var font = new Font(fonts[index].FontFamily, fonts[index].SizeInPoints * 96F / 72F * scale,
+                    fonts[index].Style, GraphicsUnit.Pixel);
+                _displayFonts.Add(font); controls[index].Font = font;
+            }
+            return ShowDialog(new OfficeOwner(handle));
+        }
+        private static void Collect(Control control, List<Control> result)
+        { result.Add(control); foreach (Control child in control.Controls) Collect(child, result); }
+        private sealed class OfficeOwner : IWin32Window
+        { public IntPtr Handle { get; } internal OfficeOwner(int handle) { Handle = new IntPtr(handle); } }
+        [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
+        protected override void Dispose(bool disposing)
+        { base.Dispose(disposing); if (disposing) foreach (Font font in _displayFonts) font.Dispose(); }
     }
 }

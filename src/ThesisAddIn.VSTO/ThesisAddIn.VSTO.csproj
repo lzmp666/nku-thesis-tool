@@ -24,7 +24,7 @@
     <AssemblyName>ThesisAddIn.VSTO</AssemblyName>
     <LoadBehavior>3</LoadBehavior>
     <!-- Bump for each distributable update so VSTO cannot reuse a same-version deployment. -->
-    <ApplicationVersion>1.4.12.1025</ApplicationVersion>
+    <ApplicationVersion>1.4.13.1025</ApplicationVersion>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
     <!-- Never commit a signing private key. Sign only when a developer-local certificate is configured. -->
@@ -187,6 +187,7 @@
     <Compile Include="Engine\WordDocumentSynchronizer.cs" />
     <Compile Include="Engine\WordRepairSession.cs" />
     <Compile Include="Engine\CooperativeRepairRunner.cs" />
+    <Compile Include="Engine\DiagnosticSetComparer.cs" />
     <Compile Include="Engine\ObjectFormattingPolicy.cs" />
     <Compile Include="Engine\WordObjectFormatting.cs" />
     <Compile Include="Engine\WordTableGeometry.cs" />

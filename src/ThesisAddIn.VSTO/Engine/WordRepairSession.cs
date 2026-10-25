@@ -52,6 +52,52 @@ namespace ThesisAddIn.VSTO.Engine
             IEnumerable<EnginePatch> patches, Dictionary<string, Word.Range> cached = null) =>
             BuildRanges(document, snapshot, patches.Select(p => p.Location), cached);
 
+        internal static bool RemoveResolvedAnnotations(Word.Document document, IEnumerable<EngineDiagnostic> solved,
+            IEnumerable<EngineDiagnostic> remaining, Dictionary<string, Word.Range> verifiedRanges, out string error)
+        {
+            var selected = solved.ToArray();
+            var stillActive = new HashSet<string>(remaining.SelectMany(GetOccurrences), StringComparer.Ordinal);
+            List<AnnotationRecord> owned = null;
+            var remove = new List<AnnotationRecord>();
+            return ExecuteUndoable(document, "清除已修复项的工具批注", () => {
+                owned = ReadOwnedAnnotations(document);
+                foreach (EngineDiagnostic issue in selected) {
+                    var locations = new HashSet<string>(GetOccurrences(issue), StringComparer.Ordinal);
+                    string field = "\r规则：" + issue.RuleId + "\r期望值：" + issue.Expected + "\r实际值：";
+                    var matches = owned.Where(record => NormalizeCommentText(record.Text).Contains(field) &&
+                        locations.SetEquals(record.OriginalHighlights.Keys)).ToArray();
+                    if (matches.Length != 1) throw new InvalidDataException("已修复项的工具批注已被改动，请重新分析。");
+                    var match = matches[0];
+                    Word.Range anchor = verifiedRanges[GetOccurrences(issue).First()];
+                    if (match.Scope.Start != anchor.Start || match.Scope.End != anchor.End)
+                        throw new InvalidDataException("已修复项批注的原文锚点已变化。");
+                    remove.Add(match);
+                }
+            }, mark => {
+                var handled = new HashSet<string>(StringComparer.Ordinal);
+                foreach (AnnotationRecord record in remove)
+                    foreach (var item in record.OriginalHighlights) {
+                        if (stillActive.Contains(item.Key) || !handled.Add(item.Key)) continue;
+                        Word.Range range = verifiedRanges[item.Key];
+                        int original = (int)HighlightValue(item.Value);
+                        string name = HighlightBookmarkName(item.Key, original);
+                        if (document.Bookmarks.Exists(name)) {
+                            Word.Bookmark bookmark = document.Bookmarks[name];
+                            if (bookmark.Range.Start != range.Start || bookmark.Range.End != range.End)
+                                throw new InvalidDataException("原文恢复标记的范围已变化。");
+                            // Preserve a highlight the author changed during the repair.
+                            if (range.HighlightColorIndex == Word.WdColorIndex.wdYellow) {
+                                range.HighlightColorIndex = (Word.WdColorIndex)original; mark();
+                            }
+                            bookmark.Delete(); mark();
+                        } else throw new InvalidDataException("原文恢复标记缺失。");
+                    }
+                foreach (var record in remove.OrderByDescending(value => value.Index)) {
+                    document.Comments[record.Index].Delete(); mark();
+                }
+            }, out error);
+        }
+
         internal static bool ApplyDirectWithRanges(Word.Document document, string snapshot,
             IReadOnlyList<EnginePatch> patches, Dictionary<string, Word.Range> verifiedRanges,
             out RepairRecord record, out string error)

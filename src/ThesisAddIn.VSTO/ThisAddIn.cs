@@ -103,7 +103,7 @@ namespace ThesisAddIn.VSTO
                 if (document.TrackRevisions) throw new InvalidDataException("当前启用了修订，请先由作者决定如何处理修订，再应用图表排版。");
                 ObjectFormattingSettings settings;
                 using (var dialog = new ObjectFormattingDialog()) {
-                    if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+                    if (dialog.ShowForOfficeWindow(window.Hwnd) != System.Windows.Forms.DialogResult.OK) return;
                     settings = dialog.Settings;
                 }
                 SetBusy(pane, true, "正在处理配对图表…");
@@ -796,7 +796,12 @@ namespace ThesisAddIn.VSTO
                 // Once written, keep item-level undo available even if re-analysis fails.
                 applied.Clear();
                 WriteStartupLog("修复耗时 write="+(elapsed.ElapsedMilliseconds-stage)+"ms");
-                await RefreshReviewFromLive(pane,document,operation.Window);
+                stage=elapsed.ElapsedMilliseconds;
+                bool annotationsCurrent = WordDocumentSynchronizer.RemoveResolvedAnnotations(document,selected,
+                    pane.Review.Rows.Where(row => !pane.Review.IsRepaired(row)),repairRanges,out error);
+                WriteStartupLog("修复耗时 cleanup="+(elapsed.ElapsedMilliseconds-stage)+"ms ok="+annotationsCurrent);
+                if (!annotationsCurrent) WriteStartupLog("快速清理转为完整刷新："+error);
+                await RefreshReviewFromLive(pane,document,operation.Window,annotationsCurrent);
                 SetStatus(pane,"已修复所选 "+selected.Length+" 项；可在建议卡中逐项撤销。改动留在当前文档，未自动保存。");
             } catch(Exception ex) {
                 // Roll back completed chunks only if their target text/format is still
@@ -814,7 +819,8 @@ namespace ThesisAddIn.VSTO
                 SetBusy(pane,false,null); TryDelete(snapshot);
             }
         }
-        private async Task RefreshReviewFromLive(DiagnosticsPane pane, Word.Document document, Word.Window window)
+        private async Task RefreshReviewFromLive(DiagnosticsPane pane, Word.Document document, Word.Window window,
+            bool annotationsAlreadyCurrent = false)
         {
             // Word may finish a background layout/export update just after Save As.
             // Re-read and re-analyze fresh content; never accept a stale fingerprint.
@@ -839,9 +845,18 @@ namespace ThesisAddIn.VSTO
                     Dictionary<string, Word.Range> refreshedRanges;
                     Dictionary<string, Word.Range> cached;
                     _occurrenceRangesByWindow.TryGetValue(window.Hwnd, out cached);
-                    if(!WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,
-                        out error,out refreshedRanges,WriteStartupLog,cached))
-                        throw new InvalidDataException(error);
+                    bool unchanged = annotationsAlreadyCurrent && cached != null &&
+                        DiagnosticSetComparer.Equivalent(pane.Review.Rows.Where(row => !pane.Review.IsRepaired(row)), response.Result.Diagnostics);
+                    if (unchanged) {
+                        var locations = new HashSet<string>(response.Result.Diagnostics.SelectMany(row =>
+                            row.Occurrences != null && row.Occurrences.Count > 0 ? row.Occurrences.Select(value => value.Location) : new[]{row.Location}), StringComparer.Ordinal);
+                        refreshedRanges = cached.Where(pair => locations.Contains(pair.Key))
+                            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+                        unchanged = refreshedRanges.Count == locations.Count;
+                    } else refreshedRanges = null;
+                    if (!unchanged && !WordDocumentSynchronizer.RefreshAnnotations(document,operation.SnapshotPath,response.Result,
+                        out error,out refreshedRanges,WriteStartupLog,cached)) throw new InvalidDataException(error);
+                    if (unchanged) WriteStartupLog("复查诊断未变化，保留其余批注及原文范围；跳过全文批注扫描。");
                     WriteStartupLog("复查耗时 annotations="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     stage=elapsed.ElapsedMilliseconds;
                     ShowAnalysis(pane,response.Result);
