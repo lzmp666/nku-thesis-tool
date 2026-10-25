@@ -34,6 +34,7 @@ namespace ThesisAddIn.VSTO.Ui
         private bool _isShowingPlaceholder;
         private bool _updatingList;
         private bool _analysisSucceeded;
+        private bool _selectionDuringBusy;
         private float _uiScale = 1F;
         private readonly List<Font> _scaledFonts = new List<Font>();
 
@@ -314,10 +315,14 @@ namespace ThesisAddIn.VSTO.Ui
             {
                 _isBusy = busy;
                 if (busy) _navigationTimer.Stop();
-                _searchBox.Enabled = !busy;
-                _issueList.Enabled = !busy;
+                // Keep search/scroll/selection responsive while writes and rechecks
+                // are in progress. Only commands that mutate Word are blocked.
+                _searchBox.Enabled = true;
+                _issueList.Enabled = true;
+                _issueList.Invalidate();
                 if (!string.IsNullOrEmpty(message)) SetStatusCore(message);
                 RaiseStateChanged();
+                if (!busy && _selectionDuringBusy) { _selectionDuringBusy=false; QueueSourceNavigation(); }
             });
         }
 
@@ -498,6 +503,10 @@ namespace ThesisAddIn.VSTO.Ui
         private void OnIssueSelected(object sender, EventArgs e)
         {
             if (_updatingList || _issueList.SelectedIndex < 0 || _issueList.SelectedIndex >= _visibleIndices.Count) return;
+            if (_isBusy) {
+                SelectDiagnostic(_visibleIndices[_issueList.SelectedIndex], navigateToSource:false);
+                _selectionDuringBusy=true; return;
+            }
             SelectDiagnostic(_visibleIndices[_issueList.SelectedIndex], navigateToSource: true);
         }
 
@@ -757,8 +766,8 @@ namespace ThesisAddIn.VSTO.Ui
                         card.Left+9,ref y,card.Right-9,body,ink);
                 {
                     int buttonY = card.Bottom-28;
-                    DrawAction(graphics,new Rectangle(card.Left+9,buttonY,66,23),"解决",Review.CanRepair(issue));
-                    DrawAction(graphics,new Rectangle(card.Left+83,buttonY,66,23),"撤销",Review.IsRepaired(issue));
+                    DrawAction(graphics,new Rectangle(card.Left+9,buttonY,66,23),"解决",!_isBusy && Review.CanRepair(issue));
+                    DrawAction(graphics,new Rectangle(card.Left+83,buttonY,66,23),"撤销",!_isBusy && Review.IsRepaired(issue));
                 }
             }
         }

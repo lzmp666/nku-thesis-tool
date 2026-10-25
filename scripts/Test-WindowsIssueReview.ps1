@@ -40,6 +40,17 @@ try {
     $state.GetType().GetField('Repaired',$flags).GetValue($state).Add($key) | Out-Null
     $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
     if($script:undos -ne 1) { throw 'Undo is not connected to the item undo event.' }
+    $search.SetBusy($true,'checking')
+    $query=$search.GetType().GetField('_searchBox',$flags).GetValue($search)
+    if(-not $left.Enabled -or -not $query.Enabled) { throw 'Read-only browsing/search is blocked while repairing.' }
+    $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
+    if($script:repairs -ne 1 -or $script:undos -ne 1) { throw 'A mutation was dispatched while a repair was already running.' }
+    $search.GetType().GetMethod('OnSearchGotFocus',$flags).Invoke($search,@($query,[EventArgs]::Empty)) | Out-Null
+    $query.Text='Times'
+    if($left.Items.Count -ne 0) { throw 'Busy search did not filter immediately.' }
+    $query.Text=''
+    if($left.Items.Count -ne 3) { throw 'Busy search did not restore all rows.' }
+    $search.SetBusy($false,$null)
     foreach($row in $state.GetType().GetField('Rows',$flags).GetValue($state)) {
         $rowKey=$assembly.GetType('ThesisAddIn.VSTO.Ui.IssueReviewState').GetMethod('Key',[Reflection.BindingFlags]'Static,NonPublic').Invoke($null,@($row))
         $state.GetType().GetField('Repaired',$flags).GetValue($state).Add($rowKey) | Out-Null

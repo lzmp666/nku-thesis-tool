@@ -253,8 +253,7 @@ namespace ThesisAddIn.VSTO
         {
             // An owned dialog can temporarily activate a different Word window.
             // Refresh command state from the document that is actually active.
-            DiagnosticsPane active = TryGetPaneForActiveWindow();
-            if (active != null) _pane = active;
+            if (sender is DiagnosticsPane changed) ActivatePaneFromSender(changed);
             _ribbon?.Invalidate();
         }
 
@@ -839,8 +838,9 @@ namespace ThesisAddIn.VSTO
                 applied.Clear();
                 WriteStartupLog("修复耗时 write="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 stage=elapsed.ElapsedMilliseconds;
-                bool annotationsCurrent = WordDocumentSynchronizer.RemoveResolvedAnnotations(document,selected,
-                    pane.Review.Rows.Where(row => !pane.Review.IsRepaired(row)),repairRanges,out error);
+                var cleanup = await WordDocumentSynchronizer.RemoveResolvedAnnotationsAsync(document,selected,
+                    pane.Review.Rows.Where(row => !pane.Review.IsRepaired(row)),repairRanges);
+                bool annotationsCurrent = cleanup.Item1; error = cleanup.Item2;
                 WriteStartupLog("修复耗时 cleanup="+(elapsed.ElapsedMilliseconds-stage)+"ms ok="+annotationsCurrent);
                 if (!annotationsCurrent) WriteStartupLog("快速清理转为完整刷新："+error);
                 await RefreshReviewFromLive(pane,document,operation.Window,annotationsCurrent);

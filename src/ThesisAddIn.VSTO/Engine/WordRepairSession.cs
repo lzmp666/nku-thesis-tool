@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using System.Threading.Tasks;
 using ThesisAddIn.Protocol;
 using Word = Microsoft.Office.Interop.Word;
 
@@ -33,6 +34,10 @@ namespace ThesisAddIn.VSTO.Engine
             internal Action<Action> RestoreObject;
             internal Func<Tuple<string, double[]>> ObjectSignature;
             internal Tuple<string, double[]> AppliedObjectSignature;
+            internal Word.Range ObjectTarget;
+            internal double ObjectBeforeWidth;
+            internal Action<EnginePatch,Action> ApplyObject;
+            internal Func<EnginePatch,double[]> DesiredObjectDimensions;
         }
         public static bool ClearPreviousToolMarks(Word.Document document, string snapshot, out string error)
         {
@@ -52,14 +57,14 @@ namespace ThesisAddIn.VSTO.Engine
             IEnumerable<EnginePatch> patches, Dictionary<string, Word.Range> cached = null) =>
             BuildRanges(document, snapshot, patches.Select(p => p.Location), cached);
 
-        internal static bool RemoveResolvedAnnotations(Word.Document document, IEnumerable<EngineDiagnostic> solved,
-            IEnumerable<EngineDiagnostic> remaining, Dictionary<string, Word.Range> verifiedRanges, out string error)
+        internal static async Task<Tuple<bool,string>> RemoveResolvedAnnotationsAsync(Word.Document document, IEnumerable<EngineDiagnostic> solved,
+            IEnumerable<EngineDiagnostic> remaining, Dictionary<string, Word.Range> verifiedRanges)
         {
             var selected = solved.ToArray();
             var stillActive = new HashSet<string>(remaining.SelectMany(GetOccurrences), StringComparer.Ordinal);
             List<AnnotationRecord> owned = null;
             var remove = new List<AnnotationRecord>();
-            return ExecuteUndoable(document, "清除已修复项的工具批注", () => {
+            try {
                 var selectedFields = selected.Select(issue => "\r规则：" + issue.RuleId + "\r期望值：" + issue.Expected + "\r实际值：").ToArray();
                 owned = ReadOwnedAnnotations(document, text => selectedFields.Any(field => NormalizeCommentText(text).Contains(field)));
                 foreach (EngineDiagnostic issue in selected) {
@@ -74,9 +79,18 @@ namespace ThesisAddIn.VSTO.Engine
                         throw new InvalidDataException("已修复项批注的原文锚点已变化。");
                     remove.Add(match);
                 }
-            }, mark => {
+                string bodyText = document.Content.Text;
                 var handled = new HashSet<string>(StringComparer.Ordinal);
-                foreach (AnnotationRecord record in remove)
+                await CooperativeRepairRunner.RunAsync(remove.OrderByDescending(record => record.Index).ToArray(), () => {
+                    if (document.Content.Text != bodyText) throw new InvalidDataException("清理批注间隙原文被编辑，转为重新分析。");
+                }, record => {
+                    string error;
+                    bool ok = ExecuteUndoable(document, "清除已修复项的工具批注", () => {
+                        Word.Range current = record.Comment.Range.Duplicate;
+                        current.TextRetrievalMode.IncludeHiddenText = true;
+                        if (NormalizeCommentText(current.Text) != NormalizeCommentText(record.Text))
+                            throw new InvalidDataException("工具批注已被编辑，保留改动并重新分析。");
+                    }, mark => {
                     foreach (var item in record.OriginalHighlights) {
                         if (stillActive.Contains(item.Key) || !handled.Add(item.Key)) continue;
                         Word.Range range = verifiedRanges[item.Key];
@@ -99,10 +113,12 @@ namespace ThesisAddIn.VSTO.Engine
                             bookmark.Delete(); mark();
                         } else throw new InvalidDataException("原文恢复标记缺失。");
                     }
-                foreach (var record in remove.OrderByDescending(value => value.Index)) {
-                    document.Comments[record.Index].Delete(); mark();
-                }
-            }, out error);
+                    record.Comment.Delete(); mark();
+                    }, out error);
+                    if (!ok) throw new InvalidDataException(error);
+                }, () => Task.Delay(1));
+                return Tuple.Create(true, (string)null);
+            } catch (Exception exception) { return Tuple.Create(false, exception.Message); }
         }
 
         internal static bool ApplyDirectWithRanges(Word.Document document, string snapshot,
@@ -118,7 +134,7 @@ namespace ThesisAddIn.VSTO.Engine
                 foreach (EnginePatch patch in patches)
                 {
                     Word.Range range = ranges[patch.Location];
-                    ValidatePatch(range, patch);
+                    if (!IsObjectWidth(patch.RuleId)) ValidatePatch(range, patch);
                     // Duplicating both complete COM format objects for every property
                     // needlessly makes Word resolve paragraph and character formatting.
                     bool paragraphProperty = patch.RuleId == "demo/caption-alignment" ||
@@ -129,6 +145,7 @@ namespace ThesisAddIn.VSTO.Engine
                         Paragraph = paragraphProperty ? range.ParagraphFormat.Duplicate : null,
                         RuleId = patch.RuleId, Text = range.Text };
                     CaptureObjectChange(change);
+                    if (IsObjectWidth(patch.RuleId)) ValidateObjectWidth(range,patch,change.ObjectTarget,change.ObjectBeforeWidth);
                     captured.Changes.Add(change);
                 }
             }, markMutation =>
@@ -136,13 +153,20 @@ namespace ThesisAddIn.VSTO.Engine
                 for (int index = 0; index < patches.Count; index++)
                 {
                     EnginePatch patch = patches[index];
-                    ApplyPatch(ranges[patch.Location], patch, markMutation);
-                    markMutation();
-                    ValidatePatch(ranges[patch.Location], new EnginePatch { RuleId = patch.RuleId,
-                        ExpectedBefore = patch.DesiredAfter, DesiredAfter = patch.DesiredAfter });
                     FormatChange change = captured.Changes[index];
-                    if (change.ObjectSignature != null) change.AppliedObjectSignature = change.ObjectSignature();
-                    else change.AppliedSignature = FormatSignature(change);
+                    if (change.ApplyObject != null) change.ApplyObject(patch,markMutation);
+                    else ApplyPatch(ranges[patch.Location], patch, markMutation);
+                    markMutation();
+                    if (change.ObjectSignature != null) {
+                        change.AppliedObjectSignature = change.ObjectSignature();
+                        if (!WordTableGeometry.EquivalentDimensions(change.DesiredObjectDimensions(patch),change.AppliedObjectSignature.Item2))
+                            throw new InvalidDataException("图表写入后回读的尺寸或列宽比例与目标不一致，已撤销本次修改。");
+                    }
+                    else {
+                        ValidatePatch(ranges[patch.Location], new EnginePatch { RuleId = patch.RuleId,
+                            ExpectedBefore = patch.DesiredAfter, DesiredAfter = patch.DesiredAfter });
+                        change.AppliedSignature = FormatSignature(change);
+                    }
                 }
                 document.Saved = false;
             }, out error);
@@ -268,17 +292,17 @@ namespace ThesisAddIn.VSTO.Engine
             { table.Columns[index + 1].SetWidth(widths[index], Word.WdRulerStyle.wdAdjustNone); markMutation(); }
         }
 
-        private static void ValidateObjectWidth(Word.Range anchor, EnginePatch patch)
+        private static void ValidateObjectWidth(Word.Range anchor, EnginePatch patch, Word.Range knownTarget = null, double? knownWidth = null)
         {
             if (!TryParsePoints(patch.DesiredAfter, out double limit)) throw new InvalidDataException("对象宽度目标无效。");
-            Word.Range target = AdjacentObjectRange(anchor, patch.RuleId == "demo/picture-fit-width");
+            Word.Range target = knownTarget ?? AdjacentObjectRange(anchor, patch.RuleId == "demo/picture-fit-width");
             Word.PageSetup page = target.Sections[1].PageSetup;
             if (page.TextColumns.Count != 1 || page.Gutter != 0) throw new InvalidDataException("分栏或装订线布局不支持安全缩放。");
             double available = page.PageWidth - page.LeftMargin - page.RightMargin;
             if (patch.RuleId == "demo/picture-fit-width")
                 available -= target.ParagraphFormat.LeftIndent + target.ParagraphFormat.RightIndent + target.ParagraphFormat.FirstLineIndent;
             if (Math.Abs(available - limit) > 0.1) throw new InvalidDataException("当前 Word 版面宽度与快照不同，已停止缩放。");
-            EnsureBeforeValue(patch, ObjectWidth(anchor, patch.RuleId).ToString("0.###", CultureInfo.InvariantCulture) + "pt", true);
+            EnsureBeforeValue(patch, (knownWidth ?? ObjectWidth(anchor, patch.RuleId)).ToString("0.###", CultureInfo.InvariantCulture) + "pt", true);
         }
 
         private static void ResizeObject(Word.Range anchor, EnginePatch patch, Action markMutation)
@@ -313,11 +337,24 @@ namespace ThesisAddIn.VSTO.Engine
         {
             if (!IsObjectWidth(change.RuleId)) return;
             Word.Range target = AdjacentObjectRange(change.Range, change.RuleId == "demo/picture-fit-width");
+            change.ObjectTarget = target;
             if (change.RuleId == "demo/picture-fit-width")
             {
                 Word.InlineShape picture = target.InlineShapes[1];
                 float width = picture.Width, height = picture.Height;
                 var locked = picture.LockAspectRatio;
+                change.ObjectBeforeWidth = width;
+                change.DesiredObjectDimensions = patch => {
+                    double limit; if (!TryParsePoints(patch.DesiredAfter,out limit)) throw new InvalidDataException("图片目标宽度无效。");
+                    return new[]{limit,height*limit/width};
+                };
+                change.ApplyObject = (patch,mark) => {
+                    double[] dimensions = change.DesiredObjectDimensions(patch);
+                    try {
+                        if (locked != Microsoft.Office.Core.MsoTriState.msoFalse) { picture.LockAspectRatio = Microsoft.Office.Core.MsoTriState.msoFalse; mark(); }
+                        picture.Width = (float)dimensions[0]; mark(); picture.Height = (float)dimensions[1]; mark();
+                    } finally { picture.LockAspectRatio = locked; }
+                };
                 change.ObjectSignature = () => Tuple.Create(picture.LockAspectRatio + "|" + PictureContentSignature(picture),
                     new[] { (double)picture.Width, picture.Height });
                 change.RestoreObject = markMutation =>
@@ -337,6 +374,17 @@ namespace ThesisAddIn.VSTO.Engine
                 float[] widths = ReadTableWidths(table);
                 var preferredType = table.PreferredWidthType;
                 float preferredWidth = table.PreferredWidth;
+                change.ObjectBeforeWidth = widths.Sum(value => (double)value);
+                change.DesiredObjectDimensions = patch => {
+                    double limit; if (!TryParsePoints(patch.DesiredAfter,out limit)) throw new InvalidDataException("表格目标宽度无效。");
+                    return new[]{limit}.Concat(WordTableGeometry.ScaleColumns(widths,limit).Select(value => (double)value)).ToArray();
+                };
+                change.ApplyObject = (patch,mark) => {
+                    double[] dimensions = change.DesiredObjectDimensions(patch);
+                    WriteTableWidths(table,dimensions.Skip(1).Select(value => (float)value).ToArray(),mark);
+                    table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints; mark();
+                    table.PreferredWidth = (float)dimensions[0]; mark();
+                };
                 change.ObjectSignature = () => Tuple.Create(table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
                     table.PreferredWidthType, new[] { (double)table.PreferredWidth }.Concat(ReadTableWidths(table).Select(value => (double)value)).ToArray());
                 change.RestoreObject = markMutation =>

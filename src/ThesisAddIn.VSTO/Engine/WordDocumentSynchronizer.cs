@@ -40,6 +40,7 @@ namespace ThesisAddIn.VSTO.Engine
 
         private sealed class AnnotationRecord
         {
+            public Word.Comment Comment { get; set; }
             public int Index { get; set; }
             public string Text { get; set; }
             public Word.Range Scope { get; set; }
@@ -536,7 +537,7 @@ namespace ThesisAddIn.VSTO.Engine
                     continue;
                 if (keep != null && !keep(text)) continue;
 
-                var record = new AnnotationRecord { Index = index, Text = text, Scope = comment.Scope.Duplicate };
+                var record = new AnnotationRecord { Comment = comment, Index = index, Text = text, Scope = comment.Scope.Duplicate };
                 MatchCollection matches = OccurrencePattern.Matches(text);
                 foreach (Match match in matches)
                     record.OriginalHighlights[match.Groups["location"].Value] = match.Groups["highlight"].Value;
