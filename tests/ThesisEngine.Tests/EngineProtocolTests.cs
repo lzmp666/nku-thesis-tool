@@ -89,6 +89,11 @@ public sealed class EngineProtocolTests
         Assert.Equal("integration-1", result.RequestId);
         Assert.Equal("demo-0.1.0", result.Result!.RuleVersion);
         Assert.Equal(3, result.Result.Diagnostics.Count);
+        Assert.NotNull(result.Plan);
+        var explicitPlan = await RunHost(host, new EngineRequest { InputPath=input, Operation=EngineProtocol.PlanOperation });
+        Assert.True(explicitPlan.Ok, explicitPlan.Error?.Message);
+        Assert.Equal(explicitPlan.Plan!.Patches.Select(p=> (p.RuleId,p.Location,p.ExpectedBefore,p.DesiredAfter)),
+            result.Plan.Patches.Select(p=> (p.RuleId,p.Location,p.ExpectedBefore,p.DesiredAfter)));
     }
 
     [Fact]

@@ -19,7 +19,13 @@ namespace ThesisAddIn.VSTO.Engine
         internal static string TableRejection(string flatOpc)
         {
             var xml = XDocument.Parse(flatOpc);
-            var tables = xml.Descendants(W + "tbl").ToArray();
+            XNamespace package = "http://schemas.microsoft.com/office/2006/xmlPackage";
+            var main = xml.Descendants(package + "part").FirstOrDefault(part =>
+                (string)part.Attribute(package + "name") == "/word/document.xml");
+            // A Flat OPC selection can carry glossary/building-block dependencies
+            // containing unrelated tables. Only inspect its document body.
+            var scope = main?.Element(package + "xmlData") ?? xml.Root;
+            var tables = scope.DescendantsAndSelf(W + "tbl").ToArray();
             if (tables.Length != 1) return "嵌套表格";
             var table = tables[0];
             if (table.Descendants().Any(e => e.Name.Namespace == W &&

@@ -46,6 +46,13 @@ namespace ThesisAddIn.VSTO
         private CancellationTokenSource _operationCancellation;
         private readonly Dictionary<int, Dictionary<string, Word.Range>> _occurrenceRangesByWindow =
             new Dictionary<int, Dictionary<string, Word.Range>>();
+        private sealed class RepairBasis
+        {
+            internal Word.Document Document;
+            internal string MappingPath, Fingerprint;
+            internal EnginePatchPlan Plan;
+        }
+        private readonly Dictionary<int,RepairBasis> _repairBasis = new Dictionary<int,RepairBasis>();
         private int _lastHoveredWindowHandle = -1;
         private int _lastHoveredCursorX = -1;
         private int _lastHoveredCursorY = -1;
@@ -244,6 +251,10 @@ namespace ThesisAddIn.VSTO
 
         private void OnPaneStateChanged(object sender, EventArgs e)
         {
+            // An owned dialog can temporarily activate a different Word window.
+            // Refresh command state from the document that is actually active.
+            DiagnosticsPane active = TryGetPaneForActiveWindow();
+            if (active != null) _pane = active;
             _ribbon?.Invalidate();
         }
 
@@ -301,6 +312,8 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Shutdown(object sender, EventArgs e)
         {
+            foreach (RepairBasis basis in _repairBasis.Values) TryDelete(basis.MappingPath);
+            _repairBasis.Clear();
             try { WordDocumentSynchronizer.RestoreCommentWidth(Application.ActiveDocument); }
             catch (System.Runtime.InteropServices.COMException) { }
             if (_operationCancellation != null)
@@ -400,6 +413,13 @@ namespace ThesisAddIn.VSTO
                 ShowAnalysis(pane, response.Result);
                 ShowSuggestions(pane);
                 _occurrenceRangesByWindow[operation.WindowHandle] = analyzedRanges;
+                if (response.Plan != null) {
+                    string current = CreateTemporaryDocxPath("analysis-basis");
+                    try {
+                        SaveDocumentCopy(operation.Document,current);
+                        CacheRepairBasis(operation,response.Plan,DocxSnapshotFingerprint.Compute(current));
+                    } finally { TryDelete(current); }
+                }
                 SetStatus(pane, "分析完成：当前文档共 " + response.Result.Diagnostics.Count
                     + " 项问题，原文黄色标记已在本窗口更新。可用 Ctrl+Z 撤销标记；完成后自行保存。");
                 WriteStartupLog("已在当前 Word 文档刷新标注，问题数 " + response.Result.Diagnostics.Count
@@ -547,6 +567,20 @@ namespace ThesisAddIn.VSTO
         private void OnDocumentBeforeClose(Word.Document document, ref bool cancel)
         {
             WordDocumentSynchronizer.RestoreCommentWidth(document);
+            foreach (int handle in _repairBasis.Where(pair => pair.Value.Document == document).Select(pair => pair.Key).ToArray()) {
+                TryDelete(_repairBasis[handle].MappingPath); _repairBasis.Remove(handle);
+            }
+        }
+
+        private void CacheRepairBasis(DocumentOperationContext operation, EnginePatchPlan plan, string fingerprint)
+        {
+            if (plan == null) return;
+            string mapping = CreateTemporaryDocxPath("repair-basis");
+            File.Copy(operation.SnapshotPath,mapping);
+            RepairBasis previous;
+            if (_repairBasis.TryGetValue(operation.WindowHandle,out previous)) TryDelete(previous.MappingPath);
+            _repairBasis[operation.WindowHandle] = new RepairBasis { Document=operation.Document,
+                MappingPath=mapping, Fingerprint=fingerprint, Plan=plan };
         }
 
         private void EnsureTaskPaneForWindow(Word.Window window)
@@ -748,7 +782,13 @@ namespace ThesisAddIn.VSTO
                 document=operation.Document; snapshot=operation.SnapshotPath;
                 WriteStartupLog("修复耗时 snapshot="+elapsed.ElapsedMilliseconds+"ms");
                 stage=elapsed.ElapsedMilliseconds;
-                EngineResponse response=await _gateway.PlanAsync(snapshot,null,GetOperationCancellationToken());
+                RepairBasis basis;
+                bool reusePlan = _repairBasis.TryGetValue(operation.WindowHandle,out basis) &&
+                    basis.Document == document && basis.Fingerprint == operation.Fingerprint && File.Exists(basis.MappingPath);
+                string mappingSnapshot = reusePlan ? basis.MappingPath : snapshot;
+                EngineResponse response = reusePlan ? new EngineResponse { Ok=true,Plan=basis.Plan } :
+                    await _gateway.PlanAsync(snapshot,null,GetOperationCancellationToken());
+                WriteStartupLog("修复计划缓存 hit="+reusePlan+"；完整当前快照已核对。");
                 WriteStartupLog("修复耗时 plan="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 if(response==null || !response.Ok || response.Plan==null) throw new InvalidDataException(EngineGateway.DescribeError(response?.Error));
                 var groups=new List<KeyValuePair<EngineDiagnostic,List<EnginePatch>>>();
@@ -762,12 +802,14 @@ namespace ThesisAddIn.VSTO
                     groups.Add(new KeyValuePair<EngineDiagnostic,List<EnginePatch>>(issue,patches));
                 }
                 stage=elapsed.ElapsedMilliseconds;
-                if(!TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
+                // A cache hit has no await between capturing the complete current
+                // fingerprint and the writes. An async engine call still needs recheck.
+                if(!reusePlan && !TryEnsureSnapshotUnchanged(operation,out error)) throw new InvalidDataException(error);
                 WriteStartupLog("修复耗时 verify="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 stage=elapsed.ElapsedMilliseconds;
                 Dictionary<string, Word.Range> cached;
                 _occurrenceRangesByWindow.TryGetValue(operation.WindowHandle, out cached);
-                var repairRanges=WordDocumentSynchronizer.GetRepairRanges(document,snapshot,
+                var repairRanges=WordDocumentSynchronizer.GetRepairRanges(document,mappingSnapshot,
                     groups.SelectMany(group=>group.Value), cached);
                 WriteStartupLog("修复耗时 map="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                 string bodyText = document.Content.Text;
@@ -783,7 +825,7 @@ namespace ThesisAddIn.VSTO
                             throw new InvalidDataException("修复间隙原文已被编辑或文档状态改变，已停止后续写入。");
                     }, patch => {
                         WordDocumentSynchronizer.RepairRecord part;
-                        if(!WordDocumentSynchronizer.ApplyDirectWithRanges(document,snapshot,new[]{patch},
+                        if(!WordDocumentSynchronizer.ApplyDirectWithRanges(document,mappingSnapshot,new[]{patch},
                             repairRanges,out part,out error)) throw new InvalidDataException(error);
                         aggregate.Append(part);
                     }, () => Task.Delay(1), completed => SetStatus(pane,
@@ -865,6 +907,7 @@ namespace ThesisAddIn.VSTO
                     if (refreshedRanges.Count == 0) _occurrenceRangesByWindow.Remove(window.Hwnd);
                     else _occurrenceRangesByWindow[window.Hwnd] = refreshedRanges;
                     ShowSuggestions(pane);
+                    if (unchanged && response.Plan != null) CacheRepairBasis(operation,response.Plan,operation.Fingerprint);
                     WriteStartupLog("复查耗时 ui="+(elapsed.ElapsedMilliseconds-stage)+"ms");
                     WriteStartupLog("直接修复/撤销后复查：剩余 "+response.Result.Diagnostics.Count+" 项。");
                     return;
@@ -968,7 +1011,7 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
-            if (_isNavigatingToDiagnostic)
+            if (_isNavigatingToDiagnostic || _pane?.IsBusy == true)
             {
                 return;
             }

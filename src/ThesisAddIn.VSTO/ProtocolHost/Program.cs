@@ -169,13 +169,17 @@ static void Write(EngineResponse response)
 
 static class ProtocolHostResponse
 {
-    public static EngineResponse Analysis(string requestId, AnalysisResult result) => new()
+    public static EngineResponse Analysis(string requestId, AnalysisResult result)
     {
-        ProtocolVersion = EngineProtocol.Version,
-        RequestId = requestId,
-        Ok = true,
-        Result = ToAnalysisTransfer(result)
-    };
+        var plan = PatchEngine.PlanPatches(result);
+        return new EngineResponse {
+            ProtocolVersion = EngineProtocol.Version,
+            RequestId = requestId, Ok = true, Result = ToAnalysisTransfer(result),
+            // Reuse this exact analysis, rather than launching the analyzer again
+            // on the next click. Word still checks a complete live fingerprint.
+            Plan = ToPlanTransfer(plan, plan.Patches.ToList(), result, new EngineRequest())
+        };
+    }
 
     public static EngineResponse Plan(string requestId, EnginePatchPlan plan) => new()
     {

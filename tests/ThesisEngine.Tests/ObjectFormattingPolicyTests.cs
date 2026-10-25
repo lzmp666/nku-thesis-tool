@@ -44,4 +44,16 @@ public sealed class ObjectFormattingPolicyTests
         var math = Table(); math.Add(new XElement(XName.Get("oMath", "http://schemas.openxmlformats.org/officeDocument/2006/math")));
         Assert.NotNull(ObjectFormattingPolicy.TableRejection(math.ToString()));
     }
+
+    [Fact]
+    public void FlatOpcGlossaryTablesDoNotMakeAnOrdinarySelectionLookNested()
+    {
+        XNamespace package = "http://schemas.microsoft.com/office/2006/xmlPackage";
+        var xml = new XElement(package + "package",
+            new XElement(package + "part", new XAttribute(package + "name", "/word/document.xml"),
+                new XElement(package + "xmlData", new XElement(XName.Get("document", W), new XElement(XName.Get("body", W), Table())))),
+            new XElement(package + "part", new XAttribute(package + "name", "/word/glossary/document.xml"),
+                new XElement(package + "xmlData", new XElement(XName.Get("glossaryDocument", W), Table()))));
+        Assert.Null(ObjectFormattingPolicy.TableRejection(xml.ToString()));
+    }
 }

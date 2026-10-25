@@ -60,7 +60,8 @@ namespace ThesisAddIn.VSTO.Engine
             List<AnnotationRecord> owned = null;
             var remove = new List<AnnotationRecord>();
             return ExecuteUndoable(document, "清除已修复项的工具批注", () => {
-                owned = ReadOwnedAnnotations(document);
+                var selectedFields = selected.Select(issue => "\r规则：" + issue.RuleId + "\r期望值：" + issue.Expected + "\r实际值：").ToArray();
+                owned = ReadOwnedAnnotations(document, text => selectedFields.Any(field => NormalizeCommentText(text).Contains(field)));
                 foreach (EngineDiagnostic issue in selected) {
                     var locations = new HashSet<string>(GetOccurrences(issue), StringComparer.Ordinal);
                     string field = "\r规则：" + issue.RuleId + "\r期望值：" + issue.Expected + "\r实际值：";

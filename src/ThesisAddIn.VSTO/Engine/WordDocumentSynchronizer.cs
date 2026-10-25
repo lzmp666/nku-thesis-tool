@@ -521,17 +521,20 @@ namespace ThesisAddIn.VSTO.Engine
             catch (System.Runtime.InteropServices.COMException) { }
         }
 
-        private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document)
+        private static List<AnnotationRecord> ReadOwnedAnnotations(Word.Document document, Func<string,bool> keep = null)
         {
             var records = new List<AnnotationRecord>();
-            for (int index = 1; index <= document.Comments.Count; index++)
+            Word.Comments comments = document.Comments;
+            int count = comments.Count;
+            for (int index = 1; index <= count; index++)
             {
-                Word.Comment comment = document.Comments[index];
+                Word.Comment comment = comments[index];
                 Word.Range range = comment.Range.Duplicate;
                 range.TextRetrievalMode.IncludeHiddenText = true;
                 string text = range.Text ?? string.Empty;
                 if (text.IndexOf(ToolMarker, StringComparison.Ordinal) < 0)
                     continue;
+                if (keep != null && !keep(text)) continue;
 
                 var record = new AnnotationRecord { Index = index, Text = text, Scope = comment.Scope.Duplicate };
                 MatchCollection matches = OccurrencePattern.Matches(text);
@@ -741,6 +744,7 @@ namespace ThesisAddIn.VSTO.Engine
                     if (!cached.TryGetValue(location, out candidate) || candidate == null) return false;
                     try {
                         return candidate.Start >= paragraphRange.Start && candidate.End <= paragraphRange.End &&
+                            candidate.End - candidate.Start == paragraphRuns[runIndex].Text.Length &&
                             candidate.Text == paragraphRuns[runIndex].Text &&
                             document.Range(paragraphRange.Start, candidate.Start).Text ==
                                 string.Concat(paragraphRuns.Take(runIndex).Select(run => run.Text));
