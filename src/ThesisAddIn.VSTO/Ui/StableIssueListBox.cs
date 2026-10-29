@@ -12,15 +12,22 @@ namespace ThesisAddIn.VSTO.Ui
         internal int Index, X, Y;
         internal bool Handled;
     }
+    internal sealed class CardHoverEventArgs : EventArgs
+    {
+        internal int Index;
+    }
     internal sealed class StableIssueListBox : Control
     {
         private readonly IssueListViewport _viewport = new IssueListViewport();
         private readonly VScrollBar _scrollBar = new VScrollBar { Dock = DockStyle.Right, TabStop = false };
         private readonly Timer _scrollTimer = new Timer { Interval = 15 };
+        private readonly Timer _hoverTimer = new Timer { Interval = 100 };
         private int _targetOffset;
         private int _updateDepth;
         private bool _settingScrollBar;
         private bool _measuring;
+        private int _hoverCandidate = -1;
+        private int _hoveredIndex = -1;
 
         internal StableIssueListBox()
         {
@@ -43,6 +50,15 @@ namespace ThesisAddIn.VSTO.Ui
                 SetOffset(Math.Abs(distance) <= 1 ? _targetOffset : _viewport.Offset + Math.Sign(distance) * step);
                 if (_viewport.Offset == _targetOffset) _scrollTimer.Stop();
             };
+            _hoverTimer.Tick += (sender, args) =>
+            {
+                _hoverTimer.Stop();
+                if (_hoverCandidate >= 0 && _hoverCandidate != _hoveredIndex)
+                {
+                    _hoveredIndex = _hoverCandidate;
+                    ItemHoverChanged?.Invoke(this, new CardHoverEventArgs { Index = _hoveredIndex });
+                }
+            };
         }
         public Collection<string> Items { get; }
         public int ContentWidth => Math.Max(1, ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
@@ -52,6 +68,7 @@ namespace ThesisAddIn.VSTO.Ui
         public event EventHandler SelectedIndexChanged;
         public event EventHandler CurrentItemInvoked;
         internal event EventHandler<CardPointerEventArgs> ItemPointerPressed;
+        internal event EventHandler<CardHoverEventArgs> ItemHoverChanged;
         public event DrawItemEventHandler DrawItem;
         public event MeasureItemEventHandler MeasureItem;
         public int SelectedIndex { get => _viewport.SelectedIndex; set => SelectCard(value, false); }
@@ -126,6 +143,31 @@ namespace ThesisAddIn.VSTO.Ui
             if (!_viewport.ScrollTo(offset)) return;
             UpdateScrollBar();
             Invalidate(new Rectangle(0, 0, ContentWidth, ClientSize.Height));
+            QueueHoverAtLastPointer();
+        }
+        private void QueueHoverAtLastPointer()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            Point point = PointToClient(Cursor.Position);
+            if (!ClientRectangle.Contains(point) || point.X >= ContentWidth) { ClearHover(); return; }
+            QueueHover(point);
+        }
+        private void QueueHover(Point point)
+        {
+            int index = _viewport.HitTest(point.Y);
+            if (index == _hoveredIndex && index == _hoverCandidate) return;
+            _hoverCandidate = index;
+            _hoverTimer.Stop();
+            if (index != _hoveredIndex && index >= 0) _hoverTimer.Start();
+            else if (_hoveredIndex >= 0) ClearHover();
+        }
+        private void ClearHover()
+        {
+            _hoverTimer.Stop();
+            _hoverCandidate = -1;
+            if (_hoveredIndex < 0) return;
+            _hoveredIndex = -1;
+            ItemHoverChanged?.Invoke(this, new CardHoverEventArgs { Index = -1 });
         }
         private void SelectCard(int index, bool ensureVisible)
         {
@@ -172,9 +214,21 @@ namespace ThesisAddIn.VSTO.Ui
             finally { e.Graphics.Restore(state); }
         }
         protected override void OnResize(EventArgs e) { base.OnResize(e); MeasureCards(); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (e.X < ContentWidth) QueueHover(e.Location);
+            else ClearHover();
+        }
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            ClearHover();
+        }
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            ClearHover();
             if (e.Button != MouseButtons.Left || e.X >= ContentWidth) return;
             _scrollTimer.Stop();
             _targetOffset = _viewport.Offset;
@@ -192,6 +246,7 @@ namespace ThesisAddIn.VSTO.Ui
         }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
+            ClearHover();
             if (e is HandledMouseEventArgs handled) handled.Handled = true;
             int wheelPixels = Math.Max(24, Font.Height * 3);
             _targetOffset = Math.Max(0, Math.Min(_viewport.MaximumOffset,
@@ -261,7 +316,7 @@ namespace ThesisAddIn.VSTO.Ui
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _scrollTimer.Stop(); _scrollTimer.Dispose(); }
+            if (disposing) { _scrollTimer.Stop(); _scrollTimer.Dispose(); _hoverTimer.Stop(); _hoverTimer.Dispose(); }
             base.Dispose(disposing);
         }
     }

@@ -32,6 +32,10 @@ namespace ThesisAddIn.VSTO.Ui
         internal Action FormatObjects { get; set; }
         internal Action UndoBatch { get; set; }
         internal Func<bool> CanUndoBatch { get; set; }
+        internal Action ReviewOutline { get; set; }
+        internal Action UndoOutline { get; set; }
+        internal Func<bool> CanReviewOutline { get; set; }
+        internal Func<bool> CanUndoOutline { get; set; }
         private readonly Dictionary<string, stdole.IPictureDisp> _images =
             new Dictionary<string, stdole.IPictureDisp>(StringComparer.Ordinal);
 
@@ -78,8 +82,18 @@ namespace ThesisAddIn.VSTO.Ui
                         supertip=""在当前 Word 窗口显示或隐藏左侧问题检索列表。""
                         onAction=""OnToggleIssues"" />
         </group>
+        <group id=""NkuThesisWholeFormatting"" label=""整篇排版"">
+          <button id=""NkuReviewOutline"" label=""大纲确认与排版"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+                  screentip=""识别整篇结构并确认排版范围""
+                  supertip=""核对摘要、标题、正文和文末角色，勾选后按南开2026草案排版当前文档；不自动保存。""
+                  onAction=""OnReviewOutline"" />
+          <button id=""NkuUndoOutline"" label=""撤销整篇排版"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+                  screentip=""恢复本轮整篇排版前的格式""
+                  supertip=""只撤销本轮涉及的格式；原文或目标格式已被再次编辑时停止，保护后续修改。""
+                  onAction=""OnUndoOutline"" />
+        </group>
         <group id=""NkuThesisRepair"" label=""修复"">
-          <button id=""NkuFixCurrent"" label=""修复当前问题"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
+          <button id=""NkuFixCurrent"" label=""解决当前问题"" size=""large"" getImage=""GetButtonImage"" getEnabled=""GetEnabled""
                   screentip=""直接解决当前格式问题""
                   supertip=""按当前规则直接修改所选项，可在问题检索中撤销；不会自动保存。""
                   onAction=""OnFixCurrent"" />
@@ -126,8 +140,9 @@ namespace ThesisAddIn.VSTO.Ui
             int state = (SafeGet(_canFixCurrent) ? 1 : 0) | (SafeGet(_canFixAll) ? 2 : 0)
                 | (SafeGet(_canVerifyResolved) ? 4 : 0) | (SafeGet(_canNavigateIssue) ? 8 : 0)
                 | (SafeGet(_canNavigateOccurrence) ? 16 : 0) | (SafeGet(_isIssuesVisible) ? 32 : 0)
-                | (SafeGet(CanUndoBatch) ? 64 : 0);
-            int changed = _stateMask < 0 ? 127 : _stateMask ^ state;
+                | (SafeGet(CanUndoBatch) ? 64 : 0) | (SafeGet(CanReviewOutline) ? 128 : 0)
+                | (SafeGet(CanUndoOutline) ? 256 : 0);
+            int changed = _stateMask < 0 ? 511 : _stateMask ^ state;
             _stateMask = state;
             if (_ribbonUi == null || changed == 0) return;
             try
@@ -149,6 +164,8 @@ namespace ThesisAddIn.VSTO.Ui
                 }
                 if ((changed & 32) != 0) _ribbonUi.InvalidateControl("NkuShowIssues");
                 if ((changed & 64) != 0) _ribbonUi.InvalidateControl("NkuUndoBatch");
+                if ((changed & 128) != 0) _ribbonUi.InvalidateControl("NkuReviewOutline");
+                if ((changed & 256) != 0) _ribbonUi.InvalidateControl("NkuUndoOutline");
             }
             catch (COMException) { }
         }
@@ -161,6 +178,8 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NkuFixAll": return (_stateMask & 2) != 0;
                 case "NkuVerifyResolved": return (_stateMask & 4) != 0;
                 case "NkuUndoBatch": return (_stateMask & 64) != 0;
+                case "NkuReviewOutline": return (_stateMask & 128) != 0;
+                case "NkuUndoOutline": return (_stateMask & 256) != 0;
                 case "NkuPreviousIssue":
                 case "NkuNextIssue": return (_stateMask & 8) != 0;
                 case "NkuPreviousOccurrence":
@@ -187,6 +206,8 @@ namespace ThesisAddIn.VSTO.Ui
                 case "NkuFormatObjects": index = 3; break;
                 case "NkuVerifyResolved": index = 4; break;
                 case "NkuUndoBatch": index = 4; break;
+                case "NkuReviewOutline": index = 0; break;
+                case "NkuUndoOutline": index = 4; break;
                 case "NkuPreviousIssue": index = 5; break;
                 case "NkuNextIssue": index = 6; break;
                 case "NkuPreviousOccurrence": index = 7; break;
@@ -303,6 +324,8 @@ namespace ThesisAddIn.VSTO.Ui
         public void OnFixAll(Office.IRibbonControl control) => _fixAll();
         public void OnFormatObjects(Office.IRibbonControl control) => FormatObjects?.Invoke();
         public void OnUndoBatch(Office.IRibbonControl control) => UndoBatch?.Invoke();
+        public void OnReviewOutline(Office.IRibbonControl control) => ReviewOutline?.Invoke();
+        public void OnUndoOutline(Office.IRibbonControl control) => UndoOutline?.Invoke();
         public void OnVerifyResolved(Office.IRibbonControl control) => _verifyResolved();
         public void OnPreviousIssue(Office.IRibbonControl control) => _navigateIssue(-1);
         public void OnNextIssue(Office.IRibbonControl control) => _navigateIssue(1);

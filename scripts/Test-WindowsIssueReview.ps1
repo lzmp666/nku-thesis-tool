@@ -2,6 +2,24 @@ param([Parameter(Mandatory=$true)][string]$AddinOutputDirectory)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Reflection;
+public sealed class HoverEventCapture
+{
+    public int Calls;
+    public string RuleId;
+    public string Location;
+    public void OnHover(object sender, EventArgs args)
+    {
+        Calls++;
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        object diagnostic = args.GetType().GetField("Diagnostic", flags).GetValue(args);
+        RuleId = diagnostic == null ? null : (string)diagnostic.GetType().GetProperty("RuleId").GetValue(diagnostic);
+        Location = (string)args.GetType().GetField("Location", flags).GetValue(args);
+    }
+}
+'@
 [Reflection.Assembly]::LoadFrom((Join-Path $AddinOutputDirectory 'ThesisAddIn.Protocol.dll')) | Out-Null
 $assembly=[Reflection.Assembly]::LoadFrom((Join-Path $AddinOutputDirectory 'ThesisAddIn.VSTO.dll'))
 $flags=[Reflection.BindingFlags]'Instance,Public,NonPublic'
@@ -21,6 +39,19 @@ try {
     $getList={ param($pane) $pane.GetType().GetField('_issueList',$flags).GetValue($pane) }
     $left=& $getList $search; $right=& $getList $suggestion
     if($left.Items.Count -ne 3 -or $right.Items.Count -ne 3) { throw 'Review regions do not share all issues.' }
+    $hoverEvent=$suggestion.GetType().GetEvent('DiagnosticHoverChanged',$flags)
+    $hoverCapture=[HoverEventCapture]::new()
+    $hoverHandler=[Delegate]::CreateDelegate($hoverEvent.EventHandlerType,$hoverCapture,$hoverCapture.GetType().GetMethod('OnHover'))
+    $hoverEvent.GetAddMethod($true).Invoke($suggestion,@($hoverHandler)) | Out-Null
+    $move=$right.GetType().GetMethod('OnMouseMove',$flags)
+    $firstBounds=$right.GetItemRectangle(0)
+    $move.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::None,0,20,$firstBounds.Top+12,0))) | Out-Null
+    $hoverDeadline=[DateTime]::UtcNow.AddMilliseconds(350)
+    while([DateTime]::UtcNow -lt $hoverDeadline) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 10 }
+    if($hoverCapture.Calls -lt 1 -or $hoverCapture.RuleId -ne 'demo/east-asian-font' -or
+        $hoverCapture.Location -ne 'word/document.xml#paragraph[0]/run[0]') { throw 'Hover did not publish the corresponding suggestion and source location.' }
+    $right.GetType().GetMethod('OnMouseLeave',$flags).Invoke($right,@([EventArgs]::Empty)) | Out-Null
+    if($null -ne $hoverCapture.RuleId) { throw 'Leaving the suggestion card did not clear its hover preview.' }
     $state.GetType().GetMethod('SetBatch',$flags).Invoke($state,@($true)) | Out-Null
     $checked=$state.GetType().GetField('Checked',$flags).GetValue($state)
     $click=$left.GetType().GetMethod('OnMouseDown',$flags)
@@ -32,18 +63,24 @@ try {
     $script:repairs=0; $script:undos=0
     $search.add_RepairRequested({$script:repairs++})
     $search.add_UndoRequested({$script:undos++})
+    $suggestion.add_RepairRequested({$script:repairs++})
+    $suggestion.add_UndoRequested({$script:undos++})
     $bounds=$left.GetItemRectangle(0)
     $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,30,$bounds.Bottom-18,0))) | Out-Null
+    if($script:repairs -ne 0) { throw 'The searchable index should not duplicate source-card actions.' }
+    $rightBounds=$right.GetItemRectangle(0)
+    $click.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,30,$rightBounds.Bottom-18,0))) | Out-Null
     if($script:repairs -ne 1) { throw 'Solve is not connected to the repair event.' }
     $selected=$search.SelectedDiagnostic
     $key=$assembly.GetType('ThesisAddIn.VSTO.Ui.IssueReviewState').GetMethod('Key',[Reflection.BindingFlags]'Static,NonPublic').Invoke($null,@($selected))
     $state.GetType().GetField('Repaired',$flags).GetValue($state).Add($key) | Out-Null
-    $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
+    $click.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$rightBounds.Bottom-18,0))) | Out-Null
     if($script:undos -ne 1) { throw 'Undo is not connected to the item undo event.' }
     $search.SetBusy($true,'checking')
+    $suggestion.SetBusy($true,'checking')
     $query=$search.GetType().GetField('_searchBox',$flags).GetValue($search)
     if(-not $left.Enabled -or -not $query.Enabled) { throw 'Read-only browsing/search is blocked while repairing.' }
-    $click.Invoke($left,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$bounds.Bottom-18,0))) | Out-Null
+    $click.Invoke($right,@([Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left,1,100,$rightBounds.Bottom-18,0))) | Out-Null
     if($script:repairs -ne 1 -or $script:undos -ne 1) { throw 'A mutation was dispatched while a repair was already running.' }
     $search.GetType().GetMethod('OnSearchGotFocus',$flags).Invoke($search,@($query,[EventArgs]::Empty)) | Out-Null
     $query.Text='Times'
@@ -51,6 +88,7 @@ try {
     $query.Text=''
     if($left.Items.Count -ne 3) { throw 'Busy search did not restore all rows.' }
     $search.SetBusy($false,$null)
+    $suggestion.SetBusy($false,$null)
     # An equivalent fresh analysis must retain both search text and the exact
     # pixel scroll offset, with no transient clear/selection reset.
     $search.Height=210; $search.PerformLayout()

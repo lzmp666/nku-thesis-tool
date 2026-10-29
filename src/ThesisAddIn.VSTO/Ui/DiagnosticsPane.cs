@@ -12,7 +12,13 @@ using ThesisAddIn.VSTO.Engine;
 
 namespace ThesisAddIn.VSTO.Ui
 {
-    /// <summary>只显示可检索的问题列表；分析、定位和修复命令位于 Word 功能区。</summary>
+    internal sealed class DiagnosticHoverEventArgs : EventArgs
+    {
+        internal EngineDiagnostic Diagnostic;
+        internal string Location;
+    }
+
+    /// <summary>显示可检索的问题并保存当前文档的修复/撤销状态；原文建议显示为 Word 锚定批注。</summary>
     public sealed class DiagnosticsPane : UserControl
     {
         private const string SearchPlaceholder = "搜索类型、要求、实际或位置";
@@ -43,11 +49,17 @@ namespace ThesisAddIn.VSTO.Ui
 
         internal readonly IssueReviewState Review;
         internal bool IsSuggestion { get; }
+        internal void FocusIssueListForPreview()
+        {
+            if (IsSuggestion && !_issueList.IsDisposed && _issueList.CanFocus) _issueList.Focus();
+        }
+        internal void SyncReviewState() => OnReviewChanged(this, EventArgs.Empty);
         public event EventHandler RepairRequested;
         public event EventHandler UndoRequested;
         public event EventHandler ApplyCheckedRequested;
         public event EventHandler UndoCheckedRequested;
         public event EventHandler DiagnosticSelected;
+        internal event EventHandler<DiagnosticHoverEventArgs> DiagnosticHoverChanged;
         public event EventHandler StateChanged;
 
         public DiagnosticsPane() : this(false, new IssueReviewState()) { }
@@ -132,6 +144,7 @@ namespace ThesisAddIn.VSTO.Ui
             _issueList.SelectedIndexChanged += OnIssueSelected;
             _issueList.CurrentItemInvoked += OnIssueSelected;
             _issueList.ItemPointerPressed += OnCardPointer;
+            _issueList.ItemHoverChanged += OnCardHoverChanged;
             _issueList.DrawItem += OnDrawIssueItem;
             _issueList.MeasureItem += OnMeasureIssueItem;
             _issueList.KeyDown += OnIssueListKeyDown;
@@ -354,7 +367,7 @@ namespace ThesisAddIn.VSTO.Ui
             Review.Refresh(result?.Diagnostics);
             string baseStatus = _diagnostics.Count == 0
                 ? "未发现已覆盖范围内的格式问题；未覆盖项不会被判为合规。"
-                : "点击问题定位原文；建议卡内可解决或撤销。";
+                : "点击问题定位原文；批注中的“解决”可修复，撤销请选中问题后点击功能区“撤销当前修复”。";
             string[] unsupported = result?.UnsupportedScopes?.Where(value => !string.IsNullOrWhiteSpace(value))
                 .Select(DescribeUnsupportedScope).Distinct(StringComparer.CurrentCulture).ToArray()
                 ?? Array.Empty<string>();
@@ -728,7 +741,7 @@ namespace ThesisAddIn.VSTO.Ui
                 height += MeasureCardLineHeight(e.Graphics, ActualText(issue), 12, width-12, font)+2;
                 if (!IsSuggestion) height += MeasureCardLineHeight(e.Graphics,
                     GetCompactLocation(_visibleIndices[e.Index], issue), 12, width-12, font)+2;
-                height += 30;
+                if (IsSuggestion) height += 30;
                 e.ItemHeight = (int)Math.Ceiling(height * _uiScale);
             }
         }
@@ -778,6 +791,7 @@ namespace ThesisAddIn.VSTO.Ui
                 if (!IsSuggestion)
                     DrawCardLine(graphics,"位置",GetCompactLocation(_visibleIndices[index],issue),
                         card.Left+9,ref y,card.Right-9,body,ink);
+                if (IsSuggestion)
                 {
                     int buttonY = card.Bottom-28;
                     DrawAction(graphics,new Rectangle(card.Left+9,buttonY,66,23),"解决",!_isBusy && Review.CanRepair(issue));
@@ -804,12 +818,36 @@ namespace ThesisAddIn.VSTO.Ui
             if (Review.BatchMode && x<36) {
                 SelectDiagnostic(index,false); Review.Toggle(issue); e.Handled=true; return;
             }
-            if (y>=height-33) {
+            if (IsSuggestion && y>=height-33) {
                 SelectDiagnostic(index,false);
                 if (x>=12 && x<=80 && Review.CanRepair(issue)) OnEvent(RepairRequested);
                 else if (x>=86 && x<=155 && Review.IsRepaired(issue)) OnEvent(UndoRequested);
                 e.Handled=true;
             }
+        }
+        private void OnCardHoverChanged(object sender, CardHoverEventArgs e)
+        {
+            if (!IsSuggestion) return;
+            if (_isBusy)
+            {
+                DiagnosticHoverChanged?.Invoke(this, new DiagnosticHoverEventArgs());
+                return;
+            }
+            if (e.Index < 0 || e.Index >= _visibleIndices.Count)
+            {
+                DiagnosticHoverChanged?.Invoke(this, new DiagnosticHoverEventArgs());
+                return;
+            }
+            EngineDiagnostic issue = _diagnostics[_visibleIndices[e.Index]];
+            if (!Review.CanRepair(issue))
+            {
+                DiagnosticHoverChanged?.Invoke(this, new DiagnosticHoverEventArgs());
+                return;
+            }
+            string location = issue.Occurrences != null && issue.Occurrences.Count > 0
+                ? issue.Occurrences[0]?.Location : issue.Location;
+            DiagnosticHoverChanged?.Invoke(this, new DiagnosticHoverEventArgs
+            { Diagnostic = issue, Location = location });
         }
         private void OnReviewChanged(object sender, EventArgs e)
         {

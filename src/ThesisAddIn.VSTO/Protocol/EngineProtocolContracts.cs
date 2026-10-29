@@ -13,11 +13,14 @@ namespace ThesisAddIn.Protocol;
 
 public static class EngineProtocol
 {
-    public const string Version = "1.2";
+    public const string Version = "1.3";
     public const string AnalyzeOperation = "analyze";
     public const string PlanOperation = "plan";
     public const string ApplyOperation = "apply";
     public const string AnnotateOperation = "annotate";
+    public const string StructureReviewOperation = "structure_review";
+    public const string StructurePlanOperation = "structure_plan";
+    public const string StructureVerifyOperation = "structure_verify";
 
     public const string InvalidRequest = "invalid_request";
     public const string ProtocolVersionMismatch = "protocol_version_mismatch";
@@ -62,6 +65,14 @@ public sealed class EngineRequest
     [JsonPropertyName("locations")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Locations { get; set; }
+
+    [JsonPropertyName("structurePlan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructurePlanRequest? StructurePlan { get; set; }
+
+    [JsonPropertyName("structureVerification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureVerificationRequest? StructureVerification { get; set; }
 }
 
 public sealed class EngineResponse
@@ -93,6 +104,18 @@ public sealed class EngineResponse
     [JsonPropertyName("annotation")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineAnnotationResult? Annotation { get; set; }
+
+    [JsonPropertyName("structureReview")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureReviewResult? StructureReview { get; set; }
+
+    [JsonPropertyName("structurePlan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureFormatPlan? StructurePlan { get; set; }
+
+    [JsonPropertyName("structureVerification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureVerificationResult? StructureVerification { get; set; }
 
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -234,11 +257,18 @@ public sealed class EngineDiagnosticOccurrence
 
 public static class EngineProtocolCodec
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions Options = CreateOptions();
+
+    private static JsonSerializerOptions CreateOptions()
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false
-    };
+        var options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            WriteIndented = false
+        };
+        options.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+        return options;
+    }
 
     public static string SerializeRequest(EngineRequest request) => Serialize(request);
 
@@ -396,6 +426,27 @@ public sealed class EngineProtocolClient
     public Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default) =>
         SendAsync(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null), cancellationToken);
 
+    public Task<EngineResponse> ReviewStructureAsync(string inputPath, CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.StructureReviewOperation, inputPath, null, null, null), cancellationToken);
+
+    public Task<EngineResponse> PlanStructureAsync(string inputPath, EngineStructurePlanRequest structurePlan,
+        CancellationToken cancellationToken = default)
+    {
+        if (structurePlan is null) throw new ArgumentNullException(nameof(structurePlan));
+        var request = CreateRequest(EngineProtocol.StructurePlanOperation, inputPath, null, null, null);
+        request.StructurePlan = structurePlan;
+        return SendAsync(request, cancellationToken);
+    }
+
+    public Task<EngineResponse> VerifyStructureFormatAsync(string inputPath, EngineStructureFormatPlan previousPlan,
+        CancellationToken cancellationToken = default)
+    {
+        if (previousPlan is null) throw new ArgumentNullException(nameof(previousPlan));
+        var request = CreateRequest(EngineProtocol.StructureVerifyOperation, inputPath, null, null, null);
+        request.StructureVerification = new EngineStructureVerificationRequest { PreviousPlan = previousPlan };
+        return SendAsync(request, cancellationToken);
+    }
+
     public EngineResponse Send(EngineRequest request) => SendAsync(request).GetAwaiter().GetResult();
 
     private static EngineRequest CreateRequest(string operation, string inputPath, string? outputPath, string? ruleId, string? location,
@@ -519,6 +570,9 @@ public sealed class EngineProtocolClient
         EngineProtocol.PlanOperation => response.Plan is not null,
         EngineProtocol.ApplyOperation => response.Apply is not null,
         EngineProtocol.AnnotateOperation => response.Annotation is not null && response.Result is not null,
+        EngineProtocol.StructureReviewOperation => response.StructureReview is not null,
+        EngineProtocol.StructurePlanOperation => response.StructurePlan is not null,
+        EngineProtocol.StructureVerifyOperation => response.StructureVerification is not null,
         _ => response.Result is not null
     };
 

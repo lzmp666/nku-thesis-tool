@@ -7,10 +7,13 @@ var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 Console.OutputEncoding = utf8;
 Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
 
+if (args.Length > 0 && string.Equals(args[0], "structure", StringComparison.Ordinal))
+    return await new StructureCommand().ExecuteAsync(args, Console.Out, Console.Error);
+
 if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.OrdinalIgnoreCase))
 {
     var command = new AnalyzeCommand(
-        new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer()));
+        new DemoAnalysisService(new WordFormattingReader(inferUnstyledStructure: true), new FontSizeAnalyzer()));
     return command.Execute(args);
 }
 

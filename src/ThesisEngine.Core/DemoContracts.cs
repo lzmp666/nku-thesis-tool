@@ -25,7 +25,12 @@ public sealed record DemoRuleSet(
 public sealed record DocumentSnapshot(
     string PartName,
     IReadOnlyList<ParagraphSnapshot> Paragraphs,
-    IReadOnlyList<string> UnsupportedScopes);
+    IReadOnlyList<string> UnsupportedScopes)
+{
+    public DocumentSourceMap? SourceMap { get; init; }
+    public ThesisStructureResult? Structure { get; init; }
+    public string? PackageSha256 { get; init; }
+}
 
 public enum ParagraphScopeClassification
 {
@@ -45,6 +50,10 @@ public sealed record ParagraphSnapshot(
     public bool? CaptionPlacementCorrect { get; init; }
     public ParagraphFormattingSnapshot? ParagraphFormatting { get; init; }
     public ObjectWidthSnapshot? CaptionObjectWidth { get; init; }
+    public string? BlockId { get; init; }
+    public ThesisStructureDecision? Structure { get; init; }
+    public bool IsTableCell { get; init; }
+    public bool HasUnsupportedInlineContent { get; init; }
 }
 
 /// <summary>Layout bound for a uniquely paired inline picture or simple fixed table.</summary>

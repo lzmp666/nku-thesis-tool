@@ -4,6 +4,7 @@ param(
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$CertificateThumbprint = $env:THESIS_VSTO_CERT_THUMBPRINT,
     [string]$AddinOutputDirectory,
+    [switch]$IncludeStructureCli,
     [switch]$Force
 )
 
@@ -17,6 +18,12 @@ $addinOutput = if ([string]::IsNullOrWhiteSpace($AddinOutputDirectory)) {
     (Resolve-Path -LiteralPath (Join-Path $root $AddinOutputDirectory)).Path
 }
 $engineOutput = Join-Path $root 'src\ThesisAddIn.VSTO\ProtocolHost\bin\Release\net10.0'
+$cliOutput = Join-Path $root 'src\ThesisEngine.Cli\bin\Release\net10.0'
+if ($IncludeStructureCli) {
+    foreach ($name in @('ThesisEngine.Cli.dll', 'ThesisEngine.Cli.deps.json', 'ThesisEngine.Cli.runtimeconfig.json', 'ThesisEngine.Core.dll')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $cliOutput $name) -PathType Leaf)) { throw "缺少结构工作流输出：$name。请先构建 Release CLI。" }
+    }
+}
 $sampleRoot = Join-Path $root 'tests\fixtures\synthetic\demo'
 $fullThesisRoot = Join-Path $root 'tests\fixtures\synthetic\full-thesis'
 $requiredAddin = @('ThesisAddIn.VSTO.dll', 'ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manifest')
@@ -45,6 +52,35 @@ foreach ($manifestName in @('ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manif
     if ($null -eq $embeddedNode) { throw "清单 $manifestName 未嵌入签名证书。" }
     $embeddedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($embeddedNode.InnerText.Trim()))
     if ($embeddedCertificate.Thumbprint -ne $certificate.Thumbprint) { throw "清单 $manifestName 的签名证书与 -CertificateThumbprint 不匹配。" }
+}
+
+# A valid XML signature does not verify hashes of dependent files. Validate the
+# final application manifest after signing, and preserve VSTO's install=false.
+$deploymentDocument = [xml](Get-Content -LiteralPath (Join-Path $addinOutput 'ThesisAddIn.VSTO.vsto') -Raw)
+$deploymentNode = $deploymentDocument.SelectSingleNode("//*[local-name()='deployment']")
+if ($null -eq $deploymentNode -or $deploymentNode.GetAttribute('install') -ne 'false') {
+    throw 'VSTO 部署清单必须使用 install="false"；请在 Mage 更新时显式指定 -Install false。'
+}
+$applicationReferences = $deploymentDocument.SelectNodes("//*[local-name()='dependentAssembly'][@codebase='ThesisAddIn.VSTO.dll.manifest']")
+if ($applicationReferences.Count -ne 1) { throw 'VSTO 部署清单缺少唯一的程序集清单引用。' }
+$applicationReference = $applicationReferences[0]
+$applicationManifestPath = Join-Path $addinOutput 'ThesisAddIn.VSTO.dll.manifest'
+if ([int64]$applicationReference.GetAttribute('size') -ne (Get-Item -LiteralPath $applicationManifestPath).Length) {
+    throw 'VSTO 部署清单记录的程序集清单大小已过期；请在最终签名后重新更新部署清单。'
+}
+$digestMethod = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestMethod']")
+$digestValue = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestValue']")
+if ($null -eq $digestMethod -or $null -eq $digestValue) { throw 'VSTO 部署清单缺少程序集清单哈希。' }
+$hashAlgorithm = switch ($digestMethod.GetAttribute('Algorithm')) {
+    'http://www.w3.org/2000/09/xmldsig#sha1' { [Security.Cryptography.SHA1]::Create(); break }
+    'http://www.w3.org/2001/04/xmlenc#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    'http://www.w3.org/2000/09/xmldsig#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    default { throw 'VSTO 部署清单使用了不支持的哈希算法。' }
+}
+try { $actualDigest = [Convert]::ToBase64String($hashAlgorithm.ComputeHash([IO.File]::ReadAllBytes($applicationManifestPath))) }
+finally { $hashAlgorithm.Dispose() }
+if ($actualDigest -ne $digestValue.InnerText.Trim()) {
+    throw 'VSTO 部署清单记录的程序集清单哈希已过期；请先签程序集清单，再更新并签署部署清单。'
 }
 
 $revision = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
@@ -89,6 +125,19 @@ try {
         Copy-Item -Destination $vstoStage
     Get-ChildItem -LiteralPath $engineOutput -File | Where-Object { $_.Extension -in @('.dll', '.exe', '.json') } |
         Copy-Item -Destination $engineStage
+    if ($IncludeStructureCli) {
+        $cliStage = Join-Path $stage 'cli'
+        New-Item -ItemType Directory -Path $cliStage | Out-Null
+        Get-ChildItem -LiteralPath $cliOutput -File | Where-Object { $_.Extension -in @('.dll', '.exe', '.json') } |
+            Copy-Item -Destination $cliStage
+        Copy-Item -LiteralPath (Join-Path $root 'docs\unstyled-thesis-workflow.md') -Destination (Join-Path $docsStage 'unstyled-thesis-workflow.md')
+        $outlineDemoDocs = Join-Path $docsStage 'demo'
+        New-Item -ItemType Directory -Path $outlineDemoDocs | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'docs\demo\word-outline-acceptance-20261026.md') -Destination $outlineDemoDocs
+        $researchStage = Join-Path $docsStage 'research'
+        New-Item -ItemType Directory -Path $researchStage | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'docs\research\unstyled-thesis-open-source-2026-10-26.md') -Destination $researchStage
+    }
     foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $sampleRoot $name) -Destination $samplesStage
     }
@@ -133,6 +182,7 @@ try {
         wordAcceptanceChecklistIncluded = $acceptanceIncluded
         candidateWordAcceptanceRecordIncluded = $acceptanceRecordIncluded
         wordAcceptanceComplete = $acceptanceComplete
+        structureCliIncluded = [bool]$IncludeStructureCli
         readyForDistribution = $readyForDistribution
         note = 'Synthetic demonstration only; no private key or real thesis is included.'
     }

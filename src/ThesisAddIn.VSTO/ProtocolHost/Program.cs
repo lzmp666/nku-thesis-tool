@@ -9,7 +9,7 @@ if (args.Length != 1 || !string.Equals(args[0], "--protocol-stdio", StringCompar
 
 Console.InputEncoding = System.Text.Encoding.UTF8;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
-var service = new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer());
+var service = new DemoAnalysisService(new WordFormattingReader(inferUnstyledStructure: true), new FontSizeAnalyzer());
 
 string? line;
 while ((line = Console.ReadLine()) is not null)
@@ -47,6 +47,11 @@ while ((line = Console.ReadLine()) is not null)
                 break;
             case EngineProtocol.AnnotateOperation:
                 Write(Annotate(request, fullPath));
+                break;
+            case EngineProtocol.StructureReviewOperation:
+            case EngineProtocol.StructurePlanOperation:
+            case EngineProtocol.StructureVerifyOperation:
+                Write(StructureProtocolBridge.Handle(request, fullPath));
                 break;
             default:
                 Write(ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "不支持的协议操作。"));

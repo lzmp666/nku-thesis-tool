@@ -209,6 +209,8 @@ namespace ThesisAddIn.VSTO.Engine
                 }
 
                 action(() => mutated = true);
+                undoRecord.EndCustomRecord();
+                customRecordStarted = false;
                 return true;
             }
             catch (Exception exception)
@@ -221,8 +223,9 @@ namespace ThesisAddIn.VSTO.Engine
                         customRecordStarted = false;
                         if (mutated)
                         {
-                            dynamic commandBars = document.Application.CommandBars;
-                            commandBars.ExecuteMso("Undo");
+                            object undoCount = 1;
+                            if (!document.Undo(ref undoCount))
+                                throw new InvalidOperationException("Word 未能恢复目标文档的撤销记录。");
                             error = "Word 未能完成操作，已撤销本次修改：" + exception.Message;
                         }
                         else
@@ -305,6 +308,16 @@ namespace ThesisAddIn.VSTO.Engine
             string[] newLocations = GetDiagnosticLocations(analysis).Distinct(StringComparer.Ordinal).ToArray();
             var wantedLocations = new HashSet<string>(newLocations, StringComparer.Ordinal);
             var freshOriginalHighlights = new Dictionary<string, int>(StringComparer.Ordinal);
+            // Tool issues are displayed in the add-in's suggestion pane. The hidden
+            // bookmark is now the source of truth for the pre-mark color, including
+            // marks written by older releases whose tool comments are being retired.
+            foreach (string location in newLocations)
+            {
+                HighlightBookmarkRecord mark = existingMarks.FirstOrDefault(candidate =>
+                    MarkMatchesRange(candidate.Range, ranges[location]));
+                if (mark != null && !originalByLocation.ContainsKey(location))
+                    originalByLocation[location] = GetHighlightName((Word.WdColorIndex)mark.OriginalHighlight);
+            }
             // Recover the pre-tool color without clearing/reapplying every yellow range.
             foreach (string location in newLocations)
             {
@@ -346,7 +359,7 @@ namespace ThesisAddIn.VSTO.Engine
             {
                 string name = HighlightBookmarkName(location, freshOriginalHighlights[location]);
                 HighlightBookmarkRecord mark = existingMarks.FirstOrDefault(candidate => candidate.Name == name);
-                if (mark?.Range != null && mark.Range.Start == ranges[location].Start && mark.Range.End == ranges[location].End)
+                if (mark?.Range != null && MarkMatchesRange(mark.Range, ranges[location]))
                     retainedMarks.Add(name);
             }
             foreach (HighlightBookmarkRecord mark in existingMarks)
@@ -446,6 +459,18 @@ namespace ThesisAddIn.VSTO.Engine
                 ((analysis.Diagnostics?.Count ?? 0) - retainedDiagnostics.Count) +
                 " highlightsRetained=" + retainedMarks.Count);
             return newLocations.ToDictionary(location => location, location => ranges[location], StringComparer.Ordinal);
+        }
+
+        private static bool MarkMatchesRange(Word.Range stored, Word.Range target)
+        {
+            if (stored == null || target == null) return false;
+            try
+            {
+                return stored.Start <= target.Start && stored.End >= target.End && stored.Text == target.Text &&
+                    string.IsNullOrEmpty(target.Document.Range(stored.Start, target.Start).Text) &&
+                    string.IsNullOrEmpty(target.Document.Range(target.End, stored.End).Text);
+            }
+            catch (System.Runtime.InteropServices.COMException) { return false; }
         }
 
         private static void StyleComment(Word.Comment comment, string text, int metadataStart)
@@ -704,13 +729,27 @@ namespace ThesisAddIn.VSTO.Engine
                 originalHighlight.ToString("X8", CultureInfo.InvariantCulture);
         }
 
-        private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
-            IEnumerable<string> requestedLocations, Dictionary<string, Word.Range> cached = null)
+        private sealed class RangeMappingSource
         {
-            Dictionary<int, XmlParagraph> paragraphs = ReadXmlParagraphs(snapshotPath);
+            internal Dictionary<int, XmlParagraph> Paragraphs;
+            internal int ParagraphCount, TableRowCount;
+        }
+        private static RangeMappingSource PrepareRangeMapping(string snapshotPath)
+        {
+            var paragraphs = ReadXmlParagraphs(snapshotPath);
+            return new RangeMappingSource { Paragraphs = paragraphs,
+                ParagraphCount = paragraphs.Count == 0 ? 0 : paragraphs.Keys.Max() + 1,
+                TableRowCount = paragraphs.Values.Select(paragraph => paragraph.TotalTableRows).DefaultIfEmpty(0).Max() };
+        }
+        private static Dictionary<string, Word.Range> BuildRanges(Word.Document document, string snapshotPath,
+            IEnumerable<string> requestedLocations, Dictionary<string, Word.Range> cached = null,
+            RangeMappingSource prepared = null)
+        {
+            RangeMappingSource source = prepared ?? PrepareRangeMapping(snapshotPath);
+            Dictionary<int, XmlParagraph> paragraphs = source.Paragraphs;
             int paragraphCount = document.Paragraphs.Count;
-            int xmlParagraphCount = paragraphs.Count == 0 ? 0 : paragraphs.Keys.Max() + 1;
-            int tableRowCount = paragraphs.Values.Select(paragraph => paragraph.TotalTableRows).DefaultIfEmpty(0).Max();
+            int xmlParagraphCount = source.ParagraphCount;
+            int tableRowCount = source.TableRowCount;
             if (paragraphCount != xmlParagraphCount + tableRowCount)
                 throw new InvalidDataException("Word 段落与分析快照数量不一致（Word " + paragraphCount
                     + " 段，快照正文 " + xmlParagraphCount + " 段、表格 " + tableRowCount

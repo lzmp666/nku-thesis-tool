@@ -46,6 +46,8 @@ namespace ThesisAddIn.VSTO
         private CancellationTokenSource _operationCancellation;
         private readonly Dictionary<int, Dictionary<string, Word.Range>> _occurrenceRangesByWindow =
             new Dictionary<int, Dictionary<string, Word.Range>>();
+        private readonly Dictionary<int, Dictionary<string, string>> _occurrenceTextsByWindow =
+            new Dictionary<int, Dictionary<string, string>>();
         private sealed class RepairBasis
         {
             internal Word.Document Document;
@@ -62,6 +64,17 @@ namespace ThesisAddIn.VSTO
         private DateTime _lastNavigationUtc = DateTime.MinValue;
         private readonly DocumentInteractionGate _interactionGate = new DocumentInteractionGate();
         private Word.Comment _resolveCandidate;
+        private sealed class HoverFormatPreview
+        {
+            internal DiagnosticsPane Owner, SuggestionPane;
+            internal Word.Document Document;
+            internal int WindowHandle;
+            internal string Key;
+            internal bool WasSaved;
+            internal WordDocumentSynchronizer.RepairRecord Record;
+        }
+        private HoverFormatPreview _hoverFormatPreview;
+        private bool _clearingHoverPreview;
 
         private sealed class DocumentOperationContext
         {
@@ -98,6 +111,10 @@ namespace ThesisAddIn.VSTO
             _ribbon.FormatObjects = OnRibbonFormatObjects;
             _ribbon.UndoBatch = OnRibbonUndoBatch;
             _ribbon.CanUndoBatch = () => _pane?.HasUndoableDiagnostics == true;
+            _ribbon.ReviewOutline = OnRibbonReviewOutline;
+            _ribbon.UndoOutline = OnRibbonUndoOutline;
+            _ribbon.CanReviewOutline = CanReviewOutline;
+            _ribbon.CanUndoOutline = CanUndoOutline;
             return _ribbon;
         }
 
@@ -278,6 +295,7 @@ namespace ThesisAddIn.VSTO
 
             Application.DocumentOpen += OnDocumentOpened;
             Application.WindowActivate += OnWindowActivate;
+            Application.DocumentBeforeSave += OnDocumentBeforeSave;
             Application.DocumentBeforeClose += OnDocumentBeforeClose;
             Application.WindowSelectionChange += OnWindowSelectionChange;
             _ribbonTabTracker = new RibbonTabVisibilityTracker();
@@ -314,6 +332,7 @@ namespace ThesisAddIn.VSTO
 
         private void ThisAddIn_Shutdown(object sender, EventArgs e)
         {
+            ClearHoverPreview();
             foreach (RepairBasis basis in _repairBasis.Values) TryDelete(basis.MappingPath);
             _repairBasis.Clear();
             try { WordDocumentSynchronizer.RestoreCommentWidth(Application.ActiveDocument); }
@@ -334,6 +353,7 @@ namespace ThesisAddIn.VSTO
                 }
                 Application.DocumentOpen -= OnDocumentOpened;
                 Application.WindowActivate -= OnWindowActivate;
+                Application.DocumentBeforeSave -= OnDocumentBeforeSave;
                 Application.DocumentBeforeClose -= OnDocumentBeforeClose;
                 Application.WindowSelectionChange -= OnWindowSelectionChange;
             }
@@ -346,6 +366,7 @@ namespace ThesisAddIn.VSTO
             _ribbonTabTracker?.Dispose();
             _ribbonTabTracker = null;
             _occurrenceRangesByWindow.Clear();
+            _occurrenceTextsByWindow.Clear();
             if (_operationCancellation != null)
             {
                 _operationCancellation.Dispose();
@@ -362,8 +383,10 @@ namespace ThesisAddIn.VSTO
 
         private async void OnAnalyzeRequested(object sender, EventArgs e)
         {
+            ClearHoverPreview();
             ActivatePaneFromSender(sender);
             DiagnosticsPane pane = sender as DiagnosticsPane ?? _pane;
+            if (pane == null || pane.IsBusy) return;
             string snapshotPath = null;
             try
             {
@@ -414,8 +437,8 @@ namespace ThesisAddIn.VSTO
 
                 if (response.Result.Diagnostics.Count==0) WordDocumentSynchronizer.CollapseEmptyCommentArea(operation.Document);
                 ShowAnalysis(pane, response.Result);
-                ShowSuggestions(pane);
                 _occurrenceRangesByWindow[operation.WindowHandle] = analyzedRanges;
+                _occurrenceTextsByWindow[operation.WindowHandle] = SnapshotRangeTexts(analyzedRanges);
                 if (response.Plan != null) {
                     string current = CreateTemporaryDocxPath("analysis-basis");
                     try {
@@ -463,7 +486,7 @@ namespace ThesisAddIn.VSTO
             EngineDiagnostic diagnostic = pane != null ? pane.SelectedDiagnostic : null;
             if (diagnostic == null)
             {
-                SetStatus(pane, "请先从右侧问题列表或 Word 批注选择一个问题，再执行“修复当前问题”。");
+            SetStatus(pane, "请先从左侧问题检索或原文批注选择一个问题，再执行“解决当前问题”。");
                 return;
             }
 
@@ -506,7 +529,7 @@ namespace ThesisAddIn.VSTO
             ActivatePaneFromSender(sender);
             DiagnosticsPane pane=_pane;
             if (pane==null || pane.IsBusy) return;
-            var selected=pane.CheckedUndoDiagnostics.Reverse().ToArray();
+            var selected=pane.CheckedUndoDiagnostics.AsEnumerable().Reverse().ToArray();
             if (selected.Length==0) { SetStatus(pane,"请勾选至少一项已修复问题。"); return; }
             Word.Document document; Word.Window window; string error;
             if (!TryGetDocumentForPane(pane,out document,out window,out error)) { SetStatus(pane,error); return; }
@@ -602,7 +625,176 @@ namespace ThesisAddIn.VSTO
         }
         private void ShowSuggestions(DiagnosticsPane pane)
         {
-            if(_suggestions.TryGetValue(pane,out CustomTaskPane suggestions)) suggestions.Visible = pane.Review.Rows.Count>0;
+            if (pane == null || pane.IsDisposed) return;
+            // Source-linked suggestions are shown as native comment balloons. Keep
+            // the issue search list as the only add-in task pane to avoid duplicate cards.
+            if (pane.Review.Rows.Count == 0 && _hoverFormatPreview?.Owner == pane) ClearHoverPreview();
+        }
+
+        private void EnsureSuggestionPane(DiagnosticsPane owner)
+        {
+            if (_suggestions.TryGetValue(owner, out CustomTaskPane existing) && existing != null)
+            {
+                try { if (existing.Control is DiagnosticsPane control && !control.IsDisposed) return; }
+                catch (Exception) { }
+                _suggestions.Remove(owner);
+            }
+            if (!TryGetDocumentForPane(owner, out Word.Document document, out Word.Window window, out string error))
+            {
+                WriteStartupLog("未能创建原文建议栏：" + error);
+                return;
+            }
+            var suggestion = new DiagnosticsPane(true, owner.Review);
+            suggestion.DiagnosticSelected += OnDiagnosticSelected;
+            suggestion.DiagnosticHoverChanged += OnSuggestionHoverChanged;
+            suggestion.StateChanged += OnPaneStateChanged;
+            suggestion.RepairRequested += OnFixCurrentRequested;
+            suggestion.UndoRequested += OnVerifyResolvedRequested;
+            suggestion.ApplyCheckedRequested += OnApplyCheckedRequested;
+            suggestion.UndoCheckedRequested += OnUndoCheckedRequested;
+            CustomTaskPane host = null;
+            try
+            {
+                host = CustomTaskPanes.Add(suggestion, "原文建议", window);
+                host.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionRight;
+                host.Width = suggestion.ConfigureForOfficeWindow(window.Hwnd);
+                host.VisibleChanged += OnSuggestionPaneVisibleChanged;
+                host.Visible = false;
+                suggestion.CreateControl();
+                _suggestions[owner] = host;
+                _searchOwners[suggestion] = owner;
+                suggestion.SyncReviewState();
+                WriteStartupLog("已为 Word 窗口 " + window.Hwnd + " 创建原文建议栏。");
+            }
+            catch (Exception exception)
+            {
+                if (host != null) try { CustomTaskPanes.Remove(host); } catch { }
+                suggestion.Dispose();
+                WriteStartupLog("创建原文建议栏失败：" + exception);
+            }
+        }
+
+        private void OnSuggestionPaneVisibleChanged(object sender, EventArgs e)
+        {
+            if (sender is CustomTaskPane host && !host.Visible && host.Control is DiagnosticsPane pane &&
+                _searchOwners.TryGetValue(pane, out DiagnosticsPane owner) && _hoverFormatPreview?.Owner == owner)
+                ClearHoverPreview();
+        }
+
+        private void OnSuggestionHoverChanged(object sender, DiagnosticHoverEventArgs e)
+        {
+            if (!(sender is DiagnosticsPane suggestion) || !_searchOwners.TryGetValue(suggestion, out DiagnosticsPane owner))
+                return;
+            if (e == null || e.Diagnostic == null)
+            {
+                if (_hoverFormatPreview?.Owner == owner) ClearHoverPreview();
+                return;
+            }
+            string key = IssueReviewState.Key(e.Diagnostic) + "|" + e.Location;
+            if (_hoverFormatPreview != null && _hoverFormatPreview.Owner == owner && _hoverFormatPreview.Key == key)
+                return;
+            if (!ClearHoverPreview()) return;
+            if (owner.IsBusy || !owner.Review.CanRepair(e.Diagnostic)) return;
+            if (!TryGetDocumentForPane(owner, out Word.Document document, out Word.Window window, out string error)) return;
+            int handle = window.Hwnd;
+            if (!_repairBasis.TryGetValue(handle, out RepairBasis basis) || basis.Document != document ||
+                basis.Plan == null || !File.Exists(basis.MappingPath)) return;
+            EnginePatch patch = basis.Plan.Patches.FirstOrDefault(candidate => candidate.RuleId == e.Diagnostic.RuleId &&
+                candidate.DesiredAfter == e.Diagnostic.Expected && candidate.Location == e.Location);
+            if (patch == null) return;
+            bool previewApplied = false;
+            try
+            {
+                _occurrenceRangesByWindow.TryGetValue(handle, out Dictionary<string, Word.Range> cached);
+                _occurrenceTextsByWindow.TryGetValue(handle, out Dictionary<string, string> cachedTexts);
+                Dictionary<string, Word.Range> ranges;
+                if (cached != null && cachedTexts != null && cached.ContainsKey(patch.Location) &&
+                    cachedTexts.ContainsKey(patch.Location))
+                {
+                    // A full snapshot/XML/paragraph scan on every pointer move was
+                    // the main source of the hover pause. The analysis already
+                    // validated these live ranges; recheck only the target run.
+                    ranges = WordDocumentSynchronizer.GetCachedRepairRanges(document,
+                        new[] { patch }, cached, cachedTexts);
+                }
+                else
+                {
+                    ranges = WordDocumentSynchronizer.GetRepairRanges(document, basis.MappingPath,
+                        new[] { patch }, cached);
+                    if (cached == null)
+                        _occurrenceRangesByWindow[handle] = cached = new Dictionary<string, Word.Range>(StringComparer.Ordinal);
+                    if (cachedTexts == null)
+                        _occurrenceTextsByWindow[handle] = cachedTexts = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (KeyValuePair<string, Word.Range> pair in ranges)
+                    {
+                        cached[pair.Key] = pair.Value;
+                        cachedTexts[pair.Key] = pair.Value.Text;
+                    }
+                }
+                Word.Range target = ranges[patch.Location];
+                if (window.Document != document || target == null) return;
+                _documentHoverTimer?.Stop();
+                window.ScrollIntoView(target, true);
+                bool wasSaved = document.Saved;
+                suggestion.FocusIssueListForPreview();
+                if (!WordDocumentSynchronizer.ApplyDirectWithRanges(document, basis.MappingPath,
+                    new[] { patch }, ranges, out WordDocumentSynchronizer.RepairRecord record, out string applyError,
+                    actionName: "预览格式建议", markDocumentDirty: false, fastObjectSignature: true,
+                    suspendRepaint: true, fastFormatSnapshot: true))
+                {
+                    WriteStartupLog("悬停格式预览跳过：" + applyError);
+                    return;
+                }
+                _hoverFormatPreview = new HoverFormatPreview { Owner = owner, SuggestionPane = suggestion,
+                    Document = document, WindowHandle = handle, Key = key, WasSaved = wasSaved, Record = record };
+                previewApplied = true;
+            }
+            catch (Exception exception)
+            {
+                WriteStartupLog("悬停格式预览跳过：" + exception.Message);
+            }
+            finally
+            {
+                if (!previewApplied) _documentHoverTimer?.Start();
+            }
+        }
+
+        private static Dictionary<string, string> SnapshotRangeTexts(Dictionary<string, Word.Range> ranges)
+        {
+            if (ranges == null) return new Dictionary<string, string>(StringComparer.Ordinal);
+            return ranges.ToDictionary(pair => pair.Key, pair => pair.Value?.Text ?? string.Empty,
+                StringComparer.Ordinal);
+        }
+
+        private bool ClearHoverPreview()
+        {
+            if (_clearingHoverPreview) return false;
+            if (_hoverFormatPreview == null) return true;
+            HoverFormatPreview preview = _hoverFormatPreview;
+            _clearingHoverPreview = true;
+            bool restored = false;
+            try
+            {
+                string error;
+                if (!WordDocumentSynchronizer.UndoHoverPreview(preview.Document, preview.Record,
+                    preview.WasSaved, out error))
+                {
+                    SetStatus(preview.Owner, "悬停预览未能自动恢复，请立即使用撤销并重新分析。" + error);
+                    WriteStartupLog("悬停预览恢复失败：" + error);
+                }
+                else
+                {
+                    restored = true;
+                    _hoverFormatPreview = null;
+                }
+            }
+            catch (Exception exception) { WriteStartupLog("悬停预览恢复异常：" + exception); }
+            finally
+            {
+                _clearingHoverPreview = false;
+                if (restored) _documentHoverTimer?.Start();
+            }
+            return restored;
         }
         private Dictionary<string, WordDocumentSynchronizer.RepairRecord> GetHistory(DiagnosticsPane pane)
         {
@@ -614,14 +806,35 @@ namespace ThesisAddIn.VSTO
         }
         private void OnWindowActivate(Word.Document document, Word.Window window)
         {
-            WordDocumentSynchronizer.UpdateCommentWidth(document);
+            if (!ClearHoverPreview()) return;
             EnsureTaskPaneForWindow(window);
             _issuesVisible = _taskPane != null && _taskPane.Visible;
             _ribbon?.Invalidate();
         }
+        private void OnDocumentBeforeSave(Word.Document document, ref bool saveAsUi, ref bool cancel)
+        {
+            if (_hoverFormatPreview?.Document == document && !ClearHoverPreview())
+            {
+                // Never let a transient live-format preview become the saved document.
+                // The user can retry after the preview is safely restored.
+                cancel = true;
+                SetStatus(_hoverFormatPreview?.Owner ?? _pane,
+                    "悬停预览尚未安全恢复，已取消保存。请撤销预览后再保存。");
+            }
+        }
+
         private void OnDocumentBeforeClose(Word.Document document, ref bool cancel)
         {
+            if (_hoverFormatPreview?.Document == document && !ClearHoverPreview())
+            {
+                cancel = true;
+                SetStatus(_hoverFormatPreview?.Owner ?? _pane,
+                    "悬停预览尚未安全恢复，已取消关闭。请撤销预览后再关闭。");
+                return;
+            }
             WordDocumentSynchronizer.RestoreCommentWidth(document);
+            foreach (int handle in _outlineHistory.Where(pair => SameOutlineDocument(pair.Value.Document, document)).Select(pair => pair.Key).ToArray())
+                _outlineHistory.Remove(handle);
             foreach (int handle in _repairBasis.Where(pair => pair.Value.Document == document).Select(pair => pair.Key).ToArray()) {
                 TryDelete(_repairBasis[handle].MappingPath); _repairBasis.Remove(handle);
             }
@@ -688,7 +901,8 @@ namespace ThesisAddIn.VSTO
             try
             {
                 taskPane = CustomTaskPanes.Add(pane, TaskPaneTitle, window);
-                // Keep the issue index on the left, separate from native source comments.
+                // Keep the searchable issue index on the left. Actionable suggestions
+                // are anchored to source text as Word comment balloons.
                 taskPane.DockPosition = Microsoft.Office.Core.MsoCTPDockPosition.msoCTPDockPositionLeft;
                 taskPane.Width = preferredWidth;
                 taskPane.VisibleChanged += OnTaskPaneVisibleChanged;
@@ -696,7 +910,6 @@ namespace ThesisAddIn.VSTO
                 _taskPane = taskPane;
                 _pane = pane;
                 pane.CreateControl();
-                // Native Word balloons provide the connected source annotations.
                 CustomTaskPane trackedTaskPane = taskPane;
                 _ribbonTabTracker?.Track(windowHandle, selected =>
                 {
@@ -901,7 +1114,7 @@ namespace ThesisAddIn.VSTO
                 WriteStartupLog("修复耗时 cleanup="+(elapsed.ElapsedMilliseconds-stage)+"ms ok="+annotationsCurrent);
                 if (!annotationsCurrent) WriteStartupLog("快速清理转为完整刷新："+error);
                 await RefreshReviewFromLive(pane,document,operation.Window,annotationsCurrent);
-                SetStatus(pane,"已修复所选 "+selected.Length+" 项；可在建议卡中逐项撤销。改动留在当前文档，未自动保存。");
+                SetStatus(pane,"已解决所选 "+selected.Length+" 项；问题仍保留在检索列表，可选中后点击功能区“撤销当前修复”。改动留在当前文档，未自动保存。");
             } catch(Exception ex) {
                 // Roll back completed chunks only if their target text/format is still
                 // unchanged. A user's intervening edit is never blindly overwritten.
@@ -962,8 +1175,16 @@ namespace ThesisAddIn.VSTO
                     ShowAnalysis(pane,response.Result);
                     // Reuse the ranges just validated by annotation refresh. They are live
                     // Word ranges and already follow comment-reference insertion/deletion.
-                    if (refreshedRanges.Count == 0) _occurrenceRangesByWindow.Remove(window.Hwnd);
-                    else _occurrenceRangesByWindow[window.Hwnd] = refreshedRanges;
+                    if (refreshedRanges.Count == 0)
+                    {
+                        _occurrenceRangesByWindow.Remove(window.Hwnd);
+                        _occurrenceTextsByWindow.Remove(window.Hwnd);
+                    }
+                    else
+                    {
+                        _occurrenceRangesByWindow[window.Hwnd] = refreshedRanges;
+                        _occurrenceTextsByWindow[window.Hwnd] = SnapshotRangeTexts(refreshedRanges);
+                    }
                     ShowSuggestions(pane);
                     if (unchanged && response.Plan != null) CacheRepairBasis(operation,response.Plan,operation.Fingerprint);
                     WriteStartupLog("复查耗时 ui="+(elapsed.ElapsedMilliseconds-stage)+"ms");
@@ -1069,6 +1290,7 @@ namespace ThesisAddIn.VSTO
         /// </summary>
         private void OnWindowSelectionChange(object selection)
         {
+            ClearHoverPreview();
             if (_isNavigatingToDiagnostic || _pane?.IsBusy == true)
             {
                 return;
@@ -1270,13 +1492,20 @@ namespace ThesisAddIn.VSTO
                 Dictionary<string, Word.Range> ranges = WordDocumentSynchronizer.GetOccurrenceRanges(
                     document, snapshotPath, analysis);
                 if (ranges.Count == 0)
+                {
                     _occurrenceRangesByWindow.Remove(windowHandle);
+                    _occurrenceTextsByWindow.Remove(windowHandle);
+                }
                 else
+                {
                     _occurrenceRangesByWindow[windowHandle] = ranges;
+                    _occurrenceTextsByWindow[windowHandle] = SnapshotRangeTexts(ranges);
+                }
             }
             catch (Exception exception)
             {
                 _occurrenceRangesByWindow.Remove(windowHandle);
+                _occurrenceTextsByWindow.Remove(windowHandle);
                 WriteStartupLog("未能缓存问题位置，请重新分析当前文档后再定位：" + exception.Message);
             }
         }
@@ -1308,6 +1537,7 @@ namespace ThesisAddIn.VSTO
             catch (Exception)
             {
                 _occurrenceRangesByWindow.Remove(windowHandle);
+                _occurrenceTextsByWindow.Remove(windowHandle);
             }
             return false;
         }
@@ -1674,9 +1904,11 @@ namespace ThesisAddIn.VSTO
 
         private void SetBusy(DiagnosticsPane pane, bool busy, string message)
         {
+            if (busy) ClearHoverPreview();
             if (IsPaneAvailable(pane)) pane.SetBusy(busy, message);
             if(pane!=null && _suggestions.TryGetValue(pane,out var host) && host.Control is DiagnosticsPane suggestion
                 && IsPaneAvailable(suggestion)) suggestion.SetBusy(busy,message);
+            _ribbon?.Invalidate();
         }
 
         private void SetStatus(DiagnosticsPane pane, string message)

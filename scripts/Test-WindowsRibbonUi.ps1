@@ -32,6 +32,8 @@ $navigate = [Action[int]]{ param($direction) }
 $show = [Action[bool]]{ param($value) }
 $ribbon = [ThesisAddIn.VSTO.Ui.ThesisRibbon]::new($action,$action,$action,$action,$navigate,$navigate,$show,$visibleCallback,$state,$state,$state,$state,$state)
 $ribbon.GetType().GetProperty('CanUndoBatch',[Reflection.BindingFlags]'Instance,NonPublic').SetValue($ribbon,$state)
+$ribbon.GetType().GetProperty('CanReviewOutline',[Reflection.BindingFlags]'Instance,NonPublic').SetValue($ribbon,$state)
+$ribbon.GetType().GetProperty('CanUndoOutline',[Reflection.BindingFlags]'Instance,NonPublic').SetValue($ribbon,$state)
 $ui = New-Object UiProbe
 $ribbon.OnRibbonLoad($ui)
 [xml]$deployment = Get-Content -LiteralPath (Join-Path $AddinOutputDirectory 'ThesisAddIn.VSTO.vsto') -Raw
@@ -47,12 +49,12 @@ $ribbon.Invalidate()
 if ($ui.Changes.Count -ne 0) { throw 'Unchanged state invalidated controls.' }
 $script:enabled = $true
 $ribbon.Invalidate()
-if ($ui.Changes.Count -ne 8) { throw 'Expected only the eight state-dependent buttons to invalidate.' }
+if ($ui.Changes.Count -ne 10) { throw 'Expected only the ten state-dependent buttons to invalidate.' }
 $ui.Changes.Clear()
 $before = $script:reads
 [xml]$xml = $ribbon.GetCustomUI('Microsoft.Word.Document')
 $buttons = $xml.SelectNodes('//*[@getImage="GetButtonImage"]')
-if ($buttons.Count -ne 11) { throw 'Missing command icons.' }
+if ($buttons.Count -ne 13) { throw 'Missing command icons.' }
 foreach ($button in $buttons) {
     $control = New-Object ControlProbe
     $control.Id = [string]$button.id
@@ -72,4 +74,6 @@ foreach ($brand in $brands) {
     $picture = $ribbon.GetBrandImage($control)
     if ($null -eq $picture -or [ControlProbe]::Width($picture) -le 0) { throw 'Brand image is invalid.' }
 }
-Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 11 command icons and one large emblem are valid.'
+if ($xml.SelectNodes('//*[@id="NkuReviewOutline" and @onAction="OnReviewOutline"]').Count -ne 1 -or
+    $xml.SelectNodes('//*[@id="NkuUndoOutline" and @onAction="OnUndoOutline"]').Count -ne 1) { throw 'Whole-thesis review/undo commands are missing.' }
+Write-Output 'PASS: no whole-Ribbon invalidation; unchanged state does not repaint; getters read cached state; open/close changes only the toggle; 13 command icons, outline/undo commands and one large emblem are valid.'

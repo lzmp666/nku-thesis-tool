@@ -85,6 +85,39 @@ namespace ThesisAddIn.VSTO.Engine
             return _client.AnalyzeAsync(documentPath, cancellationToken);
         }
 
+        /// <summary>读取当前文档快照的大纲和原文锚点；不修改 DOCX 或 Word。</summary>
+        public Task<EngineResponse> ReviewStructureAsync(string documentPath, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath)) return MissingStructureDocument();
+            return _client.ReviewStructureAsync(documentPath, cancellationToken);
+        }
+
+        /// <summary>提交作者明确确认的角色，返回可在原 Word 页面应用的规范目标。</summary>
+        public Task<EngineResponse> PlanStructureAsync(string documentPath, EngineStructurePlanRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath)) return MissingStructureDocument();
+            return _client.PlanStructureAsync(documentPath, request, cancellationToken);
+        }
+
+        /// <summary>原位写入后核验新快照；计划中的所有原文和规范目标均须匹配。</summary>
+        public Task<EngineResponse> VerifyStructureFormatAsync(string documentPath, EngineStructureFormatPlan previousPlan,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(documentPath)) return MissingStructureDocument();
+            return _client.VerifyStructureFormatAsync(documentPath, previousPlan, cancellationToken);
+        }
+
+        private static Task<EngineResponse> MissingStructureDocument()
+        {
+            return Task.FromResult(new EngineResponse
+            {
+                ProtocolVersion = EngineProtocol.Version,
+                Ok = false,
+                Error = new EngineError { Code = EngineProtocol.InvalidRequest, Message = "请先打开可读取的 .docx 文档，再确认整篇结构。" }
+            });
+        }
+
         /// <summary>分析文档并生成用于新建或刷新工作副本的工具批注。</summary>
         public Task<EngineResponse> AnnotateAsync(
             string documentPath,

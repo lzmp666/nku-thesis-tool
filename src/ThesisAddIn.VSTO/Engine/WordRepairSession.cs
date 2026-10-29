@@ -14,7 +14,9 @@ namespace ThesisAddIn.VSTO.Engine
 {
     public static partial class WordDocumentSynchronizer
     {
-        // Actionable cards are hosted by the add-in, not Word's reply/resolve UI.
+        // Anchor each grouped issue to the source text with a native Word comment.
+        // Word's Resolve action is routed to the add-in repair flow; undo remains an
+        // explicit add-in command because Word does not expose custom comment actions.
         private static readonly bool CreateNativeComments = true;
 
         public sealed class RepairRecord
@@ -31,6 +33,10 @@ namespace ThesisAddIn.VSTO.Engine
             internal string RuleId;
             internal string Text;
             internal string AppliedSignature;
+            internal string FastString;
+            internal string FastSecondaryString;
+            internal float FastNumber;
+            internal int FastEnum;
             internal Action<Action> RestoreObject;
             internal Func<Tuple<string, double[]>> ObjectSignature;
             internal Tuple<string, double[]> AppliedObjectSignature;
@@ -57,9 +63,43 @@ namespace ThesisAddIn.VSTO.Engine
             IEnumerable<EnginePatch> patches, Dictionary<string, Word.Range> cached = null) =>
             BuildRanges(document, snapshot, patches.Select(p => p.Location), cached);
 
+        internal static Dictionary<string, Word.Range> GetCachedRepairRanges(Word.Document document,
+            IEnumerable<EnginePatch> patches, Dictionary<string, Word.Range> cached,
+            Dictionary<string, string> expectedTexts)
+        {
+            if (document == null) throw new ArgumentNullException(nameof(document));
+            if (patches == null) throw new ArgumentNullException(nameof(patches));
+            if (cached == null || expectedTexts == null)
+                throw new InvalidDataException("悬停定位缓存已失效，请重新分析当前文档。");
+
+            var ranges = new Dictionary<string, Word.Range>(StringComparer.Ordinal);
+            foreach (EnginePatch patch in patches.Where(value => value != null)
+                .GroupBy(value => value.Location, StringComparer.Ordinal).Select(group => group.First()))
+            {
+                if (string.IsNullOrWhiteSpace(patch.Location) ||
+                    !cached.TryGetValue(patch.Location, out Word.Range range) || range == null ||
+                    !expectedTexts.TryGetValue(patch.Location, out string expectedText))
+                    throw new InvalidDataException("悬停定位缓存缺少目标文本，请重新分析当前文档。");
+                try
+                {
+                    if (range.Document != document || range.Text != expectedText ||
+                        range.End - range.Start != expectedText.Length)
+                        throw new InvalidDataException("原文已变化，悬停预览已停止；请重新分析。");
+                }
+                catch (System.Runtime.InteropServices.COMException exception)
+                {
+                    throw new InvalidDataException("悬停定位缓存已失效，请重新分析当前文档。", exception);
+                }
+                ranges.Add(patch.Location, range);
+            }
+            return ranges;
+        }
+
         internal static async Task<Tuple<bool,string>> RemoveResolvedAnnotationsAsync(Word.Document document, IEnumerable<EngineDiagnostic> solved,
             IEnumerable<EngineDiagnostic> remaining, Dictionary<string, Word.Range> verifiedRanges)
         {
+            if (!CreateNativeComments)
+                return await RemoveResolvedHighlightMarksAsync(document, solved, remaining, verifiedRanges);
             var selected = solved.ToArray();
             var stillActive = new HashSet<string>(remaining.SelectMany(GetOccurrences), StringComparer.Ordinal);
             List<AnnotationRecord> owned = null;
@@ -121,13 +161,73 @@ namespace ThesisAddIn.VSTO.Engine
             } catch (Exception exception) { return Tuple.Create(false, exception.Message); }
         }
 
+        private static Task<Tuple<bool,string>> RemoveResolvedHighlightMarksAsync(Word.Document document,
+            IEnumerable<EngineDiagnostic> solved, IEnumerable<EngineDiagnostic> remaining,
+            Dictionary<string, Word.Range> verifiedRanges)
+        {
+            try
+            {
+                var stillActive = new HashSet<string>((remaining ?? Enumerable.Empty<EngineDiagnostic>())
+                    .SelectMany(GetOccurrences), StringComparer.Ordinal);
+                var selectedLocations = (solved ?? Enumerable.Empty<EngineDiagnostic>())
+                    .SelectMany(GetOccurrences).Distinct(StringComparer.Ordinal)
+                    .Where(location => !stillActive.Contains(location)).ToArray();
+                var marks = ReadOwnedHighlightBookmarks(document);
+                var cleanup = new List<Tuple<string, HighlightBookmarkRecord, Word.Range>>();
+                foreach (string location in selectedLocations)
+                {
+                    if (verifiedRanges == null || !verifiedRanges.TryGetValue(location, out Word.Range target))
+                        throw new InvalidDataException("已修复项的位置缓存已失效，请重新分析。");
+                    HighlightBookmarkRecord[] matches = marks.Where(mark => mark.Range != null &&
+                        mark.Range.Start <= target.Start && mark.Range.End >= target.End && mark.Range.Text == target.Text &&
+                        string.IsNullOrEmpty(document.Range(mark.Range.Start, target.Start).Text) &&
+                        string.IsNullOrEmpty(document.Range(target.End, mark.Range.End).Text)).ToArray();
+                    if (matches.Length != 1) throw new InvalidDataException("已修复项的原文恢复标记缺失或不唯一，请重新分析。");
+                    cleanup.Add(Tuple.Create(location, matches[0], target));
+                }
+                if (cleanup.Count == 0) return Task.FromResult(Tuple.Create(true, (string)null));
+
+                string originalText = document.Content.Text;
+                string error;
+                bool ok = ExecuteUndoable(document, "清除已修复项的格式标记", () =>
+                {
+                    if (document.Content.Text != originalText)
+                        throw new InvalidDataException("清理标记期间原文发生变化，已停止操作。");
+                    foreach (var item in cleanup)
+                    {
+                        string name = HighlightBookmarkName(item.Item1, item.Item2.OriginalHighlight);
+                        if (!document.Bookmarks.Exists(name) || item.Item3.Text != item.Item2.Range.Text)
+                            throw new InvalidDataException("原文恢复标记已变化，已停止清理。");
+                    }
+                }, markMutation =>
+                {
+                    foreach (var item in cleanup)
+                    {
+                        Word.Range target = item.Item3;
+                        // Keep an author's later highlight change; restore only our yellow mark.
+                        if (target.HighlightColorIndex == Word.WdColorIndex.wdYellow)
+                        {
+                            target.HighlightColorIndex = (Word.WdColorIndex)item.Item2.OriginalHighlight;
+                            markMutation();
+                        }
+                        string name = HighlightBookmarkName(item.Item1, item.Item2.OriginalHighlight);
+                        document.Bookmarks[name].Delete();
+                        markMutation();
+                    }
+                }, out error, suspendRepaint: false);
+                return Task.FromResult(Tuple.Create(ok, error));
+            }
+            catch (Exception exception) { return Task.FromResult(Tuple.Create(false, exception.Message)); }
+        }
+
         internal static bool ApplyDirectWithRanges(Word.Document document, string snapshot,
             IReadOnlyList<EnginePatch> patches, Dictionary<string, Word.Range> verifiedRanges,
-            out RepairRecord record, out string error)
+            out RepairRecord record, out string error, string actionName = null, bool markDocumentDirty = true,
+            bool fastObjectSignature = false, bool suspendRepaint = true, bool fastFormatSnapshot = false)
         {
             var captured = new RepairRecord();
             Dictionary<string, Word.Range> ranges = null;
-            bool success = ExecuteUndoable(document, "解决选中的格式问题", () =>
+            bool success = ExecuteUndoable(document, actionName ?? "解决选中的格式问题", () =>
             {
                 if (patches == null || patches.Count == 0) throw new InvalidDataException("没有选中可修复的格式。");
                 ranges = verifiedRanges ?? BuildRanges(document, snapshot, patches.Select(p => p.Location));
@@ -141,10 +241,11 @@ namespace ThesisAddIn.VSTO.Engine
                         patch.RuleId == "demo/caption-line-spacing" || patch.RuleId == "demo/caption-space-before" ||
                         patch.RuleId == "demo/caption-space-after";
                     var change = new FormatChange { Range = range.Duplicate,
-                        Font = !paragraphProperty && !IsObjectWidth(patch.RuleId) ? range.Font.Duplicate : null,
-                        Paragraph = paragraphProperty ? range.ParagraphFormat.Duplicate : null,
+                        Font = !fastFormatSnapshot && !paragraphProperty && !IsObjectWidth(patch.RuleId) ? range.Font.Duplicate : null,
+                        Paragraph = !fastFormatSnapshot && paragraphProperty ? range.ParagraphFormat.Duplicate : null,
                         RuleId = patch.RuleId, Text = range.Text };
-                    CaptureObjectChange(change);
+                    if (fastFormatSnapshot) CaptureFastFormat(change, range);
+                    CaptureObjectChange(change, fastObjectSignature);
                     if (IsObjectWidth(patch.RuleId)) ValidateObjectWidth(range,patch,change.ObjectTarget,change.ObjectBeforeWidth);
                     captured.Changes.Add(change);
                 }
@@ -168,8 +269,8 @@ namespace ThesisAddIn.VSTO.Engine
                         change.AppliedSignature = FormatSignature(change);
                     }
                 }
-                document.Saved = false;
-            }, out error, suspendRepaint:false);
+                if (markDocumentDirty) document.Saved = false;
+            }, out error, suspendRepaint:suspendRepaint);
             record = success ? captured : null;
             return success;
         }
@@ -200,7 +301,58 @@ namespace ThesisAddIn.VSTO.Engine
                     markMutation();
                 }
                 document.Saved = false;
-            }, out error, suspendRepaint:false);
+            }, out error, suspendRepaint:true);
+        }
+
+        internal static bool UndoHoverPreview(Word.Document document, RepairRecord record,
+            bool wasSaved, out string error)
+        {
+            error = null;
+            if (document == null || record == null || record.Count == 0)
+            { error = "悬停预览记录已失效。"; return false; }
+            try
+            {
+                // The suggestion list takes keyboard focus while the preview is shown.
+                // Check only the affected ranges: reading document.Content.Text here
+                // transfers the entire thesis through COM on every pointer movement.
+                bool targetUnchanged = record.Changes.All(change => change.Range != null &&
+                    change.Range.Document == document && change.Range.Text == change.Text &&
+                    IsPreviewPatchUnchanged(change));
+                if (targetUnchanged)
+                {
+                    // The pointer must leave the suggestion list before document input
+                    // can occur; this preview custom record is therefore the top undo.
+                    // Popping it avoids accumulating undo entries while hovering.
+                    bool? screenUpdating = null;
+                    try
+                    {
+                        screenUpdating = document.Application.ScreenUpdating;
+                        if (screenUpdating.Value) document.Application.ScreenUpdating = false;
+                        dynamic commandBars = document.Application.CommandBars;
+                        commandBars.ExecuteMso("Undo");
+                        document.Saved = wasSaved;
+                        return true;
+                    }
+                    finally
+                    {
+                        if (screenUpdating.HasValue)
+                        {
+                            try { document.Application.ScreenUpdating = screenUpdating.Value; }
+                            catch (System.Runtime.InteropServices.COMException) { }
+                        }
+                    }
+                }
+                // If the document was edited while the pointer remained over a card,
+                // never pop a potentially user-authored undo. Restore only the format
+                // range, with UndoRepair's text/format guards.
+                if (!UndoRepair(document, record, out error)) return false;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = "无法安全结束悬停预览：" + exception.Message;
+                return false;
+            }
         }
         private static string FormatSignature(FormatChange change)
         {
@@ -224,16 +376,59 @@ namespace ThesisAddIn.VSTO.Engine
             Word.Range range = change.Range;
             switch (change.RuleId)
             {
-                case "demo/east-asian-font": case "demo/caption-east-asian-font": range.Font.NameFarEast = change.Font.NameFarEast; break;
-                case "demo/western-font": range.Font.NameAscii = change.Font.NameAscii; range.Font.NameOther = change.Font.NameOther; break;
-                case "demo/font-size": case "demo/caption-font-size": range.Font.Size = change.Font.Size; break;
-                case "demo/caption-alignment": range.ParagraphFormat.Alignment = change.Paragraph.Alignment; break;
-                case "demo/caption-line-spacing": range.ParagraphFormat.LineSpacingRule = change.Paragraph.LineSpacingRule;
-                    range.ParagraphFormat.LineSpacing = change.Paragraph.LineSpacing; break;
-                case "demo/caption-space-before": range.ParagraphFormat.SpaceBefore = change.Paragraph.SpaceBefore; break;
-                case "demo/caption-space-after": range.ParagraphFormat.SpaceAfter = change.Paragraph.SpaceAfter; break;
+                case "demo/east-asian-font": case "demo/caption-east-asian-font":
+                    range.Font.NameFarEast = change.Font != null ? change.Font.NameFarEast : change.FastString; break;
+                case "demo/western-font":
+                    range.Font.NameAscii = change.Font != null ? change.Font.NameAscii : change.FastString;
+                    range.Font.NameOther = change.Font != null ? change.Font.NameOther : change.FastSecondaryString; break;
+                case "demo/font-size": case "demo/caption-font-size":
+                    range.Font.Size = change.Font != null ? change.Font.Size : change.FastNumber; break;
+                case "demo/caption-alignment":
+                    range.ParagraphFormat.Alignment = change.Paragraph != null ? change.Paragraph.Alignment :
+                        (Word.WdParagraphAlignment)change.FastEnum; break;
+                case "demo/caption-line-spacing":
+                    range.ParagraphFormat.LineSpacingRule = change.Paragraph != null ? change.Paragraph.LineSpacingRule :
+                        (Word.WdLineSpacing)change.FastEnum;
+                    range.ParagraphFormat.LineSpacing = change.Paragraph != null ? change.Paragraph.LineSpacing : change.FastNumber; break;
+                case "demo/caption-space-before":
+                    range.ParagraphFormat.SpaceBefore = change.Paragraph != null ? change.Paragraph.SpaceBefore : change.FastNumber; break;
+                case "demo/caption-space-after":
+                    range.ParagraphFormat.SpaceAfter = change.Paragraph != null ? change.Paragraph.SpaceAfter : change.FastNumber; break;
                 default: throw new NotSupportedException("不能撤销未支持的格式。");
             }
+        }
+
+        private static void CaptureFastFormat(FormatChange change, Word.Range range)
+        {
+            switch (change.RuleId)
+            {
+                case "demo/east-asian-font": case "demo/caption-east-asian-font":
+                    change.FastString = range.Font.NameFarEast; break;
+                case "demo/western-font":
+                    change.FastString = range.Font.NameAscii;
+                    change.FastSecondaryString = range.Font.NameOther; break;
+                case "demo/font-size": case "demo/caption-font-size":
+                    change.FastNumber = range.Font.Size; break;
+                case "demo/caption-alignment":
+                    change.FastEnum = (int)range.ParagraphFormat.Alignment; break;
+                case "demo/caption-line-spacing":
+                    change.FastEnum = (int)range.ParagraphFormat.LineSpacingRule;
+                    change.FastNumber = range.ParagraphFormat.LineSpacing; break;
+                case "demo/caption-space-before":
+                    change.FastNumber = range.ParagraphFormat.SpaceBefore; break;
+                case "demo/caption-space-after":
+                    change.FastNumber = range.ParagraphFormat.SpaceAfter; break;
+                default: throw new NotSupportedException("该格式不支持快速悬停预览。");
+            }
+        }
+
+        private static bool IsPreviewPatchUnchanged(FormatChange change)
+        {
+            if (change.ObjectSignature == null)
+                return FormatSignature(change) == change.AppliedSignature;
+            var current = change.ObjectSignature();
+            return change.AppliedObjectSignature != null && current.Item1 == change.AppliedObjectSignature.Item1 &&
+                WordTableGeometry.EquivalentDimensions(change.AppliedObjectSignature.Item2, current.Item2);
         }
 
         private static bool IsObjectWidth(string ruleId) => ruleId == "demo/picture-fit-width" || ruleId == "demo/table-fit-width";
@@ -333,7 +528,7 @@ namespace ThesisAddIn.VSTO.Engine
             }
         }
 
-        private static void CaptureObjectChange(FormatChange change)
+        private static void CaptureObjectChange(FormatChange change, bool fastSignature = false)
         {
             if (!IsObjectWidth(change.RuleId)) return;
             Word.Range target = AdjacentObjectRange(change.Range, change.RuleId == "demo/picture-fit-width");
@@ -355,8 +550,11 @@ namespace ThesisAddIn.VSTO.Engine
                         picture.Width = (float)dimensions[0]; mark(); picture.Height = (float)dimensions[1]; mark();
                     } finally { picture.LockAspectRatio = locked; }
                 };
-                change.ObjectSignature = () => Tuple.Create(picture.LockAspectRatio + "|" + PictureContentSignature(picture),
-                    new[] { (double)picture.Width, picture.Height });
+                change.ObjectSignature = fastSignature
+                    ? (Func<Tuple<string, double[]>>)(() => Tuple.Create(picture.LockAspectRatio.ToString(),
+                        new[] { (double)picture.Width, picture.Height }))
+                    : () => Tuple.Create(picture.LockAspectRatio + "|" + PictureContentSignature(picture),
+                        new[] { (double)picture.Width, picture.Height });
                 change.RestoreObject = markMutation =>
                 {
                     try
@@ -385,8 +583,13 @@ namespace ThesisAddIn.VSTO.Engine
                     table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints; mark();
                     table.PreferredWidth = (float)dimensions[0]; mark();
                 };
-                change.ObjectSignature = () => Tuple.Create(table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
-                    table.PreferredWidthType, new[] { (double)table.PreferredWidth }.Concat(ReadTableWidths(table).Select(value => (double)value)).ToArray());
+                change.ObjectSignature = fastSignature
+                    ? (Func<Tuple<string, double[]>>)(() => Tuple.Create(table.Rows.Count + "|" + table.AllowAutoFit + "|" +
+                        table.PreferredWidthType, new[] { (double)table.PreferredWidth }.Concat(
+                            ReadTableWidths(table).Select(value => (double)value)).ToArray()))
+                    : () => Tuple.Create(table.Range.Text + "|" + table.Rows.Count + "|" + table.AllowAutoFit + "|" +
+                        table.PreferredWidthType, new[] { (double)table.PreferredWidth }.Concat(
+                            ReadTableWidths(table).Select(value => (double)value)).ToArray());
                 change.RestoreObject = markMutation =>
                 {
                     WriteTableWidths(table, widths, markMutation);

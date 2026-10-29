@@ -6,7 +6,7 @@ using ThesisAddIn.Protocol;
 
 namespace ThesisAddIn.VSTO.Ui
 {
-    // One session shared by the searchable index and actionable suggestion cards.
+    // One session for the searchable issue index and its Word-anchored annotations.
     internal sealed class IssueReviewState
     {
         internal readonly List<EngineDiagnostic> Rows = new List<EngineDiagnostic>();

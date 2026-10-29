@@ -60,6 +60,35 @@ foreach ($manifestRelative in @('vsto\ThesisAddIn.VSTO.vsto', 'vsto\ThesisAddIn.
     }
 }
 
+# Mage -Update defaults to install=true, which is not the VSTO local deployment
+# mode. Check the final signed files together, before changing user settings.
+$deploymentDocument = [xml](Get-Content -LiteralPath (Join-Path $packageRoot 'vsto\ThesisAddIn.VSTO.vsto') -Raw)
+$deploymentNode = $deploymentDocument.SelectSingleNode("//*[local-name()='deployment']")
+if ($null -eq $deploymentNode -or $deploymentNode.GetAttribute('install') -ne 'false') {
+    throw 'VSTO 部署清单必须使用 install="false"；请在 Mage 更新时显式指定 -Install false。'
+}
+$applicationReferences = $deploymentDocument.SelectNodes("//*[local-name()='dependentAssembly'][@codebase='ThesisAddIn.VSTO.dll.manifest']")
+if ($applicationReferences.Count -ne 1) { throw 'VSTO 部署清单缺少唯一的程序集清单引用。' }
+$applicationReference = $applicationReferences[0]
+$applicationManifestPath = Join-Path $packageRoot 'vsto\ThesisAddIn.VSTO.dll.manifest'
+if ([int64]$applicationReference.GetAttribute('size') -ne (Get-Item -LiteralPath $applicationManifestPath).Length) {
+    throw 'VSTO 部署清单记录的程序集清单大小已过期；请在最终签名后重新更新部署清单。'
+}
+$digestMethod = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestMethod']")
+$digestValue = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestValue']")
+if ($null -eq $digestMethod -or $null -eq $digestValue) { throw 'VSTO 部署清单缺少程序集清单哈希。' }
+$hashAlgorithm = switch ($digestMethod.GetAttribute('Algorithm')) {
+    'http://www.w3.org/2000/09/xmldsig#sha1' { [Security.Cryptography.SHA1]::Create(); break }
+    'http://www.w3.org/2001/04/xmlenc#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    'http://www.w3.org/2000/09/xmldsig#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    default { throw 'VSTO 部署清单使用了不支持的哈希算法。' }
+}
+try { $actualDigest = [Convert]::ToBase64String($hashAlgorithm.ComputeHash([IO.File]::ReadAllBytes($applicationManifestPath))) }
+finally { $hashAlgorithm.Dispose() }
+if ($actualDigest -ne $digestValue.InnerText.Trim()) {
+    throw 'VSTO 部署清单记录的程序集清单哈希已过期；请先签程序集清单，再更新并签署部署清单。'
+}
+
 $preflightHost = Join-Path $PSHOME 'pwsh.exe'
 if (-not (Test-Path -LiteralPath $preflightHost)) { $preflightHost = Join-Path $PSHOME 'powershell.exe' }
 if (-not (Test-Path -LiteralPath $preflightHost)) { throw '无法找到 PowerShell 来运行预检。' }
@@ -76,7 +105,7 @@ $registryPath = 'HKCU:\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO'
 $registryNames = @('FriendlyName', 'Description', 'LoadBehavior', 'Manifest')
 
 if (Test-Path -LiteralPath $statePath) {
-    $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+    $state = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     if ([System.IO.Path]::GetFullPath([string]$state.installRoot).TrimEnd('\') -ne $installPath) { throw '安装记录中的路径不匹配，拒绝更新。' }
     if (-not [string]::Equals([string]$state.publisherThumbprint, $packageCertificate.Thumbprint, [StringComparison]::OrdinalIgnoreCase)) {
         throw '新包的签名证书与已安装版本不同。请先卸载旧版并核验新发行者，再重新安装；没有覆盖旧回滚记录。'
@@ -108,13 +137,14 @@ if (Test-Path -LiteralPath $installPath) {
     }
 }
 
-foreach ($directory in @('vsto', 'engine', 'samples', 'docs')) {
+foreach ($directory in @('vsto', 'engine', 'samples', 'docs', 'cli')) {
     $source = Join-Path $packageRoot $directory
+    if ($directory -eq 'cli' -and -not (Test-Path -LiteralPath $source -PathType Container)) { continue }
     $target = Join-Path $installPath $directory
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination $target -Recurse -Force
 }
-foreach ($file in @('publisher.cer', 'build-info.json', 'SHA256SUMS.txt', 'README.md')) {
+foreach ($file in @('Install.ps1', 'Uninstall.ps1', 'Preflight.ps1', 'publisher.cer', 'build-info.json', 'SHA256SUMS.txt', 'README.md')) {
     $source = Join-Path $packageRoot $file
     if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $installPath -Force }
 }

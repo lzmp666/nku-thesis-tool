@@ -10,6 +10,12 @@ namespace ThesisEngine.Core;
 /// </summary>
 public sealed class WordFormattingReader : IDemoDocumentReader
 {
+    private readonly bool _inferUnstyledStructure;
+    private readonly bool _includePackageFingerprint;
+
+    // Explicit opt-in keeps the reviewed 2026 draft's strict scope policy intact.
+    public WordFormattingReader(bool inferUnstyledStructure = false, bool includePackageFingerprint = false)
+    { _inferUnstyledStructure = inferUnstyledStructure; _includePackageFingerprint = includePackageFingerprint; }
     private const string MainNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private const string ThemeNamespace = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const string MathNamespace = "http://schemas.openxmlformats.org/officeDocument/2006/math";
@@ -21,7 +27,11 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         if (!string.Equals(System.IO.Path.GetExtension(path), ".docx", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Only .docx files are supported.", nameof(path));
 
-        using var archive = ZipFile.OpenRead(System.IO.Path.GetFullPath(path));
+        using var sourceStream = new FileStream(System.IO.Path.GetFullPath(path), FileMode.Open, FileAccess.Read, FileShare.Read);
+        var packageHash = _includePackageFingerprint
+            ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(sourceStream)) : null;
+        sourceStream.Position = 0;
+        using var archive = new ZipArchive(sourceStream, ZipArchiveMode.Read, leaveOpen: true);
         var document = ReadXml(archive, "word/document.xml", "document");
         var styles = TryReadXml(archive, "word/styles.xml", "styles");
         var theme = TryReadXml(archive, "word/theme/theme1.xml", "theme", ThemeNamespace);
@@ -78,8 +88,10 @@ public sealed class WordFormattingReader : IDemoDocumentReader
         var sourceParagraphs = body.Descendants(W + "p")
             .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
             .ToArray();
+        var sourceMap = DocumentSourceMap.Create("word/document.xml", sourceParagraphs);
         var paragraphs = new List<ParagraphSnapshot>();
         var scopeInputs = new List<BodyScopeInput>();
+        var structureInputs = new List<ThesisStructureBlock>();
         var paragraphIndex = 0;
         foreach (var paragraph in sourceParagraphs)
         {
@@ -135,19 +147,30 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                 Caption = captionKind,
                 CaptionPlacementCorrect = captionKind is null ? null : ResolveCaptionPlacement(paragraph, captionKind.Value, body),
                 CaptionObjectWidth = captionKind is null ? null : CaptionObjectLayout.Read(paragraph, captionKind.Value, styles),
-                ParagraphFormatting = ToSnapshot(paragraphFormatting, paragraphStyleResolution.IsResolved)
+                ParagraphFormatting = ToSnapshot(paragraphFormatting, paragraphStyleResolution.IsResolved),
+                BlockId = sourceMap.Blocks[paragraphIndex].BlockId,
+                IsTableCell = isTableCell,
+                HasUnsupportedInlineContent = hasUnsupportedInlineContent
             });
+            var outlineValue = (string?)paragraphProperties?.Element(W + "outlineLvl")?.Attribute(W + "val");
+            int? outlineLevel = int.TryParse(outlineValue, out var outline) && outline is >= 0 and <= 8 ? outline : null;
+            structureInputs.Add(new ThesisStructureBlock(sourceMap.Blocks[paragraphIndex].BlockId,
+                paragraphIndex, paragraphText, isHeading, outlineLevel, isTableCell, captionKind, hasUnsupportedInlineContent));
             scopeInputs.Add(new BodyScopeInput(paragraphIndex, paragraphText, isHeading,
                 hasUnsupportedInlineContent, isTableCell, isCaption, hasEquation));
             paragraphIndex++;
         }
 
         var decisions = NkuGraduate2026BodyScopeClassifier.Classify(scopeInputs);
+        var structure = new ThesisStructureClassifier().Classify(structureInputs);
+        var byParagraph = structure.Blocks.ToDictionary(block => block.ParagraphIndex);
         paragraphs = paragraphs.Select((paragraph, index) => paragraph with
         {
-            Scope = decisions[index].Classification,
-            ScopeReason = decisions[index].Reason
+            Scope = _inferUnstyledStructure ? AdaptiveScope(paragraph, byParagraph[index]) : decisions[index].Classification,
+            ScopeReason = _inferUnstyledStructure ? byParagraph[index].Evidence : decisions[index].Reason,
+            Structure = byParagraph[index]
         }).ToList();
+        if (_inferUnstyledStructure) unsupported.AddRange(structure.Warnings);
 
         if (theme is null && new[] { document, styles }.Where(d => d is not null)
             .SelectMany(d => d!.Descendants(W + "rFonts")).Any(HasThemeFont))
@@ -156,7 +179,22 @@ public sealed class WordFormattingReader : IDemoDocumentReader
                      .SelectMany(d => d!.Descendants(W + "rFonts"))
                      .Any(fonts => HasUnresolvedThemeFont(fonts, theme, defaults.EastAsiaLanguage)))
             unsupported.Add("theme fonts");
-        return new DocumentSnapshot("word/document.xml", paragraphs, unsupported.Distinct(StringComparer.Ordinal).ToArray());
+        return new DocumentSnapshot("word/document.xml", paragraphs, unsupported.Distinct(StringComparer.Ordinal).ToArray())
+        { SourceMap = sourceMap, Structure = structure, PackageSha256 = packageHash };
+    }
+
+    private static ParagraphScopeClassification AdaptiveScope(ParagraphSnapshot paragraph, ThesisStructureDecision decision)
+    {
+        if (paragraph.IsTableCell || paragraph.Caption is not null ||
+            decision.Kind is ThesisBlockKind.Heading or ThesisBlockKind.Keywords or ThesisBlockKind.ContentsEntry or
+                ThesisBlockKind.FigureCaption or ThesisBlockKind.TableCaption or ThesisBlockKind.TableCell)
+            return ParagraphScopeClassification.Excluded;
+        if (paragraph.HasUnsupportedInlineContent || decision.RequiresReview || decision.Confidence < 0.90)
+            return ParagraphScopeClassification.Unknown;
+        if (decision.Section == ThesisSectionKind.Body && decision.Kind == ThesisBlockKind.Paragraph)
+            return ParagraphScopeClassification.ConfirmedBodyProse;
+        return decision.Section != ThesisSectionKind.Unknown
+            ? ParagraphScopeClassification.Excluded : ParagraphScopeClassification.Unknown;
     }
 
     private static XDocument ReadXml(ZipArchive archive, string name, string root)

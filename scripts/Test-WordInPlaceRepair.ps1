@@ -61,13 +61,21 @@ function Assert-ToolMarks($Document, $Analysis, [string]$Operation) {
     $expected = Get-ExpectedToolMarkCount $Analysis
     $actual = Get-ToolMarkCount $Document
     Assert-Condition ($actual -eq $expected) ($Operation + ': expected ' + $expected + ' source marks, found ' + $actual + '.')
-    $expectedComments = @($Analysis.Diagnostics).Count
-    Assert-Condition ($Document.Comments.Count -eq $expectedComments) ($Operation + ': expected one native comment per grouped issue.')
+    $expectedComments = @($Analysis.Diagnostics | Where-Object { $_.Occurrences.Count -gt 0 }).Count
+    $ownedComments = 0
     for ($index = 1; $index -le $Document.Comments.Count; $index++) {
-        $commentRange = $Document.Comments.Item($index).Range.Duplicate
+        $comment = $Document.Comments.Item($index)
+        $commentRange = $comment.Range.Duplicate
         $commentRange.TextRetrievalMode.IncludeHiddenText = $true
-        Assert-Condition ($commentRange.Text.Contains('[NKU-TOOL-ANNOTATION:v1]')) ($Operation + ': a native comment has lost its tool ownership marker.')
+        if (-not $commentRange.Text.Contains('[NKU-TOOL-ANNOTATION:v1]')) { continue }
+        $ownedComments++
+        $visibleRange = $comment.Range.Duplicate
+        $visibleRange.TextRetrievalMode.IncludeHiddenText = $false
+        Assert-Condition ($visibleRange.Text -match '要求：.+实际：') ($Operation + ': native comment must show expected and actual values.')
+        Assert-Condition (-not $visibleRange.Text.Contains('[NKU-TOOL-ANNOTATION:v1]')) ($Operation + ': private comment metadata must stay hidden.')
+        Assert-Condition (-not [string]::IsNullOrWhiteSpace($comment.Scope.Text)) ($Operation + ': native comment must remain anchored to source text.')
     }
+    Assert-Condition ($ownedComments -eq $expectedComments) ($Operation + ': expected ' + $expectedComments + ' source-linked Word comments, found ' + $ownedComments + '.')
 }
 function Write-Snapshot($Document, [string]$Name) {
     $path = Join-Path $outputDirectory ($Name + '.docx')
