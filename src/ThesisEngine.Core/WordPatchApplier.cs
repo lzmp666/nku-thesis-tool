@@ -53,7 +53,8 @@ public static class WordPatchApplier
                 ?? throw new InvalidDataException("Missing Word document body.");
 
             var snapshot = patches.Count == 0 ? null : new WordFormattingReader().Read(fullInputPath);
-            var targets = ResolveTargets(body, patches, snapshot);
+            var styles = entries.TryGetValue("word/styles.xml", out var styleEntry) ? ReadXml(styleEntry, W + "styles", "word/styles.xml") : null;
+            var targets = ResolveTargets(body, patches, snapshot, styles);
             ValidateAll(patches, targets, snapshot);
             foreach (var target in targets)
                 ApplyTarget(target);
@@ -108,15 +109,62 @@ public static class WordPatchApplier
             if (target.Snapshot is null || snapshot is null)
                 throw new PatchFailureException(patch, $"Unable to resolve patch location: {patch.Location}");
             var actual = target.Snapshot;
-            if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
+            if (patch.RuleId is FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
+            {
+                var kind = patch.RuleId == FontSizeAnalyzer.RuleIdPictureWidth ? CaptionKind.Figure : CaptionKind.Table;
+                if (target.ParagraphSnapshot?.Caption != kind)
+                    throw new PatchFailureException(patch, "对象题注类型不匹配。");
+                var layout = CaptionObjectLayout.Read(target.Paragraph, kind, target.Styles);
+                EnsureExpected(patch, layout?.WidthPt.ToString("0.###", CultureInfo.InvariantCulture) + "pt", patch.ExpectedBefore);
+                if (layout is null || !PatchPlanner.TryParsePoints(patch.DesiredAfter, out var limit) ||
+                    Math.Abs(layout.MaximumWidthPt - limit) > 0.01 || layout.WidthPt <= limit)
+                    throw new PatchFailureException(patch, "对象尺寸或版面边界已变化。");
+            }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
             {
                 EnsureExpected(patch, actual.EastAsiaFont, patch.ExpectedBefore);
+            }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
+            {
+                EnsureExpected(patch, DescribeWesternFonts(actual), patch.ExpectedBefore);
             }
             else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal))
             {
                 EnsureExpected(patch, actual.FontSizePt is null ? null : $"{actual.FontSizePt.Value.ToString(CultureInfo.InvariantCulture)}pt", patch.ExpectedBefore);
                 if (!PatchPlanner.TryParsePoints(patch.DesiredAfter, out var points) || !TryHalfPoints(points, out _))
                     throw new PatchFailureException(patch, $"Invalid desired font size: {patch.DesiredAfter}");
+            }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdCaptionEastAsiaFont, StringComparison.Ordinal))
+            {
+                EnsureExpected(patch, actual.EastAsiaFont, patch.ExpectedBefore);
+                if (string.IsNullOrWhiteSpace(patch.DesiredAfter))
+                    throw new PatchFailureException(patch, "Caption font target is empty.");
+            }
+            else if (string.Equals(patch.RuleId, FontSizeAnalyzer.RuleIdCaptionFontSize, StringComparison.Ordinal))
+            {
+                EnsureExpected(patch, actual.FontSizePt is null ? null : $"{actual.FontSizePt.Value.ToString(CultureInfo.InvariantCulture)}pt", patch.ExpectedBefore);
+                if (!PatchPlanner.TryParsePoints(patch.DesiredAfter, out var points) || !TryHalfPoints(points, out _))
+                    throw new PatchFailureException(patch, $"Invalid desired caption font size: {patch.DesiredAfter}");
+            }
+            else if (IsCaptionParagraphRule(patch.RuleId))
+            {
+                var paragraphFormatting = target.ParagraphSnapshot?.ParagraphFormatting;
+                if (paragraphFormatting is null || paragraphFormatting.HasUnresolvedStyle)
+                    throw new PatchFailureException(patch, $"Unable to resolve caption paragraph formatting at {patch.Location}.");
+                var current = patch.RuleId switch
+                {
+                    FontSizeAnalyzer.RuleIdCaptionAlignment => paragraphFormatting.Alignment,
+                    FontSizeAnalyzer.RuleIdCaptionLineSpacing => paragraphFormatting.LineSpacing,
+                    FontSizeAnalyzer.RuleIdCaptionSpaceBefore => paragraphFormatting.SpaceBeforePt.ToString(CultureInfo.InvariantCulture) + "pt",
+                    FontSizeAnalyzer.RuleIdCaptionSpaceAfter => paragraphFormatting.SpaceAfterPt.ToString(CultureInfo.InvariantCulture) + "pt",
+                    _ => null
+                };
+                EnsureExpected(patch, current, patch.ExpectedBefore);
+                if ((patch.RuleId == FontSizeAnalyzer.RuleIdCaptionAlignment && !string.Equals(patch.DesiredAfter, "center", StringComparison.OrdinalIgnoreCase)) ||
+                    (patch.RuleId == FontSizeAnalyzer.RuleIdCaptionLineSpacing && !string.Equals(patch.DesiredAfter, "single", StringComparison.OrdinalIgnoreCase)) ||
+                    ((patch.RuleId is FontSizeAnalyzer.RuleIdCaptionSpaceBefore or FontSizeAnalyzer.RuleIdCaptionSpaceAfter) &&
+                     !PatchPlanner.TryParseNonNegativePoints(patch.DesiredAfter, out _)))
+                    throw new PatchFailureException(patch, $"Invalid desired caption paragraph value: {patch.DesiredAfter}");
             }
             else
                 throw new PatchFailureException(patch, $"Unsupported patch rule: {patch.RuleId}");
@@ -132,16 +180,22 @@ public static class WordPatchApplier
 
     private static bool ValuesEqual(string actual, string expected, string ruleId)
     {
-        if (string.Equals(ruleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal))
+        if (ruleId is FontSizeAnalyzer.RuleIdCaptionSpaceBefore or FontSizeAnalyzer.RuleIdCaptionSpaceAfter)
+            return PatchPlanner.TryParseNonNegativePoints(actual, out var actualSpacing) &&
+                   PatchPlanner.TryParseNonNegativePoints(expected, out var expectedSpacing) &&
+                   Math.Abs(actualSpacing - expectedSpacing) <= 0.001;
+        if (ruleId is FontSizeAnalyzer.RuleIdFontSize or FontSizeAnalyzer.RuleIdCaptionFontSize or FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
             return PatchPlanner.TryParsePoints(actual, out var actualPoints) &&
                    PatchPlanner.TryParsePoints(expected, out var expectedPoints) &&
                    Math.Abs(actualPoints - expectedPoints) <= 0.001;
         return string.Equals(actual, expected, StringComparison.Ordinal);
     }
 
-    private static IReadOnlyList<PatchTarget> ResolveTargets(XElement body, IReadOnlyList<Patch> patches, DocumentSnapshot? snapshot)
+    private static IReadOnlyList<PatchTarget> ResolveTargets(XElement body, IReadOnlyList<Patch> patches, DocumentSnapshot? snapshot, XDocument? styles)
     {
-        var paragraphs = body.Elements(W + "p").ToArray();
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var result = new List<PatchTarget>(patches.Count);
         foreach (var patch in patches)
         {
@@ -157,7 +211,12 @@ public static class WordPatchApplier
                 throw new PatchFailureException(patch, $"Patch run does not exist: {patch.Location}");
             var effective = snapshot?.Paragraphs.FirstOrDefault(p => p.ParagraphIndex == paragraphIndex)?.Runs
                 .FirstOrDefault(r => r.RunIndex == runIndex);
-            result.Add(new PatchTarget(patch, runs[runIndex]) { Snapshot = effective });
+            result.Add(new PatchTarget(patch, runs[runIndex], paragraphs[paragraphIndex])
+            {
+                Snapshot = effective,
+                Styles = styles,
+                ParagraphSnapshot = snapshot?.Paragraphs.FirstOrDefault(p => p.ParagraphIndex == paragraphIndex)
+            });
         }
         return result;
     }
@@ -180,6 +239,19 @@ public static class WordPatchApplier
 
     private static void ApplyTarget(PatchTarget target)
     {
+        if (target.Patch.RuleId is FontSizeAnalyzer.RuleIdPictureWidth or FontSizeAnalyzer.RuleIdTableWidth)
+        {
+            if (!PatchPlanner.TryParsePoints(target.Patch.DesiredAfter, out var limit))
+                throw new PatchFailureException(target.Patch, "对象目标尺寸无效。");
+            CaptionObjectLayout.Apply(target.Paragraph, target.Patch.RuleId == FontSizeAnalyzer.RuleIdPictureWidth ? CaptionKind.Figure : CaptionKind.Table, limit, target.Styles);
+            return;
+        }
+        if (IsCaptionParagraphRule(target.Patch.RuleId))
+        {
+            ApplyCaptionParagraphTarget(target);
+            return;
+        }
+
         var properties = target.Run.Element(W + "rPr");
         if (properties is null)
         {
@@ -187,20 +259,24 @@ public static class WordPatchApplier
             target.Run.AddFirst(properties);
         }
 
-        if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal))
+        if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdEastAsiaFont, StringComparison.Ordinal) ||
+            string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdCaptionEastAsiaFont, StringComparison.Ordinal))
         {
-            var fonts = properties.Element(W + "rFonts");
-            if (fonts is null)
-            {
-                fonts = new XElement(W + "rFonts");
-                var style = properties.Element(W + "rStyle");
-                if (style is null) properties.AddFirst(fonts);
-                else style.AddAfterSelf(fonts);
-            }
+            var fonts = GetOrCreateRunFonts(properties);
             fonts.SetAttributeValue(W + "eastAsia", target.Patch.DesiredAfter);
             fonts.Attribute(W + "eastAsiaTheme")?.Remove();
         }
-        else if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal))
+        else if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdAsciiFont, StringComparison.Ordinal))
+        {
+            var fonts = GetOrCreateRunFonts(properties);
+            fonts.SetAttributeValue(W + "ascii", target.Patch.DesiredAfter);
+            fonts.SetAttributeValue(W + "hAnsi", target.Patch.DesiredAfter);
+            // Explicit values must win over a theme slot after the repair.
+            fonts.Attribute(W + "asciiTheme")?.Remove();
+            fonts.Attribute(W + "hAnsiTheme")?.Remove();
+        }
+        else if (string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdFontSize, StringComparison.Ordinal) ||
+                 string.Equals(target.Patch.RuleId, FontSizeAnalyzer.RuleIdCaptionFontSize, StringComparison.Ordinal))
         {
             if (!PatchPlanner.TryParsePoints(target.Patch.DesiredAfter, out var points) || !TryHalfPoints(points, out var halfPoints))
                 throw new PatchFailureException(target.Patch, $"Invalid desired font size: {target.Patch.DesiredAfter}");
@@ -214,6 +290,97 @@ public static class WordPatchApplier
             }
             size.SetAttributeValue(W + "val", halfPoints.ToString(CultureInfo.InvariantCulture));
         }
+    }
+
+    private static void ApplyCaptionParagraphTarget(PatchTarget target)
+    {
+        var paragraphProperties = target.Paragraph.Element(W + "pPr");
+        if (paragraphProperties is null)
+        {
+            paragraphProperties = new XElement(W + "pPr");
+            target.Paragraph.AddFirst(paragraphProperties);
+        }
+
+        if (target.Patch.RuleId == FontSizeAnalyzer.RuleIdCaptionAlignment)
+        {
+            var alignment = paragraphProperties.Element(W + "jc");
+            if (alignment is null)
+            {
+                alignment = new XElement(W + "jc");
+                var followingProperty = paragraphProperties.Elements().FirstOrDefault(element => IsAfterAlignment(element.Name));
+                if (followingProperty is null) paragraphProperties.Add(alignment);
+                else followingProperty.AddBeforeSelf(alignment);
+            }
+            alignment.SetAttributeValue(W + "val", "center");
+            return;
+        }
+
+        var spacing = paragraphProperties.Element(W + "spacing");
+        if (spacing is null)
+        {
+            spacing = new XElement(W + "spacing");
+            var followingProperty = paragraphProperties.Elements().FirstOrDefault(element => IsAfterSpacing(element.Name));
+            if (followingProperty is null) paragraphProperties.Add(spacing);
+            else followingProperty.AddBeforeSelf(spacing);
+        }
+
+        if (target.Patch.RuleId == FontSizeAnalyzer.RuleIdCaptionLineSpacing)
+        {
+            spacing.SetAttributeValue(W + "line", "240");
+            spacing.SetAttributeValue(W + "lineRule", "auto");
+            return;
+        }
+
+        if (!PatchPlanner.TryParsePoints(target.Patch.DesiredAfter, out var points) ||
+            !TryTwips(points, out var twips))
+            throw new PatchFailureException(target.Patch, $"Invalid desired caption spacing: {target.Patch.DesiredAfter}");
+        var attribute = target.Patch.RuleId == FontSizeAnalyzer.RuleIdCaptionSpaceBefore ? "before" : "after";
+        spacing.SetAttributeValue(W + attribute, twips.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static bool IsCaptionParagraphRule(string ruleId) =>
+        ruleId is FontSizeAnalyzer.RuleIdCaptionAlignment or FontSizeAnalyzer.RuleIdCaptionLineSpacing or
+            FontSizeAnalyzer.RuleIdCaptionSpaceBefore or FontSizeAnalyzer.RuleIdCaptionSpaceAfter;
+
+    private static bool IsAfterSpacing(XName name) =>
+        name == W + "ind" || name == W + "contextualSpacing" || name == W + "mirrorIndents" ||
+        name == W + "suppressOverlap" || name == W + "jc" || name == W + "textDirection" ||
+        name == W + "textAlignment" || name == W + "textboxTightWrap" || name == W + "outlineLvl" ||
+        name == W + "divId" || name == W + "cnfStyle" || name == W + "rPr" || name == W + "sectPr" ||
+        name == W + "pPrChange";
+
+    private static bool IsAfterAlignment(XName name) =>
+        name == W + "textDirection" || name == W + "textAlignment" || name == W + "textboxTightWrap" ||
+        name == W + "outlineLvl" || name == W + "divId" || name == W + "cnfStyle" ||
+        name == W + "rPr" || name == W + "sectPr" || name == W + "pPrChange";
+
+    private static bool TryTwips(double points, out int twips)
+    {
+        twips = (int)Math.Round(points * 20, MidpointRounding.AwayFromZero);
+        return points >= 0 && Math.Abs(points * 20 - twips) < 0.0001;
+    }
+
+    private static XElement GetOrCreateRunFonts(XElement properties)
+    {
+        var fonts = properties.Element(W + "rFonts");
+        if (fonts is not null) return fonts;
+
+        fonts = new XElement(W + "rFonts");
+        var style = properties.Element(W + "rStyle");
+        if (style is null) properties.AddFirst(fonts);
+        else style.AddAfterSelf(fonts);
+        return fonts;
+    }
+
+    private static string DescribeWesternFonts(TextRunSnapshot snapshot)
+    {
+        var ascii = snapshot.AsciiSlotFont ?? snapshot.AsciiFont;
+        var hAnsi = snapshot.HAnsiFont ?? snapshot.AsciiFont;
+        var normalizedAscii = string.IsNullOrWhiteSpace(ascii) ? "(unknown)" : ascii;
+        var normalizedHAnsi = string.IsNullOrWhiteSpace(hAnsi) ? "(unknown)" : hAnsi;
+        return string.Equals(normalizedAscii, normalizedHAnsi, StringComparison.Ordinal)
+            ? normalizedAscii
+            : $"ASCII={normalizedAscii}; HAnsi={normalizedHAnsi}";
     }
 
     private static bool IsAfterFontSize(XName name) =>
@@ -295,11 +462,14 @@ public static class WordPatchApplier
             throw new ArgumentException("Only .docx files are supported.", parameterName);
     }
 
-    private sealed class PatchTarget(Patch patch, XElement run)
+    private sealed class PatchTarget(Patch patch, XElement run, XElement paragraph)
     {
         public Patch Patch { get; } = patch;
         public XElement Run { get; } = run;
+        public XElement Paragraph { get; } = paragraph;
         public TextRunSnapshot? Snapshot { get; set; }
+        public XDocument? Styles { get; set; }
+        public ParagraphSnapshot? ParagraphSnapshot { get; set; }
     }
 
     private sealed class PatchFailureException(Patch patch, string message) : Exception(message)

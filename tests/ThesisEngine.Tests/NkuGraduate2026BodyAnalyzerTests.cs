@@ -145,7 +145,7 @@ public sealed class NkuGraduate2026BodyAnalyzerTests
                 Assert.Contains("2026版", d.Message);
                 Assert.Contains("第4.7节表4.6（M26-036）", d.Message);
             });
-            Assert.Contains("tables", result.UnsupportedScopes);
+            Assert.Contains(result.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
             Assert.Contains("footnotes", result.UnsupportedScopes);
             Assert.Contains("headers/footers", result.UnsupportedScopes);
             Assert.Contains("simple fields", result.UnsupportedScopes);

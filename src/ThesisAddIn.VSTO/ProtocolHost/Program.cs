@@ -9,7 +9,7 @@ if (args.Length != 1 || !string.Equals(args[0], "--protocol-stdio", StringCompar
 
 Console.InputEncoding = System.Text.Encoding.UTF8;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
-var service = new DemoAnalysisService(new WordFormattingReader(), new FontSizeAnalyzer());
+var service = new DemoAnalysisService(new WordFormattingReader(inferUnstyledStructure: true), new FontSizeAnalyzer());
 
 string? line;
 while ((line = Console.ReadLine()) is not null)
@@ -47,6 +47,11 @@ while ((line = Console.ReadLine()) is not null)
                 break;
             case EngineProtocol.AnnotateOperation:
                 Write(Annotate(request, fullPath));
+                break;
+            case EngineProtocol.StructureReviewOperation:
+            case EngineProtocol.StructurePlanOperation:
+            case EngineProtocol.StructureVerifyOperation:
+                Write(StructureProtocolBridge.Handle(request, fullPath));
                 break;
             default:
                 Write(ProtocolHostResponse.Error(request.RequestId, EngineProtocol.InvalidRequest, "不支持的协议操作。"));
@@ -125,12 +130,18 @@ EngineResponse Annotate(EngineRequest request, string fullPath)
 
 static List<Patch> SelectPatches(PatchPlan plan, EngineRequest request)
 {
-    if (string.IsNullOrWhiteSpace(request.RuleId) && string.IsNullOrWhiteSpace(request.Location))
+    if (string.IsNullOrWhiteSpace(request.RuleId) && string.IsNullOrWhiteSpace(request.Location) &&
+        (request.Locations == null || request.Locations.Count == 0))
         return plan.Patches.ToList();
+
+    var locations = request.Locations?.Where(location => !string.IsNullOrWhiteSpace(location))
+        .ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
+    if (locations.Count == 0 && !string.IsNullOrWhiteSpace(request.Location))
+        locations.Add(request.Location);
 
     return plan.Patches.Where(patch =>
         (string.IsNullOrWhiteSpace(request.RuleId) || string.Equals(patch.RuleId, request.RuleId, StringComparison.OrdinalIgnoreCase)) &&
-        (string.IsNullOrWhiteSpace(request.Location) || string.Equals(patch.Location, request.Location, StringComparison.Ordinal)))
+        (locations.Count == 0 || locations.Contains(patch.Location)))
         .ToList();
 }
 
@@ -163,13 +174,17 @@ static void Write(EngineResponse response)
 
 static class ProtocolHostResponse
 {
-    public static EngineResponse Analysis(string requestId, AnalysisResult result) => new()
+    public static EngineResponse Analysis(string requestId, AnalysisResult result)
     {
-        ProtocolVersion = EngineProtocol.Version,
-        RequestId = requestId,
-        Ok = true,
-        Result = ToAnalysisTransfer(result)
-    };
+        var plan = PatchEngine.PlanPatches(result);
+        return new EngineResponse {
+            ProtocolVersion = EngineProtocol.Version,
+            RequestId = requestId, Ok = true, Result = ToAnalysisTransfer(result),
+            // Reuse this exact analysis, rather than launching the analyzer again
+            // on the next click. Word still checks a complete live fingerprint.
+            Plan = ToPlanTransfer(plan, plan.Patches.ToList(), result, new EngineRequest())
+        };
+    }
 
     public static EngineResponse Plan(string requestId, EnginePatchPlan plan) => new()
     {
@@ -234,7 +249,8 @@ static class ProtocolHostResponse
     {
         var selectedKeys = selected.Select(patch => patch.RuleId + "|" + patch.Location).ToList();
         var deferred = plan.DeferredDiagnostics.ToList();
-        bool filtered = !string.IsNullOrWhiteSpace(request.RuleId) || !string.IsNullOrWhiteSpace(request.Location);
+        bool filtered = !string.IsNullOrWhiteSpace(request.RuleId) || !string.IsNullOrWhiteSpace(request.Location) ||
+            request.Locations is { Count: > 0 };
         if (filtered)
         {
             deferred.AddRange((analysis.Diagnostics ?? Array.Empty<Diagnostic>()).Where(diagnostic =>
@@ -260,7 +276,10 @@ static class ProtocolHostResponse
         Expected = diagnostic.Expected,
         Actual = diagnostic.Actual,
         FixLevel = diagnostic.FixLevel,
-        Message = diagnostic.Message
+        Message = diagnostic.Message,
+        Occurrences = (diagnostic.Occurrences ?? Array.Empty<DiagnosticOccurrence>())
+            .Select(occurrence => new EngineDiagnosticOccurrence { Location = occurrence.Location, Actual = occurrence.Actual })
+            .ToList()
     };
 
     public static EnginePatch ToPatchTransfer(Patch patch) => new()

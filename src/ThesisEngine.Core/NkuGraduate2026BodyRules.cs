@@ -89,7 +89,7 @@ public sealed class NkuGraduate2026BodyAnalyzer
 
         var distinctUnsupported = unsupported.Distinct(StringComparer.Ordinal).ToArray();
         var coverage = $"规则状态：草案（{profile.Status}）；已检查 {checkedRuns} 个已确认正文文本片段；未覆盖 {distinctUnsupported.Length} 项";
-        return new AnalysisResult(diagnostics, profile.RuleVersion, coverage, distinctUnsupported);
+        return new AnalysisResult(DiagnosticGrouper.Group(diagnostics), profile.RuleVersion, coverage, distinctUnsupported);
     }
 
     private static void CheckFontSize(TextRunSnapshot run, string location, NkuGraduate2026BodyProfile profile,
@@ -185,7 +185,14 @@ public sealed class NkuGraduate2026BodyAnalysisService
     }
 }
 
-internal sealed record BodyScopeInput(int ParagraphIndex, string Text, bool IsHeading, bool HasUnsupportedInlineContent);
+internal sealed record BodyScopeInput(
+    int ParagraphIndex,
+    string Text,
+    bool IsHeading,
+    bool HasUnsupportedInlineContent,
+    bool IsTableCell = false,
+    bool IsCaption = false,
+    bool HasEquation = false);
 
 internal sealed record BodyScopeDecision(ParagraphScopeClassification Classification, string? Reason);
 
@@ -196,8 +203,9 @@ internal sealed record BodyScopeDecision(ParagraphScopeClassification Classifica
 internal static class NkuGraduate2026BodyScopeClassifier
 {
     private static readonly System.Text.RegularExpressions.Regex ChapterHeading = new(
-        @"^第[一二三四五六七八九十百零〇0-9]+章",
-        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        @"^(?:第[一二三四五六七八九十百零〇0-9]+章|Chapter\s+(?:[0-9]+|[IVXLCDM]+)\b)",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static readonly System.Text.RegularExpressions.Regex EndHeading = new(
         @"^(参考文献|主要参考文献|References|Bibliography|附\s*录|Appendix|致\s*谢|Acknowledg(e)?ments|攻读学位期间|个人简历|在学期间成果)",
@@ -230,7 +238,15 @@ internal static class NkuGraduate2026BodyScopeClassifier
         for (var i = 0; i < paragraphs.Count; i++)
         {
             var paragraph = paragraphs[i];
-            if (string.IsNullOrWhiteSpace(paragraph.Text) ||
+            if (paragraph.IsTableCell)
+            {
+                decisions[i] = new(ParagraphScopeClassification.Excluded, "表格单元格；正文规则不适用，表格专属规则尚未启用");
+            }
+            else if (paragraph.IsCaption)
+            {
+                decisions[i] = new(ParagraphScopeClassification.Excluded, "图表题注应使用题注专属规则");
+            }
+            else if (string.IsNullOrWhiteSpace(paragraph.Text) ||
                 paragraph.IsHeading && KnownExcludedHeading.IsMatch(paragraph.Text.Trim()) ||
                 boundariesKnown && paragraph.IsHeading && (i == chapterStart || i == bodyEnd || i > chapterStart && i < bodyEnd))
             {
@@ -252,6 +268,11 @@ internal static class NkuGraduate2026BodyScopeClassifier
             else if (paragraph.IsHeading)
             {
                 decisions[i] = new(ParagraphScopeClassification.Excluded, "正文中的标题段落不适用本批正文段落规则");
+            }
+            else if (paragraph.HasEquation)
+            {
+                decisions[i] = new(ParagraphScopeClassification.ConfirmedBodyProse,
+                    "含公式对象；仅检查普通文字，公式对象单独标记为未覆盖");
             }
             else
             {

@@ -7,6 +7,35 @@ namespace ThesisEngine.Tests;
 public sealed class WordFormattingReaderTests
 {
     [Fact]
+    public void InheritsRenamedDefaultParagraphStyleWhenWordOmitsPStyle()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>
+              <w:style w:type="paragraph" w:default="1" w:styleId="a1">
+                <w:name w:val="Normal"/><w:pPr><w:jc w:val="both"/></w:pPr>
+                <w:rPr><w:rFonts w:eastAsia="宋体" w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/></w:rPr>
+              </w:style>
+            </w:styles>
+            """;
+        var path = CreatePackage(Document(
+            "<w:p><w:r><w:t>正常正文 English</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:rPr><w:rFonts w:eastAsia=\"黑体\"/><w:sz w:val=\"21\"/></w:rPr><w:t>直接格式覆盖</w:t></w:r></w:p>"), styles);
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+            var inherited = Assert.Single(snapshot.Paragraphs[0].Runs);
+            Assert.Equal("宋体", inherited.EastAsiaFont);
+            Assert.Equal("Times New Roman", inherited.AsciiSlotFont);
+            Assert.Equal(12, inherited.FontSizePt);
+            var direct = Assert.Single(snapshot.Paragraphs[1].Runs);
+            Assert.Equal("黑体", direct.EastAsiaFont);
+            Assert.Equal(10.5, direct.FontSizePt);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void ReadsDirectFontsAndHalfPointSizeWithoutChangingThePackage()
     {
         var path = CreatePackage(Document(
@@ -77,8 +106,9 @@ public sealed class WordFormattingReaderTests
         try
         {
             var snapshot = new WordFormattingReader().Read(path);
-            Assert.Single(snapshot.Paragraphs);
+            Assert.Equal(2, snapshot.Paragraphs.Count);
             Assert.Single(snapshot.Paragraphs[0].Runs);
+            Assert.Single(snapshot.Paragraphs[1].Runs);
             Assert.Contains("hyperlinks", snapshot.UnsupportedScopes);
             Assert.Contains("tracked changes", snapshot.UnsupportedScopes);
             Assert.Contains("content controls", snapshot.UnsupportedScopes);
@@ -101,13 +131,16 @@ public sealed class WordFormattingReaderTests
         try
         {
             var snapshot = new WordFormattingReader().Read(path);
-            var runs = Assert.Single(snapshot.Paragraphs).Runs;
+            Assert.Equal(2, snapshot.Paragraphs.Count);
+            var runs = snapshot.Paragraphs[0].Runs;
             Assert.Equal(2, runs.Count);
             Assert.Equal(0, runs[0].RunIndex);
             Assert.Equal(1, runs[1].RunIndex);
             Assert.Equal(12, runs[0].FontSizePt);
             Assert.Null(runs[1].FontSizePt);
-            Assert.Contains("tables", snapshot.UnsupportedScopes);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[1].Scope);
+            Assert.Contains("表格单元格", snapshot.Paragraphs[1].ScopeReason);
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
             Assert.Contains("headers/footers", snapshot.UnsupportedScopes);
             Assert.Contains("footnotes", snapshot.UnsupportedScopes);
             Assert.Contains("endnotes", snapshot.UnsupportedScopes);
@@ -245,6 +278,81 @@ public sealed class WordFormattingReaderTests
     }
 
     [Fact]
+    public void FlattensTableParagraphsForStableLocationsButExcludesThemFromBodyRules()
+    {
+        var body =
+            "<w:p><w:r><w:t>正文段落</w:t></w:r></w:p>" +
+            "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>表格单元格</w:t></w:r></w:p></w:tc></w:tr></w:tbl>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Caption\"/></w:pPr><w:r><w:t>表1-1 样本统计</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:drawing/></w:r></w:p>";
+        var path = CreatePackage(Document(body));
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+
+            Assert.Equal(4, snapshot.Paragraphs.Count);
+            Assert.Equal(0, snapshot.Paragraphs[0].ParagraphIndex);
+            Assert.Equal(1, snapshot.Paragraphs[1].ParagraphIndex);
+            Assert.Equal(2, snapshot.Paragraphs[2].ParagraphIndex);
+            Assert.Equal(3, snapshot.Paragraphs[3].ParagraphIndex);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[1].Scope);
+            Assert.Contains("表格单元格", snapshot.Paragraphs[1].ScopeReason);
+            Assert.Equal(ParagraphScopeClassification.Excluded, snapshot.Paragraphs[2].Scope);
+            Assert.Contains("题注专属规则", snapshot.Paragraphs[2].ScopeReason);
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("tables", StringComparison.Ordinal));
+            Assert.Contains(snapshot.UnsupportedScopes, scope => scope.StartsWith("images", StringComparison.Ordinal));
+            Assert.Equal(CaptionKind.Table, snapshot.Paragraphs[2].Caption);
+            Assert.False(snapshot.Paragraphs[2].CaptionPlacementCorrect);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void RecognizesStyledEnglishChapterAndChecksItsLatinText()
+    {
+        var styles = """
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults>
+            </w:styles>
+            """;
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>Chapter 1 Introduction</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\"/></w:rPr><w:t>This is a synthetic English thesis paragraph.</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>References</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body), styles);
+        try
+        {
+            var snapshot = new WordFormattingReader().Read(path);
+            var bodyParagraph = snapshot.Paragraphs[1];
+            var analysis = new NkuGraduate2026BodyAnalyzer().Analyze(snapshot, NkuGraduate2026BodyProfile.Draft);
+
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, bodyParagraph.Scope);
+            Assert.Collection(analysis.Diagnostics,
+                diagnostic => Assert.Equal(NkuGraduate2026BodyAnalyzer.RuleIdLatinFont, diagnostic.RuleId));
+            Assert.Empty(analysis.UnsupportedScopes);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DoesNotTreatA正文SentenceMentioningATableAsTheCaption()
+    {
+        var body =
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 绪论</w:t></w:r></w:p>" +
+            "<w:p><w:r><w:t>表4.1说明了合成样本的区域指标差异。</w:t></w:r></w:p>" +
+            "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>参考文献</w:t></w:r></w:p>";
+        var path = CreatePackage(Document(body));
+        try
+        {
+            var paragraph = new WordFormattingReader().Read(path).Paragraphs[1];
+
+            Assert.Null(paragraph.Caption);
+            Assert.Equal(ParagraphScopeClassification.ConfirmedBodyProse, paragraph.Scope);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void KeepsAsciiAndHAnsiSlotsIndependentForThe2026Profile()
     {
         var path = CreatePackage(Document(
@@ -303,6 +411,57 @@ public sealed class WordFormattingReaderTests
             Assert.Equal(ParagraphScopeClassification.Unknown, snapshot.Paragraphs[1].Scope);
             Assert.Contains("hyperlinks", snapshot.UnsupportedScopes);
         }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("Figure 2.1 Example", CaptionKind.Figure)]
+    [InlineData("Fig. 2-1 Example", CaptionKind.Figure)]
+    [InlineData("Table 2.1 Example", CaptionKind.Table)]
+    [InlineData("table 2-1 Example", CaptionKind.Table)]
+    public void EnglishCaptionRepairsUseCaptionValuesAndPreserveText(string text, CaptionKind kind)
+    {
+        var xml=Document("<w:p><w:pPr><w:pStyle w:val=\"Caption\"/><w:jc w:val=\"left\"/><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"360\" w:lineRule=\"auto\"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\"/><w:sz w:val=\"24\"/></w:rPr><w:t>"+text+"</w:t></w:r></w:p>");
+        var styles="<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:styleId=\"Caption\"/></w:styles>";
+        var path=CreatePackage(xml,styles,new[] { ("[Content_Types].xml", "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>"), ("_rels/.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>") });
+        var output=Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".docx");
+        try {
+            var snapshot=new WordFormattingReader().Read(path);
+            Assert.Equal(kind,Assert.Single(snapshot.Paragraphs).Caption);
+            var analysis=new FontSizeAnalyzer().Analyze(snapshot,DemoRuleSet.NkuDraftSample);
+            var plan=PatchEngine.PlanPatches(analysis);
+            Assert.Contains(plan.Patches,p=>p.RuleId==FontSizeAnalyzer.RuleIdCaptionFontSize && p.DesiredAfter=="10.5pt");
+            Assert.DoesNotContain(plan.Patches,p=>p.RuleId==FontSizeAnalyzer.RuleIdFontSize || p.RuleId==FontSizeAnalyzer.RuleIdAsciiFont);
+            var applied=PatchEngine.ApplyPatches(path,plan,output);
+            Assert.True(applied.Succeeded,string.Join("; ",applied.Failures.Select(f=>f.Reason)));
+            var after=Assert.Single(new WordFormattingReader().Read(output).Paragraphs);
+            Assert.Equal(text,after.Text);
+            Assert.Equal(10.5,Assert.Single(after.Runs).FontSizePt);
+            Assert.Equal("Arial",after.Runs[0].AsciiFont); // Do not invent an English-caption font requirement.
+            Assert.Equal("center",after.ParagraphFormatting!.Alignment);
+            Assert.Equal("single",after.ParagraphFormatting.LineSpacing);
+            Assert.Empty(PatchEngine.PlanPatches(new FontSizeAnalyzer().Analyze(new WordFormattingReader().Read(output),DemoRuleSet.NkuDraftSample)).Patches);
+        } finally { File.Delete(path); File.Delete(output); }
+    }
+
+    [Theory]
+    [InlineData("Figure 2.1 is discussed in this paragraph.")]
+    [InlineData("Table 2.1 summarizes the observations.")]
+    public void EnglishProseMentioningAnObjectWithoutAStyleOrAdjacentObjectIsNotACaption(string text)
+    {
+        var path=CreatePackage(Document("<w:p><w:r><w:t>"+text+"</w:t></w:r></w:p>"));
+        try { Assert.Null(Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Caption); }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("Caption")]
+    [InlineData("题注")]
+    public void RecognizesRenamedAndDerivedCaptionStylesWithoutDependingOnStyleId(string name)
+    {
+        var styles = "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:style w:type=\"paragraph\" w:styleId=\"a7\"><w:name w:val=\"" + name + "\"/></w:style><w:style w:type=\"paragraph\" w:styleId=\"customCaption\"><w:basedOn w:val=\"a7\"/></w:style></w:styles>";
+        var path = CreatePackage(Document("<w:p><w:pPr><w:pStyle w:val=\"customCaption\"/></w:pPr><w:r><w:t>Table 1.1 Synthetic caption</w:t></w:r></w:p>"), styles);
+        try { Assert.Equal(CaptionKind.Table, Assert.Single(new WordFormattingReader().Read(path).Paragraphs).Caption); }
         finally { File.Delete(path); }
     }
 

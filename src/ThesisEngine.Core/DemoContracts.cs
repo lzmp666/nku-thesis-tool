@@ -25,7 +25,12 @@ public sealed record DemoRuleSet(
 public sealed record DocumentSnapshot(
     string PartName,
     IReadOnlyList<ParagraphSnapshot> Paragraphs,
-    IReadOnlyList<string> UnsupportedScopes);
+    IReadOnlyList<string> UnsupportedScopes)
+{
+    public DocumentSourceMap? SourceMap { get; init; }
+    public ThesisStructureResult? Structure { get; init; }
+    public string? PackageSha256 { get; init; }
+}
 
 public enum ParagraphScopeClassification
 {
@@ -38,7 +43,34 @@ public sealed record ParagraphSnapshot(
     int ParagraphIndex,
     IReadOnlyList<TextRunSnapshot> Runs,
     ParagraphScopeClassification Scope = ParagraphScopeClassification.Unknown,
-    string? ScopeReason = null);
+    string? ScopeReason = null)
+{
+    public string Text { get; init; } = string.Empty;
+    public CaptionKind? Caption { get; init; }
+    public bool? CaptionPlacementCorrect { get; init; }
+    public ParagraphFormattingSnapshot? ParagraphFormatting { get; init; }
+    public ObjectWidthSnapshot? CaptionObjectWidth { get; init; }
+    public string? BlockId { get; init; }
+    public ThesisStructureDecision? Structure { get; init; }
+    public bool IsTableCell { get; init; }
+    public bool HasUnsupportedInlineContent { get; init; }
+}
+
+/// <summary>Layout bound for a uniquely paired inline picture or simple fixed table.</summary>
+public sealed record ObjectWidthSnapshot(double WidthPt, double MaximumWidthPt, string Kind);
+
+public enum CaptionKind
+{
+    Figure,
+    Table
+}
+
+public sealed record ParagraphFormattingSnapshot(
+    string Alignment,
+    double SpaceBeforePt,
+    double SpaceAfterPt,
+    string LineSpacing,
+    bool HasUnresolvedStyle = false);
 
 public sealed record TextRunSnapshot(
     int RunIndex,
@@ -60,7 +92,14 @@ public sealed record Diagnostic(
     string Expected,
     string Actual,
     string FixLevel,
-    string Message);
+    string Message)
+{
+    /// <summary>All text runs represented by this one user-facing issue.</summary>
+    public IReadOnlyList<DiagnosticOccurrence> Occurrences { get; init; } = Array.Empty<DiagnosticOccurrence>();
+}
+
+/// <summary>A concrete document location included in a grouped diagnostic.</summary>
+public sealed record DiagnosticOccurrence(string Location, string Actual);
 
 /// <summary>
 /// 分析结果，对齐 engine-api.md 中的 AnalysisResult。

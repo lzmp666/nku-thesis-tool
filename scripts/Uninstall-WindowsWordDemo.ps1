@@ -7,7 +7,7 @@ $driveRoot = [System.IO.Path]::GetPathRoot($installPath).TrimEnd('\')
 if ($installPath -eq $driveRoot -or $installPath.Length -lt 8) { throw '拒绝删除磁盘根目录或过短路径。' }
 $statePath = Join-Path $installPath '.nku-thesis-tool-install-state.json'
 if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw "没有找到本工具的安装记录，未更改任何设置：$statePath" }
-$state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+$state = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 if ([System.IO.Path]::GetFullPath([string]$state.installRoot).TrimEnd('\') -ne $installPath) { throw '安装记录中的路径不匹配，拒绝继续。' }
 $checksumPath = Join-Path $installPath 'SHA256SUMS.txt'
 if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw '缺少包内 SHA256SUMS.txt，拒绝更改当前用户设置或删除文件。' }
@@ -86,7 +86,7 @@ if (Test-Path -LiteralPath $checksumPath -PathType Leaf) {
     }
 }
 Remove-Item -LiteralPath $statePath -Force
-foreach ($relativeDirectory in @('vsto', 'engine', 'samples', 'docs')) {
+foreach ($relativeDirectory in @('vsto', 'engine', 'samples', 'docs', 'cli')) {
     $directoryPath = Join-Path $installPath $relativeDirectory
     if ((Test-Path -LiteralPath $directoryPath -PathType Container) -and -not (Get-ChildItem -LiteralPath $directoryPath -Force | Select-Object -First 1)) {
         Remove-Item -LiteralPath $directoryPath -Force

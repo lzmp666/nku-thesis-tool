@@ -3,23 +3,43 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$CertificateThumbprint = $env:THESIS_VSTO_CERT_THUMBPRINT,
+    [string]$AddinOutputDirectory,
+    [switch]$IncludeStructureCli,
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$addinOutput = Join-Path $root 'src\ThesisAddIn.VSTO\bin\Release'
+$addinOutput = if ([string]::IsNullOrWhiteSpace($AddinOutputDirectory)) {
+    Join-Path $root 'src\ThesisAddIn.VSTO\bin\Release'
+} elseif ([IO.Path]::IsPathRooted($AddinOutputDirectory)) {
+    (Resolve-Path -LiteralPath $AddinOutputDirectory).Path
+} else {
+    (Resolve-Path -LiteralPath (Join-Path $root $AddinOutputDirectory)).Path
+}
 $engineOutput = Join-Path $root 'src\ThesisAddIn.VSTO\ProtocolHost\bin\Release\net10.0'
+$cliOutput = Join-Path $root 'src\ThesisEngine.Cli\bin\Release\net10.0'
+if ($IncludeStructureCli) {
+    foreach ($name in @('ThesisEngine.Cli.dll', 'ThesisEngine.Cli.deps.json', 'ThesisEngine.Cli.runtimeconfig.json', 'ThesisEngine.Core.dll')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $cliOutput $name) -PathType Leaf)) { throw "缺少结构工作流输出：$name。请先构建 Release CLI。" }
+    }
+}
 $sampleRoot = Join-Path $root 'tests\fixtures\synthetic\demo'
+$fullThesisRoot = Join-Path $root 'tests\fixtures\synthetic\full-thesis'
 $requiredAddin = @('ThesisAddIn.VSTO.dll', 'ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manifest')
 foreach ($name in $requiredAddin) {
     if (-not (Test-Path -LiteralPath (Join-Path $addinOutput $name) -PathType Leaf)) { throw "缺少 Release 加载项输出：$name。请先完成签名构建。" }
 }
-foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.exe', 'ThesisEngine.ProtocolHost.runtimeconfig.json', 'ThesisEngine.ProtocolHost.deps.json')) {
+# The add-in launches the protocol host through `dotnet <assembly>.dll`; an apphost
+# executable is optional and is not emitted when UseAppHost=false.
+foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.runtimeconfig.json', 'ThesisEngine.ProtocolHost.deps.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $engineOutput $name) -PathType Leaf)) { throw "缺少 Release 引擎输出：$name。请先构建 ProtocolHost。" }
 }
 foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $sampleRoot $name) -PathType Leaf)) { throw "缺少合成样例文件：$name" }
+}
+foreach ($name in @('synthetic_complete_thesis.docx', 'manifest.json', 'README.md')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $fullThesisRoot $name) -PathType Leaf)) { throw "缺少完整合成论文样例：$name" }
 }
 if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { throw '请设置 THESIS_VSTO_CERT_THUMBPRINT 或传入 -CertificateThumbprint。' }
 
@@ -34,9 +54,47 @@ foreach ($manifestName in @('ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manif
     if ($embeddedCertificate.Thumbprint -ne $certificate.Thumbprint) { throw "清单 $manifestName 的签名证书与 -CertificateThumbprint 不匹配。" }
 }
 
+# A valid XML signature does not verify hashes of dependent files. Validate the
+# final application manifest after signing, and preserve VSTO's install=false.
+$deploymentDocument = [xml](Get-Content -LiteralPath (Join-Path $addinOutput 'ThesisAddIn.VSTO.vsto') -Raw)
+$deploymentNode = $deploymentDocument.SelectSingleNode("//*[local-name()='deployment']")
+if ($null -eq $deploymentNode -or $deploymentNode.GetAttribute('install') -ne 'false') {
+    throw 'VSTO 部署清单必须使用 install="false"；请在 Mage 更新时显式指定 -Install false。'
+}
+$applicationReferences = $deploymentDocument.SelectNodes("//*[local-name()='dependentAssembly'][@codebase='ThesisAddIn.VSTO.dll.manifest']")
+if ($applicationReferences.Count -ne 1) { throw 'VSTO 部署清单缺少唯一的程序集清单引用。' }
+$applicationReference = $applicationReferences[0]
+$applicationManifestPath = Join-Path $addinOutput 'ThesisAddIn.VSTO.dll.manifest'
+if ([int64]$applicationReference.GetAttribute('size') -ne (Get-Item -LiteralPath $applicationManifestPath).Length) {
+    throw 'VSTO 部署清单记录的程序集清单大小已过期；请在最终签名后重新更新部署清单。'
+}
+$digestMethod = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestMethod']")
+$digestValue = $applicationReference.SelectSingleNode("*[local-name()='hash']/*[local-name()='DigestValue']")
+if ($null -eq $digestMethod -or $null -eq $digestValue) { throw 'VSTO 部署清单缺少程序集清单哈希。' }
+$hashAlgorithm = switch ($digestMethod.GetAttribute('Algorithm')) {
+    'http://www.w3.org/2000/09/xmldsig#sha1' { [Security.Cryptography.SHA1]::Create(); break }
+    'http://www.w3.org/2001/04/xmlenc#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    'http://www.w3.org/2000/09/xmldsig#sha256' { [Security.Cryptography.SHA256]::Create(); break }
+    default { throw 'VSTO 部署清单使用了不支持的哈希算法。' }
+}
+try { $actualDigest = [Convert]::ToBase64String($hashAlgorithm.ComputeHash([IO.File]::ReadAllBytes($applicationManifestPath))) }
+finally { $hashAlgorithm.Dispose() }
+if ($actualDigest -ne $digestValue.InnerText.Trim()) {
+    throw 'VSTO 部署清单记录的程序集清单哈希已过期；请先签程序集清单，再更新并签署部署清单。'
+}
+
 $revision = (& git -C $root rev-parse HEAD 2>$null | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $revision) { throw '无法从 Git 读取源码提交号。请在仓库工作树中运行。' }
-$dirty = (& git -C $root status --porcelain 2>$null | Out-String).Trim()
+$artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'artifacts')).TrimEnd('\')
+$dirty = @(& git -C $root status --porcelain --untracked-files=all 2>$null) | Where-Object {
+    $line = [string]$_
+    if ($line.StartsWith('?? ', [StringComparison]::Ordinal)) {
+        $relativePath = $line.Substring(3).Trim('"')
+        $untrackedPath = [System.IO.Path]::GetFullPath((Join-Path $root $relativePath))
+        if ($untrackedPath.StartsWith($artifactRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
 if ($dirty) { throw '工作树有未提交修改。请从干净提交构建演示包，避免包与源码 SHA 不一致。' }
 
 $outDir = [System.IO.Path]::GetFullPath($OutputDirectory)
@@ -67,8 +125,26 @@ try {
         Copy-Item -Destination $vstoStage
     Get-ChildItem -LiteralPath $engineOutput -File | Where-Object { $_.Extension -in @('.dll', '.exe', '.json') } |
         Copy-Item -Destination $engineStage
+    if ($IncludeStructureCli) {
+        $cliStage = Join-Path $stage 'cli'
+        New-Item -ItemType Directory -Path $cliStage | Out-Null
+        Get-ChildItem -LiteralPath $cliOutput -File | Where-Object { $_.Extension -in @('.dll', '.exe', '.json') } |
+            Copy-Item -Destination $cliStage
+        Copy-Item -LiteralPath (Join-Path $root 'docs\unstyled-thesis-workflow.md') -Destination (Join-Path $docsStage 'unstyled-thesis-workflow.md')
+        $outlineDemoDocs = Join-Path $docsStage 'demo'
+        New-Item -ItemType Directory -Path $outlineDemoDocs | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'docs\demo\word-outline-acceptance-20261026.md') -Destination $outlineDemoDocs
+        $researchStage = Join-Path $docsStage 'research'
+        New-Item -ItemType Directory -Path $researchStage | Out-Null
+        Copy-Item -LiteralPath (Join-Path $root 'docs\research\unstyled-thesis-open-source-2026-10-26.md') -Destination $researchStage
+    }
     foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
         Copy-Item -LiteralPath (Join-Path $sampleRoot $name) -Destination $samplesStage
+    }
+    $fullThesisStage = Join-Path $samplesStage 'full-thesis'
+    New-Item -ItemType Directory -Path $fullThesisStage | Out-Null
+    foreach ($name in @('synthetic_complete_thesis.docx', 'synthetic_object_layout_errors.docx', 'manifest.json', 'README.md')) {
+        Copy-Item -LiteralPath (Join-Path $fullThesisRoot $name) -Destination $fullThesisStage
     }
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Test-WindowsWordDemoEnvironment.ps1') -Destination (Join-Path $stage 'Preflight.ps1')
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Install-WindowsWordDemo.ps1') -Destination (Join-Path $stage 'Install.ps1')
@@ -99,11 +175,14 @@ try {
     $buildInfo = [ordered]@{
         product = 'NKU Thesis Tool Word Demo'
         sourceRevision = $revision
+        deploymentVersion = ([xml](Get-Content -LiteralPath (Join-Path $addinOutput 'ThesisAddIn.VSTO.vsto') -Raw)).SelectSingleNode('/*/*[local-name()="assemblyIdentity"]').GetAttribute('version')
+        addinFileVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $addinOutput 'ThesisAddIn.VSTO.dll')).FileVersion
         builtAtUtc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
         signingCertificateThumbprint = $certificate.Thumbprint
         wordAcceptanceChecklistIncluded = $acceptanceIncluded
         candidateWordAcceptanceRecordIncluded = $acceptanceRecordIncluded
         wordAcceptanceComplete = $acceptanceComplete
+        structureCliIncluded = [bool]$IncludeStructureCli
         readyForDistribution = $readyForDistribution
         note = 'Synthetic demonstration only; no private key or real thesis is included.'
     }
