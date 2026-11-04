@@ -17,6 +17,24 @@ if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.Ordina
     return command.Execute(args);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
+{
+    IChatService chatService;
+    var apiKey = Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
+    if (!string.IsNullOrEmpty(apiKey))
+    {
+        chatService = new DeepSeekChatService(apiKey);
+        Console.WriteLine("[模式] DeepSeek 大模型");
+    }
+    else
+    {
+        chatService = new LocalRuleChatService();
+        Console.WriteLine("[模式] 本地规则（设置 DEEPSEEK_API_KEY 环境变量可启用大模型）");
+    }
+    var command = new ChatCommand(chatService);
+    return command.Execute(args[1..]);
+}
+
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: ThesisEngine.Cli <document.docx>");
