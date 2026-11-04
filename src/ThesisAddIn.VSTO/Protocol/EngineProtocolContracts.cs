@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,8 +13,14 @@ namespace ThesisAddIn.Protocol;
 
 public static class EngineProtocol
 {
-    public const string Version = "1.0";
+    public const string Version = "1.3";
     public const string AnalyzeOperation = "analyze";
+    public const string PlanOperation = "plan";
+    public const string ApplyOperation = "apply";
+    public const string AnnotateOperation = "annotate";
+    public const string StructureReviewOperation = "structure_review";
+    public const string StructurePlanOperation = "structure_plan";
+    public const string StructureVerifyOperation = "structure_verify";
 
     public const string InvalidRequest = "invalid_request";
     public const string ProtocolVersionMismatch = "protocol_version_mismatch";
@@ -22,6 +29,7 @@ public static class EngineProtocol
     public const string EngineExit = "engine_exit";
     public const string Timeout = "timeout";
     public const string Cancelled = "cancelled";
+    public const string PatchConflict = "patch_conflict";
 }
 
 public sealed class EngineRequest
@@ -37,6 +45,34 @@ public sealed class EngineRequest
 
     [JsonPropertyName("inputPath")]
     public string InputPath { get; set; } = string.Empty;
+
+    /// <summary>apply/annotate 操作的目标路径；必须与 inputPath 不同，且不得已存在。</summary>
+    [JsonPropertyName("outputPath")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OutputPath { get; set; }
+
+    /// <summary>可选的规则编号过滤，用于“只处理当前这一项”。</summary>
+    [JsonPropertyName("ruleId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuleId { get; set; }
+
+    /// <summary>可选的位置过滤，与 ruleId 一起确定唯一的一条诊断。</summary>
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Location { get; set; }
+
+    /// <summary>所有属于当前合并问题的位置；旧客户端仍可只传 location。</summary>
+    [JsonPropertyName("locations")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Locations { get; set; }
+
+    [JsonPropertyName("structurePlan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructurePlanRequest? StructurePlan { get; set; }
+
+    [JsonPropertyName("structureVerification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureVerificationRequest? StructureVerification { get; set; }
 }
 
 public sealed class EngineResponse
@@ -54,9 +90,109 @@ public sealed class EngineResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineAnalysisResult? Result { get; set; }
 
+    /// <summary>plan 操作的返回：将要修改的内容与保留给用户的诊断。</summary>
+    [JsonPropertyName("plan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EnginePatchPlan? Plan { get; set; }
+
+    /// <summary>apply 操作的返回：已应用、失败和未处理的补丁。</summary>
+    [JsonPropertyName("apply")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineApplyResult? Apply { get; set; }
+
+    /// <summary>annotate 操作写入的新文档及批注数量。</summary>
+    [JsonPropertyName("annotation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineAnnotationResult? Annotation { get; set; }
+
+    [JsonPropertyName("structureReview")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureReviewResult? StructureReview { get; set; }
+
+    [JsonPropertyName("structurePlan")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureFormatPlan? StructurePlan { get; set; }
+
+    [JsonPropertyName("structureVerification")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EngineStructureVerificationResult? StructureVerification { get; set; }
+
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public EngineError? Error { get; set; }
+}
+
+public sealed class EngineAnnotationResult
+{
+    [JsonPropertyName("outputPath")]
+    public string OutputPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("commentCount")]
+    public int CommentCount { get; set; }
+}
+
+/// <summary>一条待执行的修复：位置、改前值、目标值和依据。</summary>
+public sealed class EnginePatch
+{
+    [JsonPropertyName("ruleId")]
+    public string RuleId { get; set; } = string.Empty;
+
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("expectedBefore")]
+    public string ExpectedBefore { get; set; } = string.Empty;
+
+    [JsonPropertyName("desiredAfter")]
+    public string DesiredAfter { get; set; } = string.Empty;
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class EnginePatchFailure
+{
+    [JsonPropertyName("patch")]
+    public EnginePatch Patch { get; set; } = new();
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 修复计划：Patches 只包含处理分类为 auto 的项目；Deferred 是保留给用户处理的诊断。
+/// </summary>
+public sealed class EnginePatchPlan
+{
+    [JsonPropertyName("patches")]
+    public List<EnginePatch> Patches { get; set; } = new();
+
+    [JsonPropertyName("deferred")]
+    public List<EngineDiagnostic> Deferred { get; set; } = new();
+
+    [JsonPropertyName("ruleVersion")]
+    public string RuleVersion { get; set; } = string.Empty;
+
+    [JsonPropertyName("coverage")]
+    public string Coverage { get; set; } = string.Empty;
+
+    [JsonPropertyName("unsupportedScopes")]
+    public List<string> UnsupportedScopes { get; set; } = new();
+}
+
+public sealed class EngineApplyResult
+{
+    [JsonPropertyName("outputPath")]
+    public string OutputPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("applied")]
+    public List<EnginePatch> Applied { get; set; } = new();
+
+    [JsonPropertyName("failures")]
+    public List<EnginePatchFailure> Failures { get; set; } = new();
+
+    [JsonPropertyName("unresolved")]
+    public List<EnginePatch> Unresolved { get; set; } = new();
 }
 
 public sealed class EngineError
@@ -105,15 +241,34 @@ public sealed class EngineDiagnostic
 
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("occurrences")]
+    public List<EngineDiagnosticOccurrence> Occurrences { get; set; } = new();
+}
+
+public sealed class EngineDiagnosticOccurrence
+{
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+
+    [JsonPropertyName("actual")]
+    public string Actual { get; set; } = string.Empty;
 }
 
 public static class EngineProtocolCodec
 {
-    private static readonly JsonSerializerOptions Options = new()
+    private static readonly JsonSerializerOptions Options = CreateOptions();
+
+    private static JsonSerializerOptions CreateOptions()
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false
-    };
+        var options = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            WriteIndented = false
+        };
+        options.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
+        return options;
+    }
 
     public static string SerializeRequest(EngineRequest request) => Serialize(request);
 
@@ -212,19 +367,107 @@ public sealed class EngineProtocolClient
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
-    public EngineResponse Analyze(string inputPath) => AnalyzeAsync(inputPath).GetAwaiter().GetResult();
+    public EngineResponse Analyze(string inputPath) =>
+        Send(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null));
 
-    public async Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default)
+    public EngineResponse Plan(string inputPath, string? ruleId, string? location) =>
+        Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location));
+
+    public EngineResponse Plan(string inputPath, string? ruleId, string? location, IReadOnlyList<string>? locations) =>
+        Send(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location, locations));
+
+    public Task<EngineResponse> PlanAsync(
+        string inputPath,
+        string? ruleId,
+        string? location,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location), cancellationToken);
+
+    public Task<EngineResponse> PlanAsync(
+        string inputPath,
+        string? ruleId,
+        string? location,
+        IReadOnlyList<string>? locations,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.PlanOperation, inputPath, null, ruleId, location, locations), cancellationToken);
+
+    public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location) =>
+        Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location));
+
+    public EngineResponse Apply(string inputPath, string outputPath, string? ruleId, string? location, IReadOnlyList<string>? locations) =>
+        Send(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location, locations));
+
+    public EngineResponse Annotate(string inputPath, string outputPath) =>
+        Send(CreateRequest(EngineProtocol.AnnotateOperation, inputPath, outputPath, null, null));
+
+    public Task<EngineResponse> AnnotateAsync(
+        string inputPath,
+        string outputPath,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.AnnotateOperation, inputPath, outputPath, null, null), cancellationToken);
+
+    public Task<EngineResponse> ApplyAsync(
+        string inputPath,
+        string outputPath,
+        string? ruleId,
+        string? location,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location), cancellationToken);
+
+    public Task<EngineResponse> ApplyAsync(
+        string inputPath,
+        string outputPath,
+        string? ruleId,
+        string? location,
+        IReadOnlyList<string>? locations,
+        CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.ApplyOperation, inputPath, outputPath, ruleId, location, locations), cancellationToken);
+
+    public Task<EngineResponse> AnalyzeAsync(string inputPath, CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.AnalyzeOperation, inputPath, null, null, null), cancellationToken);
+
+    public Task<EngineResponse> ReviewStructureAsync(string inputPath, CancellationToken cancellationToken = default) =>
+        SendAsync(CreateRequest(EngineProtocol.StructureReviewOperation, inputPath, null, null, null), cancellationToken);
+
+    public Task<EngineResponse> PlanStructureAsync(string inputPath, EngineStructurePlanRequest structurePlan,
+        CancellationToken cancellationToken = default)
     {
-        var request = new EngineRequest
-        {
-            RequestId = Guid.NewGuid().ToString("N"),
-            Operation = EngineProtocol.AnalyzeOperation,
-            InputPath = inputPath ?? string.Empty
-        };
+        if (structurePlan is null) throw new ArgumentNullException(nameof(structurePlan));
+        var request = CreateRequest(EngineProtocol.StructurePlanOperation, inputPath, null, null, null);
+        request.StructurePlan = structurePlan;
+        return SendAsync(request, cancellationToken);
+    }
 
-        if (string.IsNullOrWhiteSpace(inputPath) ||
-            !string.Equals(Path.GetExtension(inputPath), ".docx", StringComparison.OrdinalIgnoreCase))
+    public Task<EngineResponse> VerifyStructureFormatAsync(string inputPath, EngineStructureFormatPlan previousPlan,
+        CancellationToken cancellationToken = default)
+    {
+        if (previousPlan is null) throw new ArgumentNullException(nameof(previousPlan));
+        var request = CreateRequest(EngineProtocol.StructureVerifyOperation, inputPath, null, null, null);
+        request.StructureVerification = new EngineStructureVerificationRequest { PreviousPlan = previousPlan };
+        return SendAsync(request, cancellationToken);
+    }
+
+    public EngineResponse Send(EngineRequest request) => SendAsync(request).GetAwaiter().GetResult();
+
+    private static EngineRequest CreateRequest(string operation, string inputPath, string? outputPath, string? ruleId, string? location,
+        IReadOnlyList<string>? locations = null) => new()
+    {
+        RequestId = Guid.NewGuid().ToString("N"),
+        Operation = operation,
+        InputPath = inputPath ?? string.Empty,
+        OutputPath = outputPath,
+        RuleId = ruleId,
+        Location = location,
+        Locations = locations?.ToList()
+    };
+
+    public async Task<EngineResponse> SendAsync(EngineRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null) throw new ArgumentNullException(nameof(request));
+        request.RequestId = string.IsNullOrWhiteSpace(request.RequestId) ? Guid.NewGuid().ToString("N") : request.RequestId;
+
+        if (string.IsNullOrWhiteSpace(request.InputPath) ||
+            !string.Equals(Path.GetExtension(request.InputPath), ".docx", StringComparison.OrdinalIgnoreCase))
             return Failure(request.RequestId, EngineProtocol.InvalidRequest, "输入文件必须是 .docx。", request);
 
         using var process = new Process
@@ -284,10 +527,11 @@ public sealed class EngineProtocolClient
                 CloseInputAndWait(process);
                 return Failure(request.RequestId, EngineProtocol.ProtocolError, "引擎响应 requestId 不匹配。", request);
             }
-            if (response.Ok && response.Result is null)
+            if (response.Ok && !HasPayloadFor(request.Operation, response))
             {
                 CloseInputAndWait(process);
-                return Failure(request.RequestId, EngineProtocol.ProtocolError, "成功响应缺少 result。", request);
+                return Failure(request.RequestId, EngineProtocol.ProtocolError,
+                    "成功响应缺少与操作匹配的结果（" + request.Operation + "）。", request);
             }
             if (!response.Ok && response.Error is null)
             {
@@ -317,6 +561,21 @@ public sealed class EngineProtocolClient
         Error = new EngineError { Code = code, Message = message }
     };
 
+    /// <summary>
+    /// 成功响应必须带上与操作匹配的载荷：analyze 要 result，plan 要 plan，apply 要 apply。
+    /// 早期实现只检查 result，导致 plan/apply 的成功响应被误判为协议异常。
+    /// </summary>
+    private static bool HasPayloadFor(string operation, EngineResponse response) => operation switch
+    {
+        EngineProtocol.PlanOperation => response.Plan is not null,
+        EngineProtocol.ApplyOperation => response.Apply is not null,
+        EngineProtocol.AnnotateOperation => response.Annotation is not null && response.Result is not null,
+        EngineProtocol.StructureReviewOperation => response.StructureReview is not null,
+        EngineProtocol.StructurePlanOperation => response.StructurePlan is not null,
+        EngineProtocol.StructureVerifyOperation => response.StructureVerification is not null,
+        _ => response.Result is not null
+    };
+
     private static void CloseInputAndWait(Process process)
     {
         try
@@ -338,3 +597,4 @@ public sealed class EngineProtocolClient
         catch (System.ComponentModel.Win32Exception) { }
     }
 }
+

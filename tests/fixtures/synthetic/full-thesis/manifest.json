@@ -1,0 +1,58 @@
+{
+  "file": "synthetic_complete_thesis.docx",
+  "syntheticOnly": true,
+  "observedWordPages": 14,
+  "observedWordCharacters": 6154,
+  "sha256": "035E0E13780A0269C793E45BB059C1764761AA22D7326E871539ABEF6A16E4F0",
+  "plannedDiagnostics": [
+    {
+      "marker": "【中文格式测试点】",
+      "rule": "east-asian-font",
+      "expected": "宋体",
+      "actual": "黑体"
+    },
+    {
+      "marker": "【字号格式测试点】",
+      "rule": "font-size",
+      "expected": "12pt",
+      "actual": "10.5pt"
+    },
+    {
+      "marker": "SYNTHETIC ENGLISH FORMAT CHECK",
+      "rule": "western-font",
+      "expected": "Times New Roman",
+      "actual": "Arial"
+    },
+    {
+      "marker": "图4.1　不同时段的合成平均占用水平",
+      "rules": [
+        "caption-east-asian-font",
+        "caption-font-size",
+        "caption-alignment",
+        "caption-line-spacing",
+        "caption-space-before",
+        "caption-space-after"
+      ],
+      "expected": "宋体, 10.5pt, 居中, 单倍行距, 段前6pt, 段后12pt",
+      "actual": "黑体, 12pt, 左对齐, 1.5倍行距, 段前0pt, 段后0pt"
+    }
+  ],
+  "content": [
+    "Chinese and English abstracts",
+    "contents",
+    "six chapters",
+    "figures",
+    "tables",
+    "equation",
+    "references",
+    "appendices",
+    "acknowledgments"
+  ],
+  "knownUnsupportedScopes": [
+    "table cell formatting, border conventions, header/unit meaning and cross-page headers",
+    "caption number/title gap and automatic moving/reordering of captions",
+    "image clarity, semantic correctness and visual layout",
+    "equation formatting",
+    "headers and footers"
+  ]
+}

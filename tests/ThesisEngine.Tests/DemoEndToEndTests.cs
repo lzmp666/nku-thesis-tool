@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Xunit;
 
 namespace ThesisEngine.Tests;
@@ -7,6 +8,7 @@ public sealed class DemoEndToEndTests
 {
     private const string CleanSample = "tests/fixtures/synthetic/demo/clean_sample.docx";
     private const string KnownIssuesSample = "tests/fixtures/synthetic/demo/known_issues_sample.docx";
+    private const string FullThesis = "tests/fixtures/synthetic/full-thesis/synthetic_complete_thesis.docx";
 
     [Fact]
     public async Task CleanSyntheticSampleProducesNoFindingsWithoutChangingInput()
@@ -44,18 +46,45 @@ public sealed class DemoEndToEndTests
         Assert.Contains("发现问题：3", result.Output);
         Assert.Contains("规则版本：demo-0.1.0", result.Output);
         Assert.Contains("demo/east-asian-font", result.Output);
-        Assert.Contains("word/document.xml#paragraph[0]/run[0]", result.Output);
+        Assert.Contains("word/document.xml#paragraph[1]/run[0]", result.Output);
         Assert.Contains("期望：宋体", result.Output);
         Assert.Contains("实际：黑体", result.Output);
         Assert.Contains("demo/western-font", result.Output);
-        Assert.Contains("word/document.xml#paragraph[1]/run[0]", result.Output);
+        Assert.Contains("word/document.xml#paragraph[2]/run[0]", result.Output);
         Assert.Contains("期望：Times New Roman", result.Output);
         Assert.Contains("实际：Arial", result.Output);
         Assert.Contains("demo/font-size", result.Output);
-        Assert.Contains("word/document.xml#paragraph[2]/run[0]", result.Output);
+        Assert.Contains("word/document.xml#paragraph[3]/run[0]", result.Output);
         Assert.Contains("期望：12pt", result.Output);
         Assert.Contains("实际：10.5pt", result.Output);
         Assert.Contains("不代表规范合规结论", result.Output);
+        Assert.Equal(before, File.ReadAllBytes(sample));
+    }
+
+    [Fact]
+    public async Task FullSyntheticThesisFindsThreeBodyFaultsAndOneGroupedCaptionStyleSet()
+    {
+        var sample = Path.Combine(FindRepositoryRoot(), FullThesis);
+        var before = File.ReadAllBytes(sample);
+
+        var result = await RunCli("analyze", "--demo", FullThesis);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Error);
+        Assert.Contains("诊断数量：9", result.Output);
+        Assert.Contains("已检查 49 个正文文本片段，涉及 43 个确认正文段落", result.Output);
+        Assert.Contains("识别 6 条图/表题注", result.Output);
+        Assert.Contains("demo/east-asian-font", result.Output);
+        Assert.Contains("demo/western-font", result.Output);
+        Assert.Contains("demo/font-size", result.Output);
+        Assert.Contains("demo/caption-east-asian-font", result.Output);
+        Assert.Contains("demo/caption-font-size", result.Output);
+        Assert.Contains("demo/caption-alignment", result.Output);
+        Assert.Contains("demo/caption-line-spacing", result.Output);
+        Assert.Contains("demo/caption-space-before", result.Output);
+        Assert.Contains("demo/caption-space-after", result.Output);
+        Assert.Contains("tables (cell formatting rules are not configured)", result.Output);
+        Assert.Contains("images", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
     }
 
@@ -71,6 +100,8 @@ public sealed class DemoEndToEndTests
             WorkingDirectory = root,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };

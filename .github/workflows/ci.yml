@@ -17,3 +17,44 @@ jobs:
       - run: dotnet restore NkuThesisTool.sln
       - run: dotnet build NkuThesisTool.sln --no-restore --configuration Release
       - run: dotnet test NkuThesisTool.sln --no-build --configuration Release
+  vsto-build:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.203'
+      - name: Check VSTO project format
+        id: vsto-format
+        shell: pwsh
+        run: |
+          $projectFile = 'src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj'
+          $project = Get-Content $projectFile -Raw
+          if ($project -match '(?m)^\s*<Project\s+Sdk=') {
+            "buildable=false" >> $env:GITHUB_OUTPUT
+            Write-Host "::notice::Skipping VSTO build: the current SDK-style VSTO project needs migration to the VS2022-compatible classic format. The job will build it once the project changes to classic MSBuild."
+          } else {
+            "buildable=true" >> $env:GITHUB_OUTPUT
+          }
+      - name: Create ephemeral VSTO signing certificate
+        if: steps.vsto-format.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=NKU Thesis Tool CI' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddDays(1)
+          "THESIS_VSTO_CERT_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Build signed VSTO add-in
+        if: steps.vsto-format.outputs.buildable == 'true'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "Visual Studio Installer vswhere.exe was not found." }
+
+          $vsPath = & $vswhere -latest -products '*' -version '[17.0,18.0)' -property installationPath
+          if (-not $vsPath) { throw "Visual Studio 2022 was not found." }
+
+          $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+          if (-not (Test-Path $msbuild)) { throw "Visual Studio 2022 MSBuild was not found: $msbuild" }
+
+          if (-not $env:THESIS_VSTO_CERT_THUMBPRINT) { throw "The ephemeral VSTO development certificate was not created." }
+          & $msbuild 'src\ThesisAddIn.VSTO\ThesisAddIn.VSTO.csproj' /p:Configuration=Release /p:SignManifests=true "/p:ManifestCertificateThumbprint=$env:THESIS_VSTO_CERT_THUMBPRINT" /m:1 /verbosity:minimal

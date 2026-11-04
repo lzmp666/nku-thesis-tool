@@ -41,8 +41,9 @@ def build_clean(path: Path) -> None:
 
 
 def build_known_issues(path: Path) -> None:
-    """生成含三项已知问题的样本。"""
+    """生成带有正文边界且含三项已知问题的样本。"""
     doc = Document()
+    doc.add_heading("第一章 绪论", level=1)
 
     # 问题 1：东亚字体应为宋体，这里故意用黑体
     paragraph1 = doc.add_paragraph()
@@ -52,7 +53,7 @@ def build_known_issues(path: Path) -> None:
 
     # 问题 2：西文字体应为 Times New Roman，这里故意用 Arial
     paragraph2 = doc.add_paragraph()
-    run2 = paragraph2.add_run("【问题2】西文字体不符合预期。")
+    run2 = paragraph2.add_run("【问题2】Latin 西文字体不符合预期。")
     set_east_asian_font(run2, "宋体", "Arial")
     run2.font.size = Pt(12)
 
@@ -62,6 +63,7 @@ def build_known_issues(path: Path) -> None:
     set_east_asian_font(run3, "宋体", "Times New Roman")
     run3.font.size = Pt(10.5)
 
+    doc.add_heading("参考文献", level=1)
     doc.save(path)
 
 

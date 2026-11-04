@@ -1,10 +1,13 @@
 **/bin/
 **/obj/
 .vs/
+.dotnet-cli/
 .vscode/
 TestResults/
 *.user
 *.suo
 *.docx
 *.docm
+/src/ThesisAddIn.VSTO/*.pfx
 !tests/fixtures/synthetic/*.docx
+!tests/fixtures/synthetic/full-thesis/*.docx

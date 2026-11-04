@@ -1,12 +1,49 @@
-# JSON Schema expressed as YAML; version 0.1.0, draft contract
+# JSON Schema expressed as YAML. Supports legacy 0.1.0 and the profile-aware 0.2.0 contract.
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Thesis rule set
 type: object
 additionalProperties: false
 required: [schema_version, status, rules]
 properties:
-  schema_version: {const: "0.1.0"}
+  schema_version: {enum: ["0.1.0", "0.2.0"]}
   status: {enum: [draft, approved]}
+  profile:
+    type: object
+    additionalProperties: false
+    required: [profile_id, rule_version, standard_version, status, selection, scope_policy, source]
+    properties:
+      profile_id: {type: string, minLength: 1}
+      rule_version: {type: string, minLength: 1}
+      standard_version: {type: string, minLength: 1}
+      status: {enum: [draft, approved]}
+      selection: {enum: [explicit]}
+      scope_policy:
+        type: object
+        additionalProperties: false
+        required: [include, exclude, unknown]
+        properties:
+          include:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: {enum: [confirmed_body_prose]}
+          exclude:
+            type: array
+            uniqueItems: true
+            items:
+              enum: [heading, abstract, toc, references, appendix, acknowledgements, title_page, table_cell, footnote, endnote, header_footer, text_box, equation_object, field, non_body_part]
+          unknown: {enum: [unsupported]}
+      source:
+        type: object
+        additionalProperties: false
+        required: [title, url, version, locator, quote, verified_on]
+        properties:
+          title: {type: string, minLength: 1}
+          url: {type: string, format: uri}
+          version: {type: string, minLength: 1}
+          locator: {type: string, minLength: 1}
+          quote: {type: string, minLength: 1}
+          verified_on: {type: string, format: date}
   rules:
     type: array
     items:
@@ -15,12 +52,20 @@ properties:
       required: [id, scope, property, expect, severity, fix, source]
       properties:
         id: {type: string, pattern: "^NKU-[A-Z]+-[0-9]{3}$"}
+        matrix_id: {type: string, pattern: "^M26-[0-9]{3}$"}
         scope:
           type: array
           minItems: 1
           uniqueItems: true
           items: {enum: [body, heading, section]}
         property: {enum: [font, font_size, line_spacing, page_margins]}
+        text_script: {enum: [east_asian, latin, any]}
+        font_slots:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {enum: [eastAsia, ascii, hAnsi]}
+        unknown_policy: {enum: [unsupported]}
         expect:
           type: object
           additionalProperties: false
@@ -52,4 +97,36 @@ properties:
             locator: {type: string, minLength: 1}
             quote: {type: string, minLength: 1}
             verified_on: {type: string, format: date}
-# 跨字段语义见 rule-guide；schema 通过不等于已验证官方出处
+allOf:
+  - if:
+      properties:
+        schema_version: {const: "0.2.0"}
+      required: [schema_version]
+    then:
+      required: [profile]
+      properties:
+        rules:
+          items:
+            required: [matrix_id, unknown_policy]
+            allOf:
+              - if:
+                  properties:
+                    property: {const: font}
+                  required: [property]
+                then:
+                  required: [text_script, font_slots]
+  - if:
+      properties:
+        schema_version: {const: "0.1.0"}
+      required: [schema_version]
+    then:
+      not: {required: [profile]}
+      properties:
+        rules:
+          items:
+            not:
+              anyOf:
+                - {required: [matrix_id]}
+                - {required: [text_script]}
+                - {required: [font_slots]}
+                - {required: [unknown_policy]}

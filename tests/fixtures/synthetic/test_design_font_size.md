@@ -2,7 +2,7 @@
 
 ## 范围和状态
 
-本文件交付测试设计，不实现检测/修复引擎，不修改 contracts/ 或 src/。基于 PR #12 的初稿修订。当前 Core 仅有 DocumentLoader；以下是未来实现的验收目标，不是已通过的自动化测试。
+本文件最初交付于 Issue #10，保留其原始测试设计背景。当前实现状态以 Core 与自动化测试为准：可解析的直接格式差异会生成待用户确认的修复预览；未知值仍为 manual。以下规则输入仍是合成值，不代表学校正式要求。
 
 所有字体名和字号均为合成测试输入，不是南开校规。规则来源未审核时不得启用正式检测或宣称论文合规。正常场景只表示该项合成断言匹配。学校来源、脚本选择与主题解析仍需负责人审核。
 
@@ -14,30 +14,30 @@
 - 字体案例以单一脚本隔离选择：中文看 eastAsia，ASCII 英文看 ascii；相应有效字体必须解析后比较。两种脚本/主题的规则选择若当前 schema 无法表达，先提 RFC，保持设计待实现，不增设未定义字段。
 - w:sz 的值是半点数；24 = 12pt、21 = 10.5pt。有效值必须从直接属性或明确的继承/主题链解析；缺失直接属性不等于最终值未知。不得根据邻近文字猜测合规。
 - N：diagnostics=[]、patches=[]，仅该项已覆盖的合成断言匹配；fixLevel/severity 不适用。D：一条不匹配诊断，必须包含绑定的 ruleId、severity、location、expected、actual、fixLevel、message。U：值无法确定或能力不支持，报告未覆盖/无法判断及原因，不宣称匹配，patches=[]；若用 Diagnostic 表达，则 severity=warning、fixLevel=manual，expected 为目标、actual 为未解析状态（具体编码经 RFC/实现确定）。
-- 本设计对确定不匹配使用 severity=warning、fixLevel=suggest，用户采纳前不得生成可执行补丁；未知项使用 manual。测试规则的 fix 需与场景一致。未获得安全修复证据和批准规则时不标 auto。
+- 可解析的确定不匹配使用 severity=warning、fixLevel=auto，以便生成预览；插件仍必须先展示前后值，并等待用户确认后才应用。未知项使用 manual。该状态仅表示演示修复引擎支持该属性，不代表学校规则已批准。
 
 ## 场景矩阵
 
 | ID | 启用目标、输入与上下文 | 预期诊断/有效值 | 位置 | severity | fixLevel | 待审核来源 |
 | --- | --- | --- | --- | --- | --- | --- |
 | FS-001 | F；文本“中文”；直接 eastAsia=TestFontA | N；actual=TestFontA | L1 | 不适用 | 不适用 | R1/R3/R4 |
-| FS-002 | F；文本“中文”；直接 eastAsia=TestFontB | D；expected=TestFontA，actual=TestFontB，字体不匹配 | L1 | warning | suggest | R1/R3/R4 |
+| FS-002 | F；文本“中文”；直接 eastAsia=TestFontB | D；expected=TestFontA，actual=TestFontB，字体不匹配 | L1 | warning | auto | R1/R3/R4 |
 | FS-003 | F；文本“ABC”；直接 ascii=TestFontA | N；actual=TestFontA | L1 | 不适用 | 不适用 | R1/R3/R4 |
-| FS-004 | F；文本“ABC”；直接 ascii=TestFontB | D；expected=TestFontA，actual=TestFontB，字体不匹配 | L1 | warning | suggest | R1/R3/R4 |
+| FS-004 | F；文本“ABC”；直接 ascii=TestFontB | D；expected=TestFontA，actual=TestFontB，字体不匹配 | L1 | warning | auto | R1/R3/R4 |
 | FS-005 | S；文本“中文”；直接 sz=24 | N；actual=12pt | L1 | 不适用 | 不适用 | R1/R2/R4 |
-| FS-006 | S；文本“中文”；直接 sz=22 | D；expected=12pt，actual=11pt，字号不匹配 | L1 | warning | suggest | R1/R2/R4 |
+| FS-006 | S；文本“中文”；直接 sz=22 | D；expected=12pt，actual=11pt，字号不匹配 | L1 | warning | auto | R1/R2/R4 |
 | FS-007 | H；文本“ABC”；直接 sz=21 | N；actual=10.5pt，不因半点误报 | L1 | 不适用 | 不适用 | R1/R2/R4 |
-| FS-008 | S；文本“ABC”；直接 sz=21 | D；expected=12pt，actual=10.5pt；原因是目标不匹配而非半点无效 | L1 | warning | suggest | R1/R2/R4 |
-| FS-009 | S；文本“中文”；直接 sz=23 | D；expected=12pt，actual=11.5pt，目标下方半点边界 | L1 | warning | suggest | R1/R2/R4 |
-| FS-010 | S；文本“中文”；直接 sz=25 | D；expected=12pt，actual=12.5pt，目标上方半点边界 | L1 | warning | suggest | R1/R2/R4 |
+| FS-008 | S；文本“ABC”；直接 sz=21 | D；expected=12pt，actual=10.5pt；原因是目标不匹配而非半点无效 | L1 | warning | auto | R1/R2/R4 |
+| FS-009 | S；文本“中文”；直接 sz=23 | D；expected=12pt，actual=11.5pt，目标下方半点边界 | L1 | warning | auto | R1/R2/R4 |
+| FS-010 | S；文本“中文”；直接 sz=25 | D；expected=12pt，actual=12.5pt，目标上方半点边界 | L1 | warning | auto | R1/R2/R4 |
 | FS-011 | S；段落样式 Child basedOn Parent；Parent rPr sz=24；Child、run 无 sz；无其他格式来源 | N；从已知父样式解析 actual=12pt；不按直接属性缺失报错 | L1（来源 styles.xml/Parent） | 不适用 | 不适用 | R1/R2/R4 |
-| FS-012 | S；同 FS-011，但 run 直接 sz=22 | D；expected=12pt，actual=11pt；直接覆盖优先 | L1 | warning | suggest | R1/R2/R4 |
+| FS-012 | S；同 FS-011，但 run 直接 sz=22 | D；expected=12pt，actual=11pt；直接覆盖优先 | L1 | warning | auto | R1/R2/R4 |
 | FS-013 | F；中文；eastAsiaTheme=minorEastAsia；主题 minorFont 对 Hans 的映射=TestFontA；语言 zh-CN；无冲突属性 | 设计目标 N，actual=TestFontA；未实现主题/脚本解析时必须 U，不得靠主题标记判匹配 | L1（来源 theme/theme1.xml） | N 不适用；U warning | N 不适用；U manual | R1/R3/R4 |
 | FS-014 | F；同 FS-013，但主题部件缺失，且无可解析回退 | U；字体无法解析；不能匹配或自动替换 | L1 | warning | manual | R1/R3/R4 |
 | FS-015 | S；run 无 sz；styles docDefaults/rPrDefault/rPr sz=24；无样式和直接覆盖 | N；actual=12pt，直接缺失但默认值已知 | L1（来源 styles.xml/docDefaults） | 不适用 | 不适用 | R1/R2/R4 |
 | FS-016 | S；run、样式链和 docDefaults 都无 sz | U；字号未知，不能用零诊断声称匹配 | L1 | warning | manual | R1/R2/R4 |
-| FS-017 | F；中文；直接 eastAsia=UnknownFont，目标 TestFontA | D；expected=TestFontA，actual=UnknownFont；仅判名称不匹配，不据名称推断本机未安装/字体无效 | L1 | warning | suggest | R1/R3/R4 |
-| FS-018 | S；同段两 run：“ABC” sz=24、“中文” sz=22 | 仅 L2 有一条 D；expected=12pt，actual=11pt；L1 无误报 | L2 | warning | suggest | R1/R2/R4 |
+| FS-017 | F；中文；直接 eastAsia=UnknownFont，目标 TestFontA | D；expected=TestFontA，actual=UnknownFont；仅判名称不匹配，不据名称推断本机未安装/字体无效 | L1 | warning | auto | R1/R3/R4 |
+| FS-018 | S；同段两 run：“ABC” sz=24、“中文” sz=22 | 仅 L2 有一条 D；expected=12pt，actual=11pt；L1 无误报 | L2 | warning | auto | R1/R2/R4 |
 | FS-019 | S；同段两 run：“中文” sz=24、“，”无 sz；所有继承/默认值也无 sz | L1 匹配；L2 为 U，不从相邻 run 猜为12pt；整段不能宣称全部匹配 | L2 | warning | manual | R1/R2/R4 |
 | FS-020 | F 和 S；中文 run 字体来源全缺失，字号来源全缺失 | 两个属性均 U，分别记录未覆盖原因；patches=[]；不宣称匹配 | L1 | warning | manual | R1/R2/R3/R4 |
 | FS-021 | S；sz=0（异常输入）；无回退 | U；无有效正数字号，报告异常；不得当12pt或写补丁。规则 expect=0 则应在规则加载阶段拒绝，不能进入比较 | L1 | warning | manual | R1/R2/R4 |

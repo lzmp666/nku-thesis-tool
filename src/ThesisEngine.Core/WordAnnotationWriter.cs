@@ -19,11 +19,18 @@ public static class WordAnnotationWriter
     private const string CommentsContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml";
     private const string RelationshipsContentType = "application/vnd.openxmlformats-package.relationships+xml";
     private const long MaximumXmlCharacters = 16 * 1024 * 1024;
+    private const string ToolAnnotationMarker = "[NKU-TOOL-ANNOTATION:v1]";
     private static readonly XNamespace W = WordNamespace;
     private static readonly XNamespace Ct = ContentTypesNamespace;
     private static readonly XNamespace Rel = RelationshipsNamespace;
     private static readonly Regex LocationPattern = new(
         @"\Aword/document\.xml#paragraph\[(?<paragraph>\d+)\]/run\[(?<run>\d+)\]\z",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex LocationMarkerPattern = new(
+        @"\[NKU-LOCATION:(?<location>word/document\.xml#paragraph\[\d+\]/run\[\d+\])\]",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex OccurrenceMarkerPattern = new(
+        @"\[NKU-OCCURRENCE:(?<location>word/document\.xml#paragraph\[\d+\]/run\[\d+\])\|(?<highlight>[a-zA-Z]+|absent)\]",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
@@ -63,24 +70,29 @@ public static class WordAnnotationWriter
                 var body = document.Root!.Element(W + "body")
                     ?? throw new InvalidDataException("Missing Word document body.");
 
-                if (diagnostics.Count == 0)
+                var targets = ResolveTargets(body, diagnostics);
+                var targetByLocation = targets.ToDictionary(target => target.Location, StringComparer.Ordinal);
+                var documentRelationshipsEntry = GetOptionalEntry(entries, "word/_rels/document.xml.rels");
+                var relationships = documentRelationshipsEntry is null
+                    ? new XDocument(new XDeclaration("1.0", "utf-8", "yes"), new XElement(Rel + "Relationships"))
+                    : ReadXml(documentRelationshipsEntry, Rel + "Relationships", "word/_rels/document.xml.rels");
+                var commentsPartName = ResolveCommentsPartName(relationships);
+                var commentsEntry = GetOptionalEntry(entries, commentsPartName);
+                var comments = commentsEntry is null
+                    ? new XDocument(new XDeclaration("1.0", "utf-8", "yes"), new XElement(W + "comments"))
+                    : ReadXml(commentsEntry, W + "comments", commentsPartName);
+                var ownedAnnotations = ReadOwnedAnnotations(comments);
+
+                if (targets.Count == 0 && ownedAnnotations.Count == 0)
                 {
                     CopyPackage(source, temporaryPath);
                 }
                 else
                 {
-                    var targets = ResolveTargets(body, diagnostics);
-                    var documentRelationshipsEntry = GetOptionalEntry(entries, "word/_rels/document.xml.rels");
-                    var relationships = documentRelationshipsEntry is null
-                        ? new XDocument(new XDeclaration("1.0", "utf-8", "yes"), new XElement(Rel + "Relationships"))
-                        : ReadXml(documentRelationshipsEntry, Rel + "Relationships", "word/_rels/document.xml.rels");
-                    var commentsPartName = ResolveCommentsPartName(relationships);
-                    var commentsEntry = GetOptionalEntry(entries, commentsPartName);
-                    var comments = commentsEntry is null
-                        ? new XDocument(new XDeclaration("1.0", "utf-8", "yes"), new XElement(W + "comments"))
-                        : ReadXml(commentsEntry, W + "comments", commentsPartName);
+                    // Remove only comments carrying our private ownership marker. User comments,
+                    // including comments authored as "NKU Thesis Tool", remain untouched.
+                    RemoveOwnedAnnotations(document, body, comments, ownedAnnotations);
                     var contentTypes = ReadXml(contentTypesEntry, Ct + "Types", "[Content_Types].xml");
-
                     EnsureCommentsRelationship(relationships, commentsPartName);
                     EnsureRelationshipsContentType(contentTypes);
                     EnsureCommentsContentType(contentTypes, commentsPartName);
@@ -96,6 +108,7 @@ public static class WordAnnotationWriter
 
                     foreach (var target in targets)
                     {
+                        var originalHighlight = GetHighlightValue(target.Run);
                         EnsureHighlighted(target.Run);
                         var starts = new List<XElement>();
                         var ends = new List<XElement>();
@@ -107,7 +120,14 @@ public static class WordAnnotationWriter
                             var id = nextId++;
                             usedIds.Add(id);
 
-                            comments.Root.Add(CreateComment(id, timestamp, diagnostic));
+                            var diagnosticOccurrences = GetOccurrences(diagnostic);
+                            var occurrenceHighlights = diagnosticOccurrences.Select(occurrence =>
+                            {
+                                if (!targetByLocation.TryGetValue(occurrence.Location, out var occurrenceTarget))
+                                    throw new InvalidDataException("A grouped diagnostic occurrence was not resolved: " + occurrence.Location);
+                                return new AnnotationHighlight(occurrence.Location, occurrenceTarget.OriginalHighlight);
+                            }).ToArray();
+                            comments.Root.Add(CreateComment(id, timestamp, diagnostic, originalHighlight, occurrenceHighlights));
                             starts.Add(new XElement(W + "commentRangeStart", new XAttribute(W + "id", id)));
                             ends.Insert(0, new XElement(W + "commentRangeEnd", new XAttribute(W + "id", id)));
                             references.Add(CreateCommentReference(id));
@@ -146,8 +166,14 @@ public static class WordAnnotationWriter
 
     private static IReadOnlyList<RunTarget> ResolveTargets(XElement body, IReadOnlyList<Diagnostic> diagnostics)
     {
-        var paragraphs = body.Elements(W + "p").ToArray();
+        // Keep paragraph indexes aligned with WordFormattingReader, which flattens
+        // all body paragraphs in document order, including table-cell paragraphs.
+        // Text-box stories remain outside the main document snapshot.
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
         var targetMap = new Dictionary<(int Paragraph, int Run), RunTarget>();
+        var targetByLocation = new Dictionary<string, RunTarget>(StringComparer.Ordinal);
         foreach (var diagnostic in diagnostics)
         {
             ArgumentNullException.ThrowIfNull(diagnostic);
@@ -155,34 +181,45 @@ public static class WordAnnotationWriter
                 diagnostic.Expected is null || diagnostic.Actual is null || diagnostic.Message is null)
                 throw new ArgumentException("Diagnostics must include a rule ID, expected value, actual value, and message.", nameof(diagnostics));
 
-            var match = LocationPattern.Match(diagnostic.Location ?? string.Empty);
-            if (!match.Success ||
-                !int.TryParse(match.Groups["paragraph"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var paragraphIndex) ||
-                !int.TryParse(match.Groups["run"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var runIndex))
-                throw new NotSupportedException($"Unsupported diagnostic location: {diagnostic.Location}");
-
-            if (paragraphIndex >= paragraphs.Length)
-                throw new InvalidDataException($"Diagnostic paragraph does not exist: {diagnostic.Location}");
-            var paragraph = paragraphs[paragraphIndex];
-            var runs = paragraph.Elements(W + "r").ToArray();
-            if (runIndex >= runs.Length)
-                throw new InvalidDataException($"Diagnostic run does not exist: {diagnostic.Location}");
-
-            var key = (paragraphIndex, runIndex);
-            if (!targetMap.TryGetValue(key, out var target))
+            foreach (var occurrence in GetOccurrences(diagnostic))
             {
-                target = new RunTarget(runs[runIndex]);
-                targetMap.Add(key, target);
+                var (paragraphIndex, runIndex) = ParseRunLocation(occurrence.Location);
+                if (paragraphIndex >= paragraphs.Length)
+                    throw new InvalidDataException($"Diagnostic paragraph does not exist: {occurrence.Location}");
+                var paragraph = paragraphs[paragraphIndex];
+                // Locations count text-bearing runs only. Comment-reference runs are structural
+                // OOXML and must not shift a diagnostic when the document is analyzed again.
+                var runs = paragraph.Elements(W + "r")
+                    .Where(run => run.Descendants(W + "t").Any())
+                    .ToArray();
+                if (runIndex >= runs.Length)
+                    throw new InvalidDataException($"Diagnostic run does not exist: {occurrence.Location}");
+
+                var key = (paragraphIndex, runIndex);
+                if (!targetMap.TryGetValue(key, out var target))
+                {
+                    target = new RunTarget(runs[runIndex], occurrence.Location, GetHighlightValue(runs[runIndex]) ?? "absent");
+                    targetMap.Add(key, target);
+                }
+                targetByLocation[occurrence.Location] = target;
+                if (string.Equals(occurrence.Location, diagnostic.Location, StringComparison.Ordinal))
+                    target.Diagnostics.Add(diagnostic);
             }
-            target.Diagnostics.Add(diagnostic);
         }
 
         return targetMap.Values.ToArray();
     }
 
-    private static XElement CreateComment(int id, string timestamp, Diagnostic diagnostic)
+    private static XElement CreateComment(int id, string timestamp, Diagnostic diagnostic, string? originalHighlight,
+        IReadOnlyList<AnnotationHighlight> occurrenceHighlights)
     {
-        var text = $"要求参考来源：2026版第4.7节表4.6；规则：{diagnostic.RuleId}；期望值：{diagnostic.Expected}；实际值：{diagnostic.Actual}。";
+        var source = GetSourceReference(diagnostic);
+        var fields = new List<string>();
+        if (!string.IsNullOrWhiteSpace(source)) fields.Add("要求参考来源：" + source);
+        fields.Add("格式项：" + DescribeRule(diagnostic.RuleId));
+        fields.Add("期望值：" + diagnostic.Expected);
+        fields.Add("实际值：" + diagnostic.Actual);
+        var text = string.Join("；", fields) + "。";
         return new XElement(W + "comment",
             new XAttribute(W + "id", id),
             new XAttribute(W + "author", "NKU Thesis Tool"),
@@ -190,7 +227,190 @@ public static class WordAnnotationWriter
             new XAttribute(W + "date", timestamp),
             new XElement(W + "p",
                 new XElement(W + "r",
-                    new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text))));
+                    new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), text)),
+                // Hidden metadata keeps the visible Word comment to four concise, user-facing fields.
+                CreateHiddenMetadata(ToolAnnotationMarker),
+                CreateHiddenMetadata("[NKU-LOCATION:" + diagnostic.Location + "]"),
+                CreateHiddenMetadata("[NKU-HIGHLIGHT:" + (originalHighlight ?? "absent") + "]"),
+                occurrenceHighlights.Select(occurrence => CreateHiddenMetadata(
+                    "[NKU-OCCURRENCE:" + occurrence.Location + "|" + occurrence.Highlight + "]"))));
+    }
+
+    private static string GetSourceReference(Diagnostic diagnostic)
+    {
+        if (diagnostic.RuleId.StartsWith("NKU-REQ-", StringComparison.Ordinal))
+        {
+            var separator = diagnostic.Message?.IndexOf('：') ?? -1;
+            if (separator > 0) return diagnostic.Message![..separator];
+        }
+
+        var message = diagnostic.Message ?? string.Empty;
+        const string sourcePrefix = "依据：";
+        if (message.StartsWith(sourcePrefix, StringComparison.Ordinal))
+        {
+            var end = message.IndexOf('。', sourcePrefix.Length);
+            if (end > sourcePrefix.Length) return message[sourcePrefix.Length..end];
+        }
+
+        if (diagnostic.RuleId.StartsWith("demo/", StringComparison.Ordinal))
+            return "演示规则（仅用于验证插件流程，不代表正式标准）";
+
+        return string.Empty;
+    }
+
+    private static string DescribeRule(string ruleId) => ruleId switch
+    {
+        "demo/east-asian-font" or "NKU-REQ-042" => "中文字体",
+        "demo/western-font" or "NKU-REQ-043" => "西文字体",
+        "demo/font-size" or "NKU-REQ-044" => "字号",
+        "demo/caption-east-asian-font" => "图表题注字体",
+        "demo/caption-font-size" => "图表题注字号",
+        "demo/caption-alignment" => "图表题注对齐",
+        "demo/caption-line-spacing" => "图表题注行距",
+        "demo/caption-space-before" => "图表题注段前距",
+        "demo/caption-space-after" => "图表题注段后距",
+        "demo/caption-placement" => "图表题注位置",
+        "demo/caption-number-gap" => "题注编号间距",
+        _ => "格式项目"
+    };
+
+    private static XElement CreateHiddenMetadata(string value) =>
+        new(W + "r",
+            new XElement(W + "rPr", new XElement(W + "vanish")),
+            new XElement(W + "t", new XAttribute(XNamespace.Xml + "space", "preserve"), value));
+
+    private static IReadOnlyList<OwnedAnnotation> ReadOwnedAnnotations(XDocument comments)
+    {
+        var owned = new List<OwnedAnnotation>();
+        foreach (var comment in comments.Root!.Elements(W + "comment"))
+        {
+            var hiddenText = string.Concat(comment.Descendants(W + "r")
+                .Where(run => run.Element(W + "rPr")?.Element(W + "vanish") is not null)
+                .SelectMany(run => run.Elements(W + "t").Select(text => text.Value)));
+            if (comment.Attribute(W + "author")?.Value != "NKU Thesis Tool" ||
+                !hiddenText.Contains(ToolAnnotationMarker, StringComparison.Ordinal)) continue;
+
+            var id = comment.Attribute(W + "id")?.Value;
+            var locationMatch = LocationMarkerPattern.Match(hiddenText);
+            var location = locationMatch.Success ? locationMatch.Groups["location"].Value : null;
+            var highlight = ReadMetadata(hiddenText, "[NKU-HIGHLIGHT:");
+            if (!int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out _) || location is null || highlight is null ||
+                (!string.Equals(highlight, "absent", StringComparison.Ordinal) &&
+                 !Regex.IsMatch(highlight, @"\A[a-zA-Z]+\z", RegexOptions.CultureInvariant)))
+                throw new InvalidDataException("An NKU Thesis Tool comment contains invalid ownership metadata.");
+
+            var occurrences = OccurrenceMarkerPattern.Matches(hiddenText)
+                .Cast<Match>()
+                .Select(match => new AnnotationHighlight(match.Groups["location"].Value, match.Groups["highlight"].Value))
+                .ToArray();
+            if (occurrences.Length == 0)
+                occurrences = new[] { new AnnotationHighlight(location, highlight) };
+            owned.Add(new OwnedAnnotation(id, occurrences));
+        }
+        return owned;
+    }
+
+    private static string? ReadMetadata(string text, string prefix)
+    {
+        var start = text.IndexOf(prefix, StringComparison.Ordinal);
+        if (start < 0) return null;
+        start += prefix.Length;
+        var end = text.IndexOf(']', start);
+        return end < 0 ? null : text[start..end];
+    }
+
+    private static void RemoveOwnedAnnotations(
+        XDocument document,
+        XElement body,
+        XDocument comments,
+        IReadOnlyList<OwnedAnnotation> ownedAnnotations)
+    {
+        if (ownedAnnotations.Count == 0) return;
+        var highlightByLocation = ownedAnnotations
+            .SelectMany(annotation => annotation.Occurrences)
+            .GroupBy(occurrence => occurrence.Location, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group =>
+            {
+                var values = group.Select(annotation => annotation.Highlight).Distinct(StringComparer.Ordinal).ToArray();
+                if (values.Length != 1)
+                    throw new InvalidDataException("Owned comments disagree about the original highlight at " + group.Key + ".");
+                return values[0];
+            }, StringComparer.Ordinal);
+        var ids = ownedAnnotations.Select(annotation => annotation.Id).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var location in highlightByLocation)
+        {
+            var run = ResolveTextRun(body, location.Key);
+            RestoreHighlight(run, location.Value);
+        }
+
+        foreach (var marker in document.Descendants().Where(element =>
+                     (element.Name == W + "commentRangeStart" || element.Name == W + "commentRangeEnd") &&
+                     ids.Contains(element.Attribute(W + "id")?.Value ?? string.Empty)).ToArray())
+            marker.Remove();
+
+        foreach (var reference in document.Descendants(W + "commentReference")
+                     .Where(element => ids.Contains(element.Attribute(W + "id")?.Value ?? string.Empty)).ToArray())
+        {
+            var run = reference.Ancestors(W + "r").FirstOrDefault();
+            if (run is not null && run.Elements().All(child => child.Name == W + "rPr" || child == reference))
+                run.Remove();
+            else
+                reference.Remove();
+        }
+
+        foreach (var comment in comments.Root!.Elements(W + "comment")
+                     .Where(element => ids.Contains(element.Attribute(W + "id")?.Value ?? string.Empty)).ToArray())
+            comment.Remove();
+    }
+
+    private static XElement ResolveTextRun(XElement body, string location)
+    {
+        var match = LocationPattern.Match(location);
+        if (!match.Success ||
+            !int.TryParse(match.Groups["paragraph"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var paragraphIndex) ||
+            !int.TryParse(match.Groups["run"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var runIndex))
+            throw new InvalidDataException("An owned comment has an unsupported location: " + location);
+        var paragraphs = body.Descendants(W + "p")
+            .Where(paragraph => !paragraph.Ancestors(W + "txbxContent").Any())
+            .ToArray();
+        if (paragraphIndex >= paragraphs.Length)
+            throw new InvalidDataException("An owned comment paragraph no longer exists: " + location);
+        var runs = paragraphs[paragraphIndex].Elements(W + "r")
+            .Where(run => run.Descendants(W + "t").Any())
+            .ToArray();
+        if (runIndex >= runs.Length)
+            throw new InvalidDataException("An owned comment text run no longer exists: " + location);
+        return runs[runIndex];
+    }
+
+    private static IReadOnlyList<DiagnosticOccurrence> GetOccurrences(Diagnostic diagnostic) =>
+        diagnostic.Occurrences.Count > 0
+            ? diagnostic.Occurrences
+            : new[] { new DiagnosticOccurrence(diagnostic.Location, diagnostic.Actual) };
+
+    private static (int Paragraph, int Run) ParseRunLocation(string location)
+    {
+        var match = LocationPattern.Match(location ?? string.Empty);
+        if (!match.Success ||
+            !int.TryParse(match.Groups["paragraph"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var paragraphIndex) ||
+            !int.TryParse(match.Groups["run"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var runIndex))
+            throw new NotSupportedException($"Unsupported diagnostic location: {location}");
+        return (paragraphIndex, runIndex);
+    }
+
+    private static string? GetHighlightValue(XElement run) =>
+        run.Element(W + "rPr")?.Element(W + "highlight")?.Attribute(W + "val")?.Value;
+
+    private static void RestoreHighlight(XElement run, string value)
+    {
+        var highlight = run.Element(W + "rPr")?.Element(W + "highlight");
+        if (string.Equals(value, "absent", StringComparison.Ordinal))
+        {
+            highlight?.Remove();
+            return;
+        }
+        SetHighlightValue(run, value);
     }
 
     private static XElement CreateCommentReference(int id) =>
@@ -199,6 +419,9 @@ public static class WordAnnotationWriter
             new XElement(W + "commentReference", new XAttribute(W + "id", id)));
 
     private static void EnsureHighlighted(XElement run)
+        => SetHighlightValue(run, "yellow");
+
+    private static void SetHighlightValue(XElement run, string value)
     {
         var properties = run.Element(W + "rPr");
         if (properties is null)
@@ -210,11 +433,11 @@ public static class WordAnnotationWriter
         var highlight = properties.Element(W + "highlight");
         if (highlight is not null)
         {
-            highlight.SetAttributeValue(W + "val", "yellow");
+            highlight.SetAttributeValue(W + "val", value);
             return;
         }
 
-        highlight = new XElement(W + "highlight", new XAttribute(W + "val", "yellow"));
+        highlight = new XElement(W + "highlight", new XAttribute(W + "val", value));
         var followingProperty = properties.Elements().FirstOrDefault(element => RunPropertyOrder(element.Name) > 250);
         if (followingProperty is not null)
             followingProperty.AddBeforeSelf(highlight);
@@ -458,9 +681,15 @@ public static class WordAnnotationWriter
     private static ZipArchiveEntry? GetOptionalEntry(IReadOnlyDictionary<string, ZipArchiveEntry> entries, string partName) =>
         entries.TryGetValue(partName, out var entry) ? entry : null;
 
-    private sealed class RunTarget(XElement run)
+    private sealed class RunTarget(XElement run, string location, string originalHighlight)
     {
         public XElement Run { get; } = run;
+        public string Location { get; } = location;
+        public string OriginalHighlight { get; } = originalHighlight;
         public List<Diagnostic> Diagnostics { get; } = [];
     }
+
+    private sealed record AnnotationHighlight(string Location, string Highlight);
+    private sealed record OwnedAnnotation(string Id, IReadOnlyList<AnnotationHighlight> Occurrences);
 }
+
