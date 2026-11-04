@@ -9,6 +9,12 @@ if (args.Length > 0 && string.Equals(args[0], "analyze", StringComparison.Ordina
     return command.Execute(args);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new ChatCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: ThesisEngine.Cli <document.docx>");
