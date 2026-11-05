@@ -1,0 +1,123 @@
+using System.IO.Compression;
+using System.Xml.Linq;
+
+namespace ThesisEngine.Core;
+
+/// <summary>
+/// Word 样式体系分析器。
+/// 检测文档中哪些段落套用了样式，哪些是手动打的格式。
+/// </summary>
+public sealed class StyleAnalyzer
+{
+    private const string MainNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    private static readonly XNamespace W = MainNamespace;
+
+    public StyleAnalysisResult Analyze(string docxPath)
+    {
+        using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+
+        var stylesPart = TryReadXml(archive, "word/styles.xml");
+        var documentPart = TryReadXml(archive, "word/document.xml");
+
+        var allStyles = ExtractAllStyles(stylesPart);
+        var paragraphs = ExtractParagraphs(documentPart);
+
+        var styledParagraphs = new List<StyledParagraphInfo>();
+        var unstyledParagraphs = new List<UnstyledParagraphInfo>();
+
+        foreach (var para in paragraphs)
+        {
+            var pStyle = para.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val")?.Value;
+            var text = para.Descendants(W + "t").Select(t => t.Value).Aggregate("", (a, b) => a + b);
+
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            if (string.IsNullOrEmpty(pStyle))
+            {
+                // 没有套用样式的段落
+                var directFormat = ExtractDirectFormatting(para);
+                unstyledParagraphs.Add(new UnstyledParagraphInfo(
+                    text.Length > 50 ? text.Substring(0, 50) + "..." : text,
+                    directFormat));
+            }
+            else
+            {
+                // 套用了样式的段落
+                allStyles.TryGetValue(pStyle, out var styleName);
+                styledParagraphs.Add(new StyledParagraphInfo(
+                    pStyle,
+                    styleName ?? pStyle,
+                    text.Length > 50 ? text.Substring(0, 50) + "..." : text));
+            }
+        }
+
+        return new StyleAnalysisResult(
+            allStyles,
+            styledParagraphs,
+            unstyledParagraphs);
+    }
+
+    private static Dictionary<string, string> ExtractAllStyles(XDocument? stylesDoc)
+    {
+        var result = new Dictionary<string, string>();
+        if (stylesDoc?.Root == null) return result;
+
+        foreach (var style in stylesDoc.Root.Elements(W + "style"))
+        {
+            var styleId = style.Attribute(W + "styleId")?.Value;
+            var name = style.Element(W + "name")?.Attribute(W + "val")?.Value;
+            if (!string.IsNullOrEmpty(styleId))
+            {
+                result[styleId] = name ?? styleId;
+            }
+        }
+        return result;
+    }
+
+    private static List<XElement> ExtractParagraphs(XDocument? documentDoc)
+    {
+        var result = new List<XElement>();
+        var body = documentDoc?.Root?.Element(W + "body");
+        if (body == null) return result;
+
+        foreach (var para in body.Elements(W + "p"))
+        {
+            result.Add(para);
+        }
+        return result;
+    }
+
+    private static string ExtractDirectFormatting(XElement para)
+    {
+        var pPr = para.Element(W + "pPr");
+        var info = new List<string>();
+
+        if (pPr?.Element(W + "jc") != null) info.Add("手动对齐");
+        if (pPr?.Element(W + "spacing") != null) info.Add("手动行距");
+        if (pPr?.Element(W + "ind") != null) info.Add("手动缩进");
+
+        var runProp = para.Descendants(W + "rPr").FirstOrDefault();
+        if (runProp?.Element(W + "rFonts") != null) info.Add("手动字体");
+        if (runProp?.Element(W + "sz") != null) info.Add("手动字号");
+
+        return info.Count > 0 ? string.Join("、", info) : "无格式";
+    }
+
+    private static XDocument? TryReadXml(ZipArchive archive, string entryName)
+    {
+        var entry = archive.GetEntry(entryName);
+        if (entry == null) return null;
+        using var reader = new StreamReader(entry.Open());
+        return XDocument.Load(reader);
+    }
+}
+
+public sealed record StyleAnalysisResult(
+    Dictionary<string, string> AllStyles,
+    List<StyledParagraphInfo> StyledParagraphs,
+    List<UnstyledParagraphInfo> UnstyledParagraphs);
+
+public sealed record StyledParagraphInfo(string StyleId, string StyleName, string Preview);
+
+public sealed record UnstyledParagraphInfo(string Preview, string DirectFormat);
