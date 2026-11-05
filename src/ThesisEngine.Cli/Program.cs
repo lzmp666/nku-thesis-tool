@@ -23,6 +23,12 @@ if (args.Length > 0 && string.Equals(args[0], "analyze-styles", StringComparison
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "apply-nku-format", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new ApplyNkuFormatCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
 {
     IChatService chatService;
