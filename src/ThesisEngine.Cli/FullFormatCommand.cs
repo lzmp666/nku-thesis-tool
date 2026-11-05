@@ -55,15 +55,24 @@ public sealed class FullFormatCommand
             _output.WriteLine("=" + new string('=', 50));
             _output.WriteLine();
 
-            // 1. 套用样式
-            _output.WriteLine("【1/4】套用文档样式");
+            // 1. 自动给无样式段落套样式
+            _output.WriteLine("【1/4】自动识别并套用段落样式");
+            _output.WriteLine("  - 检测无样式段落");
+            _output.WriteLine("  - 短文本加粗段落识别为标题");
+            _output.WriteLine("  - 其他段落套用正文样式");
+            var autoAssigner = new StyleAutoAssigner();
+            autoAssigner.AutoAssignStyles(inputPath, outputPath);
+            _output.WriteLine();
+
+            // 2. 修改样式定义
+            _output.WriteLine("【2/4】修改样式定义");
             _output.WriteLine("  - 正文 Normal：宋体 小四，1.5倍行距");
             _output.WriteLine("  - 一级标题：黑体 三号");
             _output.WriteLine("  - 二级标题：黑体 四号");
             _output.WriteLine("  - 三级标题：黑体 小四");
             _output.WriteLine("  - 摘要、参考文献、题注样式");
 
-            _styleRewriter.SetStyleFontName(inputPath, outputPath, "Normal", "宋体", "Times New Roman");
+            _styleRewriter.SetStyleFontName(outputPath, outputPath, "Normal", "宋体", "Times New Roman");
             _styleRewriter.SetStyleFontSize(outputPath, outputPath, "Normal", 12);
             _styleRewriter.SetStyleLineSpacing(outputPath, outputPath, "Normal", 1.5);
 
@@ -75,20 +84,18 @@ public sealed class FullFormatCommand
             SafeApplyStyle(outputPath, "Caption", "宋体", "Times New Roman", 9);
             _output.WriteLine();
 
-            // 2. 修正图表格式
-            _output.WriteLine("【2/4】修正图表格式");
+            // 3. 修正图表格式
+            _output.WriteLine("【3/4】修正图表格式");
             _output.WriteLine("  - 所有表格改为三线表");
             _output.WriteLine("  - 所有图片居中对齐");
             _figureRewriter.ApplyThreeLineTables(outputPath, outputPath);
             _figureRewriter.CenterAlignImages(outputPath, outputPath);
             _output.WriteLine();
 
-            // 3. 完成
-            _output.WriteLine("【3/4】生成输出文件");
+            // 4. 完成
+            _output.WriteLine("【4/4】完成");
             _output.WriteLine($"  - 输出：{outputPath}");
             _output.WriteLine();
-
-            _output.WriteLine("【4/4】完成");
             _output.WriteLine("✅ 全部格式化完成！");
             _output.WriteLine("提示：打开文件检查一下，如有问题可运行 undo 命令撤销。");
 
