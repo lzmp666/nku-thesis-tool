@@ -52,25 +52,30 @@ public sealed class ApplyNkuFormatCommand
             _output.WriteLine("开始套用南开研究生论文格式...");
             _output.WriteLine();
 
-            // 修改 Normal 样式（正文）：宋体小四，西文 Times New Roman
-            _output.WriteLine("  [1/4] 设置正文样式（Normal）：宋体 小四");
+            // 修改 Normal 样式（正文）：宋体小四，西文 Times New Roman，1.5倍行距
+            _output.WriteLine("  [1/5] 设置正文样式（Normal）：宋体 小四，1.5倍行距");
             _rewriter.SetStyleFontName(inputPath, outputPath, "Normal", "宋体", "Times New Roman");
             _rewriter.SetStyleFontSize(outputPath, outputPath, "Normal", 12);
+            _rewriter.SetStyleLineSpacing(outputPath, outputPath, "Normal", 1.5);
 
             // 修改 Heading1：黑体三号
-            _output.WriteLine("  [2/4] 设置一级标题（Heading 1）：黑体 三号");
+            _output.WriteLine("  [2/5] 设置一级标题（Heading 1）：黑体 三号");
             _rewriter.SetStyleFontName(outputPath, outputPath, "Heading1", "黑体", "Times New Roman");
             _rewriter.SetStyleFontSize(outputPath, outputPath, "Heading1", 16);
 
             // 修改 Heading2：黑体四号
-            _output.WriteLine("  [3/4] 设置二级标题（Heading 2）：黑体 四号");
+            _output.WriteLine("  [3/5] 设置二级标题（Heading 2）：黑体 四号");
             _rewriter.SetStyleFontName(outputPath, outputPath, "Heading2", "黑体", "Times New Roman");
             _rewriter.SetStyleFontSize(outputPath, outputPath, "Heading2", 14);
 
             // 修改 Heading3：黑体小四
-            _output.WriteLine("  [4/4] 设置三级标题（Heading 3）：黑体 小四");
+            _output.WriteLine("  [4/5] 设置三级标题（Heading 3）：黑体 小四");
             _rewriter.SetStyleFontName(outputPath, outputPath, "Heading3", "黑体", "Times New Roman");
             _rewriter.SetStyleFontSize(outputPath, outputPath, "Heading3", 12);
+
+            // 设置正文首行缩进
+            _output.WriteLine("  [5/5] 设置正文首行缩进 2 字符");
+            // TODO: 加首行缩进设置
 
             _output.WriteLine();
             _output.WriteLine($"✅ 完成！输出文件：{outputPath}");

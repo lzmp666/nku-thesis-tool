@@ -90,6 +90,41 @@ public sealed class StyleRewriter
         WriteStylesXml(inputPath, outputPath, stylesDoc);
     }
 
+    /// <summary>
+    /// 修改指定样式的行距。
+    /// </summary>
+    /// <param name="lineSpacingMultiplier">行距倍数：1.0 = 单倍，1.5 = 1.5倍，2.0 = 双倍</param>
+    public void SetStyleLineSpacing(string inputPath, string outputPath, string styleId, double lineSpacingMultiplier)
+    {
+        // Word 行距单位是 1/240 行
+        var lineValue = (int)(lineSpacingMultiplier * 240);
+
+        var stylesDoc = ReadStylesXml(inputPath);
+
+        var styleElement = stylesDoc.Root?
+            .Elements(W + "style")
+            .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
+            ?? throw new ArgumentException($"找不到样式：{styleId}");
+
+        var pPr = styleElement.Element(W + "pPr");
+        if (pPr == null)
+        {
+            pPr = new XElement(W + "pPr");
+            styleElement.Add(pPr);
+        }
+
+        var spacing = pPr.Element(W + "spacing");
+        if (spacing == null)
+        {
+            spacing = new XElement(W + "spacing");
+            pPr.Add(spacing);
+        }
+        spacing.SetAttributeValue(W + "line", lineValue.ToString());
+        spacing.SetAttributeValue(W + "lineRule", "auto");
+
+        WriteStylesXml(inputPath, outputPath, stylesDoc);
+    }
+
     private static XDocument ReadStylesXml(string docxPath)
     {
         using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);

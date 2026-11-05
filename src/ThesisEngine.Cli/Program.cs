@@ -35,6 +35,12 @@ if (args.Length > 0 && string.Equals(args[0], "analyze-figures", StringCompariso
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "undo", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new UndoCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
 {
     IChatService chatService;
