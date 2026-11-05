@@ -109,6 +109,50 @@ public sealed class FigureTableRewriter
         WriteDocumentXml(inputPath, outputPath, doc);
     }
 
+    /// <summary>
+    /// 自动修正跨页问题：给所有段落加上孤行控制、与下段同页等设置。
+    /// 避免出现大段空白页。
+    /// </summary>
+    public void FixPageBreaks(string inputPath, string outputPath)
+    {
+        var doc = ReadDocumentXml(inputPath);
+        var body = doc.Root?.Element(W + "body");
+        if (body == null) return;
+
+        var paragraphs = body.Elements(W + "p").ToList();
+        int fixedCount = 0;
+
+        foreach (var para in paragraphs)
+        {
+            var pPr = para.Element(W + "pPr");
+            if (pPr == null)
+            {
+                pPr = new XElement(W + "pPr");
+                para.AddFirst(pPr);
+            }
+
+            // 孤行控制：避免段落最后一行单独在一页
+            var widowControl = pPr.Element(W + "widowControl");
+            if (widowControl == null)
+            {
+                widowControl = new XElement(W + "widowControl");
+                pPr.AddFirst(widowControl);
+                fixedCount++;
+            }
+
+            // 与下段同页：标题和下面的正文不要分开
+            var keepNext = pPr.Element(W + "keepNext");
+            if (keepNext == null)
+            {
+                keepNext = new XElement(W + "keepNext");
+                pPr.AddFirst(keepNext);
+            }
+        }
+
+        WriteDocumentXml(inputPath, outputPath, doc);
+        Console.WriteLine($"已为 {paragraphs.Count} 个段落设置跨页保护");
+    }
+
     private static XDocument ReadDocumentXml(string docxPath)
     {
         using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);

@@ -85,15 +85,22 @@ public sealed class FullFormatCommand
             _output.WriteLine();
 
             // 3. 修正图表格式
-            _output.WriteLine("【3/4】修正图表格式");
+            _output.WriteLine("【3/5】修正图表格式");
             _output.WriteLine("  - 所有表格改为三线表");
             _output.WriteLine("  - 所有图片居中对齐");
             _figureRewriter.ApplyThreeLineTables(outputPath, outputPath);
             _figureRewriter.CenterAlignImages(outputPath, outputPath);
             _output.WriteLine();
 
-            // 4. 完成
-            _output.WriteLine("【4/4】完成");
+            // 4. 修正跨页问题
+            _output.WriteLine("【4/5】修正跨页问题");
+            _output.WriteLine("  - 孤行控制，避免段落最后一行单独在一页");
+            _output.WriteLine("  - 与下段同页，避免标题和正文分开");
+            _figureRewriter.FixPageBreaks(outputPath, outputPath);
+            _output.WriteLine();
+
+            // 5. 完成
+            _output.WriteLine("【5/5】完成");
             _output.WriteLine($"  - 输出：{outputPath}");
             _output.WriteLine();
             _output.WriteLine("✅ 全部格式化完成！");
