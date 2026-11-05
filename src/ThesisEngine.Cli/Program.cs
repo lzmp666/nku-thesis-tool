@@ -29,6 +29,12 @@ if (args.Length > 0 && string.Equals(args[0], "apply-nku-format", StringComparis
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "analyze-figures", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new FigureTableAnalyzeCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "chat", StringComparison.OrdinalIgnoreCase))
 {
     IChatService chatService;
