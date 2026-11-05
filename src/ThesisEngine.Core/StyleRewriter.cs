@@ -15,35 +15,19 @@ public sealed class StyleRewriter
     /// <summary>
     /// 修改指定样式的字号。
     /// </summary>
-    /// <param name="inputPath">输入 docx 路径</param>
-    /// <param name="outputPath">输出 docx 路径</param>
-    /// <param name="styleId">样式 ID（如 Heading1、Normal）</param>
-    /// <param name="fontSizePt">字号（磅，如三号=16、小四=12）</param>
     public void SetStyleFontSize(string inputPath, string outputPath, string styleId, double fontSizePt)
     {
-        // Word 里字号单位是 half-points（半磅），所以要乘 2
         var halfPoints = (int)(fontSizePt * 2);
 
-        using var inputStream = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var archive = new ZipArchive(inputStream, ZipArchiveMode.Read);
+        // 第一步：读 styles.xml
+        var stylesDoc = ReadStylesXml(inputPath);
 
-        // 读取 styles.xml
-        var stylesEntry = archive.GetEntry("word/styles.xml")
-            ?? throw new InvalidDataException("文档中没有 styles.xml");
-
-        XDocument stylesDoc;
-        using (var reader = new StreamReader(stylesEntry.Open()))
-        {
-            stylesDoc = XDocument.Load(reader);
-        }
-
-        // 找到目标样式
+        // 修改 stylesDoc
         var styleElement = stylesDoc.Root?
             .Elements(W + "style")
             .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
             ?? throw new ArgumentException($"找不到样式：{styleId}");
 
-        // 找到或创建 rPr
         var rPr = styleElement.Element(W + "rPr");
         if (rPr == null)
         {
@@ -51,7 +35,6 @@ public sealed class StyleRewriter
             styleElement.Add(rPr);
         }
 
-        // 设置字号
         var szElement = rPr.Element(W + "sz");
         if (szElement == null)
         {
@@ -60,7 +43,6 @@ public sealed class StyleRewriter
         }
         szElement.SetAttributeValue(W + "val", halfPoints.ToString());
 
-        // 同时设置 complex script 字号（中文/复杂文种）
         var szCsElement = rPr.Element(W + "szCs");
         if (szCsElement == null)
         {
@@ -69,21 +51,8 @@ public sealed class StyleRewriter
         }
         szCsElement.SetAttributeValue(W + "val", halfPoints.ToString());
 
-        // 保存新的 docx
-        File.Copy(inputPath, outputPath, overwrite: true);
-
-        using var outputStream = new FileStream(outputPath, FileMode.Open, FileAccess.ReadWrite);
-        using var outputArchive = new ZipArchive(outputStream, ZipArchiveMode.Update);
-
-        // 删除旧的 styles.xml
-        outputArchive.GetEntry("word/styles.xml")?.Delete();
-
-        // 写入新的 styles.xml
-        var newEntry = outputArchive.CreateEntry("word/styles.xml");
-        using (var writer = new StreamWriter(newEntry.Open()))
-        {
-            stylesDoc.Save(writer);
-        }
+        // 第二步：写入 styles.xml
+        WriteStylesXml(inputPath, outputPath, stylesDoc);
     }
 
     /// <summary>
@@ -91,18 +60,10 @@ public sealed class StyleRewriter
     /// </summary>
     public void SetStyleFontName(string inputPath, string outputPath, string styleId, string eastAsiaFont, string asciiFont)
     {
-        using var inputStream = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var archive = new ZipArchive(inputStream, ZipArchiveMode.Read);
+        // 第一步：读 styles.xml
+        var stylesDoc = ReadStylesXml(inputPath);
 
-        var stylesEntry = archive.GetEntry("word/styles.xml")
-            ?? throw new InvalidDataException("文档中没有 styles.xml");
-
-        XDocument stylesDoc;
-        using (var reader = new StreamReader(stylesEntry.Open()))
-        {
-            stylesDoc = XDocument.Load(reader);
-        }
-
+        // 修改 stylesDoc
         var styleElement = stylesDoc.Root?
             .Elements(W + "style")
             .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
@@ -115,7 +76,6 @@ public sealed class StyleRewriter
             styleElement.Add(rPr);
         }
 
-        // 设置字体
         var rFonts = rPr.Element(W + "rFonts");
         if (rFonts == null)
         {
@@ -126,17 +86,37 @@ public sealed class StyleRewriter
         rFonts.SetAttributeValue(W + "ascii", asciiFont);
         rFonts.SetAttributeValue(W + "hAnsi", asciiFont);
 
-        File.Copy(inputPath, outputPath, overwrite: true);
+        // 第二步：写入 styles.xml
+        WriteStylesXml(inputPath, outputPath, stylesDoc);
+    }
 
-        using var outputStream = new FileStream(outputPath, FileMode.Open, FileAccess.ReadWrite);
-        using var outputArchive = new ZipArchive(outputStream, ZipArchiveMode.Update);
+    private static XDocument ReadStylesXml(string docxPath)
+    {
+        using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
 
-        outputArchive.GetEntry("word/styles.xml")?.Delete();
+        var stylesEntry = archive.GetEntry("word/styles.xml")
+            ?? throw new InvalidDataException("文档中没有 styles.xml");
 
-        var newEntry = outputArchive.CreateEntry("word/styles.xml");
-        using (var writer = new StreamWriter(newEntry.Open()))
+        using var reader = new StreamReader(stylesEntry.Open());
+        return XDocument.Load(reader);
+    }
+
+    private static void WriteStylesXml(string inputPath, string outputPath, XDocument stylesDoc)
+    {
+        // 如果输入和输出不是同一个文件，先复制
+        if (!string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
         {
-            stylesDoc.Save(writer);
+            File.Copy(inputPath, outputPath, overwrite: true);
         }
+
+        using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.ReadWrite);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Update);
+
+        archive.GetEntry("word/styles.xml")?.Delete();
+
+        var newEntry = archive.CreateEntry("word/styles.xml");
+        using var writer = new StreamWriter(newEntry.Open());
+        stylesDoc.Save(writer);
     }
 }
