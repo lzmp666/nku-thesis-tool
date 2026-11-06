@@ -55,8 +55,24 @@ public sealed class FullFormatCommand
             _output.WriteLine("=" + new string('=', 50));
             _output.WriteLine();
 
+            // 0. 先做备份，支持撤销
+            _output.WriteLine("【0/5】备份原文件（支持后续撤销）");
+            var undoManager = new UndoManager();
+            // 把输入文件备份成输出文件的名字，这样 undo 输出文件的时候能找到备份
+            var backupId = undoManager.BackupBeforeModify(inputPath);
+            // 重命名备份文件，让它和输出文件同名，这样 undo 才能找到
+            var backupDir = Path.Combine(Path.GetTempPath(), "nku-thesis-tool-backups");
+            var oldBackupPath = Path.Combine(backupDir, $"{backupId}_{Path.GetFileName(inputPath)}");
+            var newBackupPath = Path.Combine(backupDir, $"{backupId}_{Path.GetFileName(outputPath)}");
+            if (File.Exists(oldBackupPath))
+            {
+                File.Move(oldBackupPath, newBackupPath);
+            }
+            _output.WriteLine("  - 备份完成，后续可运行 undo 撤销");
+            _output.WriteLine();
+
             // 1. 自动给无样式段落套样式
-            _output.WriteLine("【1/4】自动识别并套用段落样式");
+            _output.WriteLine("【1/5】自动识别并套用段落样式");
             _output.WriteLine("  - 检测无样式段落");
             _output.WriteLine("  - 短文本加粗段落识别为标题");
             _output.WriteLine("  - 其他段落套用正文样式");
@@ -65,7 +81,7 @@ public sealed class FullFormatCommand
             _output.WriteLine();
 
             // 2. 修改样式定义
-            _output.WriteLine("【2/4】修改样式定义");
+            _output.WriteLine("【2/5】修改样式定义");
             _output.WriteLine("  - 正文 Normal：宋体 小四，1.5倍行距");
             _output.WriteLine("  - 一级标题：黑体 三号");
             _output.WriteLine("  - 二级标题：黑体 四号");
