@@ -35,6 +35,18 @@ if (args.Length > 0 && string.Equals(args[0], "analyze-figures", StringCompariso
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "apply-figure-format", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new ApplyFigureFormatCommand();
+    return command.Execute(args[1..]);
+}
+
+if (args.Length > 0 && string.Equals(args[0], "full-format", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new FullFormatCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "undo", StringComparison.OrdinalIgnoreCase))
 {
     var command = new UndoCommand();
