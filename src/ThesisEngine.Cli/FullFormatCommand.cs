@@ -67,11 +67,15 @@ public sealed class FullFormatCommand
 
             // 1. 自动给无样式段落套样式
             _output.WriteLine("【1/5】自动识别并套用段落样式");
-            _output.WriteLine("  - 检测无样式段落");
-            _output.WriteLine("  - 短文本加粗段落识别为标题");
+            _output.WriteLine("  - 检测无样式段落（含表格内段落）");
+            _output.WriteLine("  - 识别章/节/小节标题、摘要、参考文献等结构");
             _output.WriteLine("  - 其他段落套用正文样式");
-            var autoAssigner = new StyleAutoAssigner();
-            autoAssigner.AutoAssignStyles(inputPath, outputPath);
+            var autoAssigner = new StyleAutoAssigner(_output);
+            var assignment = autoAssigner.AutoAssignStyles(inputPath, outputPath);
+            if (assignment.TotalAssigned == 0)
+            {
+                _output.WriteLine("所有段落都已有样式归属，无需调整。");
+            }
             _output.WriteLine();
 
             // 2. 修改样式定义
