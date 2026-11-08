@@ -5,7 +5,8 @@ namespace ThesisEngine.Core;
 
 /// <summary>
 /// Word 样式体系分析器。
-/// 检测文档中哪些段落套用了样式，哪些是手动打的格式。
+/// 检测文档中哪些段落套用了样式，哪些是手动打的格式（含表格内段落），
+/// 并报告引用了不存在样式的段落。
 /// </summary>
 public sealed class StyleAnalyzer
 {
@@ -25,6 +26,7 @@ public sealed class StyleAnalyzer
 
         var styledParagraphs = new List<StyledParagraphInfo>();
         var unstyledParagraphs = new List<UnstyledParagraphInfo>();
+        var invalidStyleParagraphs = new List<StyledParagraphInfo>();
 
         foreach (var para in paragraphs)
         {
@@ -33,34 +35,39 @@ public sealed class StyleAnalyzer
 
             if (string.IsNullOrWhiteSpace(text)) continue;
 
+            var inTable = para.Ancestors(W + "tbl").Any();
+            var preview = text.Length > 50 ? text.Substring(0, 50) + "..." : text;
+
             if (string.IsNullOrEmpty(pStyle))
             {
                 // 没有套用样式的段落
                 var directFormat = ExtractDirectFormatting(para);
-                unstyledParagraphs.Add(new UnstyledParagraphInfo(
-                    text.Length > 50 ? text.Substring(0, 50) + "..." : text,
-                    directFormat));
+                unstyledParagraphs.Add(new UnstyledParagraphInfo(preview, directFormat, inTable));
+            }
+            else if (!allStyles.ContainsKey(pStyle))
+            {
+                // 引用了样式表中不存在的样式（无效样式引用）
+                invalidStyleParagraphs.Add(new StyledParagraphInfo(pStyle, pStyle, preview, inTable));
+                styledParagraphs.Add(new StyledParagraphInfo(pStyle, pStyle, preview, inTable));
             }
             else
             {
                 // 套用了样式的段落
                 allStyles.TryGetValue(pStyle, out var styleName);
-                styledParagraphs.Add(new StyledParagraphInfo(
-                    pStyle,
-                    styleName ?? pStyle,
-                    text.Length > 50 ? text.Substring(0, 50) + "..." : text));
+                styledParagraphs.Add(new StyledParagraphInfo(pStyle, styleName ?? pStyle, preview, inTable));
             }
         }
 
         return new StyleAnalysisResult(
             allStyles,
             styledParagraphs,
-            unstyledParagraphs);
+            unstyledParagraphs,
+            invalidStyleParagraphs);
     }
 
     private static Dictionary<string, string> ExtractAllStyles(XDocument? stylesDoc)
     {
-        var result = new Dictionary<string, string>();
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
         if (stylesDoc?.Root == null) return result;
 
         foreach (var style in stylesDoc.Root.Elements(W + "style"))
@@ -75,17 +82,13 @@ public sealed class StyleAnalyzer
         return result;
     }
 
+    /// <summary>枚举正文所有段落，包括表格（含嵌套表格）内的段落。</summary>
     private static List<XElement> ExtractParagraphs(XDocument? documentDoc)
     {
-        var result = new List<XElement>();
         var body = documentDoc?.Root?.Element(W + "body");
-        if (body == null) return result;
+        if (body == null) return new List<XElement>();
 
-        foreach (var para in body.Elements(W + "p"))
-        {
-            result.Add(para);
-        }
-        return result;
+        return body.Descendants(W + "p").ToList();
     }
 
     private static string ExtractDirectFormatting(XElement para)
@@ -116,8 +119,9 @@ public sealed class StyleAnalyzer
 public sealed record StyleAnalysisResult(
     Dictionary<string, string> AllStyles,
     List<StyledParagraphInfo> StyledParagraphs,
-    List<UnstyledParagraphInfo> UnstyledParagraphs);
+    List<UnstyledParagraphInfo> UnstyledParagraphs,
+    List<StyledParagraphInfo> InvalidStyleParagraphs);
 
-public sealed record StyledParagraphInfo(string StyleId, string StyleName, string Preview);
+public sealed record StyledParagraphInfo(string StyleId, string StyleName, string Preview, bool InTable);
 
-public sealed record UnstyledParagraphInfo(string Preview, string DirectFormat);
+public sealed record UnstyledParagraphInfo(string Preview, string DirectFormat, bool InTable);

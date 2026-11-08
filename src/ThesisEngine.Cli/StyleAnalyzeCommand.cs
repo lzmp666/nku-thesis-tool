@@ -41,24 +41,39 @@ public sealed class StyleAnalyzeCommand
             _output.WriteLine();
 
             _output.WriteLine($"共发现 {result.AllStyles.Count} 个样式：");
-            foreach (var (id, name) in result.AllStyles.Take(10))
+            foreach (var (id, name) in result.AllStyles)
             {
                 _output.WriteLine($"  - {name} ({id})");
             }
-            if (result.AllStyles.Count > 10)
-            {
-                _output.WriteLine($"  ... 还有 {result.AllStyles.Count - 10} 个");
-            }
             _output.WriteLine();
 
-            _output.WriteLine($"套用样式的段落：{result.StyledParagraphs.Count} 段");
+            var tableParagraphCount = result.StyledParagraphs.Count(p => p.InTable);
+            _output.WriteLine($"套用样式的段落：{result.StyledParagraphs.Count} 段" +
+                (tableParagraphCount > 0 ? $"（其中表格内 {tableParagraphCount} 段）" : string.Empty));
             _output.WriteLine();
+
+            if (result.InvalidStyleParagraphs.Count > 0)
+            {
+                _output.WriteLine($"⚠️ 引用了样式表中不存在的样式：{result.InvalidStyleParagraphs.Count} 段");
+                _output.WriteLine("（这些段落的样式引用是无效的，Word 会按默认格式渲染）");
+                foreach (var para in result.InvalidStyleParagraphs.Take(10))
+                {
+                    var where = para.InTable ? "（表格内）" : string.Empty;
+                    _output.WriteLine($"  - \"{para.Preview}\"  引用样式：{para.StyleId} {where}");
+                }
+                if (result.InvalidStyleParagraphs.Count > 10)
+                {
+                    _output.WriteLine($"  ... 还有 {result.InvalidStyleParagraphs.Count - 10} 段");
+                }
+                _output.WriteLine();
+            }
 
             _output.WriteLine($"⚠️ 没有套用样式的段落：{result.UnstyledParagraphs.Count} 段");
             _output.WriteLine("（这些是手动打的格式，建议套上对应样式）");
             foreach (var para in result.UnstyledParagraphs.Take(10))
             {
-                _output.WriteLine($"  - \"{para.Preview}\"  [{para.DirectFormat}]");
+                var where = para.InTable ? "（表格内）" : string.Empty;
+                _output.WriteLine($"  - \"{para.Preview}\"  [{para.DirectFormat}]{where}");
             }
             if (result.UnstyledParagraphs.Count > 10)
             {
