@@ -55,8 +55,18 @@ public sealed class FullFormatCommand
             _output.WriteLine("=" + new string('=', 50));
             _output.WriteLine();
 
+            // 0. 修改前先保存快照（备份），撤销时回滚
+            var changeDescription =
+                "一键完整格式化：自动套用段落样式、" +
+                "修改样式定义（正文宋体小四 1.5 倍行距、各级标题黑体）、" +
+                "表格改三线表、图片居中、修正跨页问题";
+            var backupId = _undo.BackupBeforeModify(inputPath, outputPath, changeDescription);
+            _output.WriteLine($"【0/5】已创建修改前快照（备份 ID：{backupId}）");
+            _output.WriteLine($"  - 如对结果不满意，可运行 undo 命令一键撤销：{outputPath}");
+            _output.WriteLine();
+
             // 1. 自动给无样式段落套样式
-            _output.WriteLine("【1/4】自动识别并套用段落样式");
+            _output.WriteLine("【1/5】自动识别并套用段落样式");
             _output.WriteLine("  - 检测无样式段落");
             _output.WriteLine("  - 短文本加粗段落识别为标题");
             _output.WriteLine("  - 其他段落套用正文样式");
@@ -65,7 +75,7 @@ public sealed class FullFormatCommand
             _output.WriteLine();
 
             // 2. 修改样式定义
-            _output.WriteLine("【2/4】修改样式定义");
+            _output.WriteLine("【2/5】修改样式定义");
             _output.WriteLine("  - 正文 Normal：宋体 小四，1.5倍行距");
             _output.WriteLine("  - 一级标题：黑体 三号");
             _output.WriteLine("  - 二级标题：黑体 四号");
@@ -105,6 +115,7 @@ public sealed class FullFormatCommand
             _output.WriteLine();
             _output.WriteLine("✅ 全部格式化完成！");
             _output.WriteLine("提示：打开文件检查一下，如有问题可运行 undo 命令撤销。");
+            _output.WriteLine($"      （备份 ID：{backupId}，可用 undo --list 查看全部备份）");
 
             return 0;
         }

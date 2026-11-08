@@ -52,6 +52,14 @@ public sealed class ApplyNkuFormatCommand
             _output.WriteLine("开始套用南开大学研究生论文格式规范...");
             _output.WriteLine();
 
+            // 修改前先保存快照（备份），撤销时回滚
+            var backupId = _undo.BackupBeforeModify(
+                inputPath,
+                outputPath,
+                "套用南开格式：正文宋体小四 1.5 倍行距，一/二/三级标题黑体，摘要、参考文献、题注样式");
+            _output.WriteLine($"  [0/7] 已创建修改前快照（备份 ID：{backupId}），不满意可运行 undo 撤销");
+            _output.WriteLine();
+
             // 1. 正文 Normal
             _output.WriteLine("  [1/7] 设置正文样式（Normal）：宋体 小四，1.5倍行距");
             _rewriter.SetStyleFontName(inputPath, outputPath, "Normal", "宋体", "Times New Roman");
@@ -85,7 +93,7 @@ public sealed class ApplyNkuFormatCommand
             _output.WriteLine();
             _output.WriteLine($"✅ 完成！输出文件：{outputPath}");
             _output.WriteLine("已套用样式：正文、各级标题、摘要、参考文献、图表题注");
-            _output.WriteLine("提示：打开文件检查一下，确认格式是否符合要求。");
+            _output.WriteLine("提示：打开文件检查一下，如有问题可运行 undo 命令撤销到修改前状态。");
 
             return 0;
         }

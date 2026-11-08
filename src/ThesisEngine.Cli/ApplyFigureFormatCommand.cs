@@ -8,15 +8,18 @@ namespace ThesisEngine.Cli;
 public sealed class ApplyFigureFormatCommand
 {
     private readonly FigureTableRewriter _rewriter;
+    private readonly UndoManager _undo;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
 
     public ApplyFigureFormatCommand(
         FigureTableRewriter? rewriter = null,
+        UndoManager? undo = null,
         TextWriter? output = null,
         TextWriter? error = null)
     {
         _rewriter = rewriter ?? new FigureTableRewriter();
+        _undo = undo ?? new UndoManager();
         _output = output ?? Console.Out;
         _error = error ?? Console.Error;
     }
@@ -47,6 +50,14 @@ public sealed class ApplyFigureFormatCommand
             _output.WriteLine("开始应用图表排版格式...");
             _output.WriteLine();
 
+            // 修改前先保存快照（备份），撤销时回滚
+            var backupId = _undo.BackupBeforeModify(
+                inputPath,
+                outputPath,
+                "图表排版：所有表格改为三线表，所有图片居中对齐");
+            _output.WriteLine($"  [0/2] 已创建修改前快照（备份 ID：{backupId}），不满意可运行 undo 撤销");
+            _output.WriteLine();
+
             _output.WriteLine("  [1/2] 将所有表格改为三线表");
             _rewriter.ApplyThreeLineTables(inputPath, outputPath);
 
@@ -55,6 +66,7 @@ public sealed class ApplyFigureFormatCommand
 
             _output.WriteLine();
             _output.WriteLine($"✅ 完成！输出文件：{outputPath}");
+            _output.WriteLine("提示：如有问题可运行 undo 命令撤销到修改前状态。");
 
             return 0;
         }
