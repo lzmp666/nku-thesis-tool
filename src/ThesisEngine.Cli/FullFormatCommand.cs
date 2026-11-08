@@ -88,10 +88,7 @@ public sealed class FullFormatCommand
             _output.WriteLine("  - 三级标题：黑体 小四");
             _output.WriteLine("  - 摘要、参考文献、题注样式");
 
-            _styleRewriter.SetStyleFontName(outputPath, outputPath, "Normal", "宋体", "Times New Roman");
-            _styleRewriter.SetStyleFontSize(outputPath, outputPath, "Normal", 12);
-            _styleRewriter.SetStyleLineSpacing(outputPath, outputPath, "Normal", 1.5);
-
+            SafeApplyStyle(outputPath, "Normal", "宋体", "Times New Roman", 12, 1.5);
             SafeApplyStyle(outputPath, "Heading1", "黑体", "Times New Roman", 16);
             SafeApplyStyle(outputPath, "Heading2", "黑体", "Times New Roman", 14);
             SafeApplyStyle(outputPath, "Heading3", "黑体", "Times New Roman", 12);
@@ -131,12 +128,16 @@ public sealed class FullFormatCommand
         }
     }
 
-    private void SafeApplyStyle(string path, string styleId, string cnFont, string enFont, double fontSize)
+    private void SafeApplyStyle(string path, string styleId, string cnFont, string enFont, double fontSize, double? lineSpacing = null)
     {
         try
         {
             _styleRewriter.SetStyleFontName(path, path, styleId, cnFont, enFont);
             _styleRewriter.SetStyleFontSize(path, path, styleId, fontSize);
+            if (lineSpacing.HasValue)
+            {
+                _styleRewriter.SetStyleLineSpacing(path, path, styleId, lineSpacing.Value);
+            }
         }
         catch (ArgumentException)
         {
