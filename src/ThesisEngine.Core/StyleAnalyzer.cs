@@ -81,7 +81,8 @@ public sealed class StyleAnalyzer
         var body = documentDoc?.Root?.Element(W + "body");
         if (body == null) return result;
 
-        foreach (var para in body.Elements(W + "p"))
+        // 找所有段落，包括表格里面的段落
+        foreach (var para in body.Descendants(W + "p"))
         {
             result.Add(para);
         }

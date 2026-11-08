@@ -24,7 +24,7 @@ public sealed class StyleAutoAssigner
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
-        var paragraphs = body.Elements(W + "p").ToList();
+        var paragraphs = body.Descendants(W + "p").ToList();
         int assignedCount = 0;
 
         foreach (var para in paragraphs)

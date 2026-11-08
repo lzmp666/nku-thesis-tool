@@ -82,7 +82,7 @@ public sealed class FigureTableRewriter
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
-        var paragraphs = body.Elements(W + "p").ToList();
+        var paragraphs = body.Descendants(W + "p").ToList();
         foreach (var para in paragraphs)
         {
             // 检查段落里有没有图片
@@ -119,7 +119,7 @@ public sealed class FigureTableRewriter
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
-        var paragraphs = body.Elements(W + "p").ToList();
+        var paragraphs = body.Descendants(W + "p").ToList();
         int fixedCount = 0;
 
         foreach (var para in paragraphs)
