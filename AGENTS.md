@@ -82,6 +82,9 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 # 图表格式写入：三线表、图片居中、跨页保护
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-figure-format tests/fixtures/synthetic/full-thesis/synthetic_object_layout_errors.docx artifacts/run_fig.docx
 
+# 公式格式写入：居中、式号右对齐、Cambria Math、段距归零；改不了的在输出里列出来
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-formula-format tests/fixtures/synthetic/formula/formula_number_not_right_aligned.docx artifacts/run_formula.docx
+
 # 一步到位：备份 + 套样式 + 改图表
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- full-format tests/fixtures/synthetic/demo/clean_sample.docx artifacts/run_full.docx
 
@@ -140,9 +143,7 @@ Issue → 分支 → PR，一步不能跳。直接推 `main` 视为没做。
 
 ## 9. 相关文档
 
-- [docs/ai-onboarding.md](docs/ai-onboarding.md)：十分钟跑通，可直接粘的提示词
 - [docs/contribution.md](docs/contribution.md)：从领取到合并的完整流程
 - [docs/architecture.md](docs/architecture.md)：数据流与写入边界
-- [docs/rule-guide.md](docs/rule-guide.md)：条文怎么变成 YAML
 - [docs/qa-sop.md](docs/qa-sop.md)：自测怎么做
 - [docs/demo/README.md](docs/demo/README.md)：演示的预期输出

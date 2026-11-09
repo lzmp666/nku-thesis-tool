@@ -53,6 +53,12 @@ if (args.Length > 0 && string.Equals(args[0], "apply-figure-format", StringCompa
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "apply-formula-format", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new ApplyFormulaFormatCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "full-format", StringComparison.OrdinalIgnoreCase))
 {
     var command = new FullFormatCommand();

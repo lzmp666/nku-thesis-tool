@@ -40,13 +40,13 @@ public sealed class FormulaAnalyzer
     private const int DefaultMarginTwips = 1814;
 
     /// <summary>制表位与版心右缘的容差，500 twips ≈ 0.88cm。</summary>
-    private const int TabStopToleranceTwips = 500;
+    internal const int TabStopToleranceTwips = 500;
 
     /// <summary>半磅单位下 10.5 磅 = 21。</summary>
-    private const int EquationNumberHalfPoints = 21;
+    internal const int EquationNumberHalfPoints = 21;
 
-    private const string CambriaMath = "Cambria Math";
-    private const string TimesNewRoman = "Times New Roman";
+    internal const string CambriaMath = "Cambria Math";
+    internal const string TimesNewRoman = "Times New Roman";
 
     public FormulaAnalysisResult Analyze(string docxPath)
     {
@@ -124,7 +124,7 @@ public sealed class FormulaAnalyzer
     /// 判据是「段落里不属于公式的正文文字还剩不剩」，不看有没有 oMathPara：
     /// Word 写 oMathPara、WPS 有时直接写 oMath，两种都得认。
     /// </summary>
-    private static FormulaLayout DetermineLayout(
+    internal static FormulaLayout DetermineLayout(
         XElement para,
         out string? numberText,
         out XElement? numberRun,
@@ -470,7 +470,7 @@ public sealed class FormulaAnalyzer
     }
 
     /// <summary>版心宽度 = 页宽 - 左右页边距，单位 twips。</summary>
-    private static int ReadTextWidthTwips(XElement body)
+    internal static int ReadTextWidthTwips(XElement body)
     {
         var sectPr = body.Elements(W + "sectPr").LastOrDefault()
             ?? body.Descendants(W + "sectPr").LastOrDefault();
