@@ -32,3 +32,5 @@ python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild
 `full-thesis/` 的 `generate.py` 顶层只用标准库（python-docx、Pillow、lxml 都延迟到 `build_bytes()` 里导入），所以清单核对在干净检出下也能跑；重建那一步才需要依赖。
 
 CI 里若加入，只需在 `build-test` 加一步 `python3 tests/fixtures/synthetic/verify_fixtures.py`。`AGENTS.md` 第 4 节规定 `.github/` 由负责人维护，因此改动 CI 的工作流文件不在这条技术债的 PR 里；逐字节的 `--check` 也不建议直接放进 CI，理由同上。CI 若也要跑 `--with-rebuild`，得先装 python-docx、Pillow、lxml。
+
+Issue #111 的规则分析回归样本 `analysis_compliant.docx` / `analysis_noncompliant.docx` 由 [generate_analysis_samples.py](generate_analysis_samples.py) 生成：前者预期 0 条不符合且未检查非空，后者第一段故意偏离字体、字号、对齐、缩进、行距和段前后，预期 8 条不符合。样本均为合成数据。
