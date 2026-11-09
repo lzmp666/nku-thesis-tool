@@ -12,3 +12,4 @@ TestResults/
 !tests/fixtures/synthetic/*.docx
 !tests/fixtures/synthetic/full-thesis/*.docx
 !tests/fixtures/synthetic/formula/*.docx
+!tests/fixtures/synthetic/document/*.docx

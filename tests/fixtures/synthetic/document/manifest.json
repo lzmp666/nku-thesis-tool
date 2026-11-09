@@ -1,0 +1,108 @@
+{
+  "sample_set": "document/page-setup",
+  "purpose": "Issue #112 文档级版式检查：纸张、页边距、页眉页脚距离、装订线、页眉页脚、页码域、页码格式、目录、疑似空白页",
+  "formal_compliance": false,
+  "status": "synthetic",
+  "generator": "generate.py",
+  "generation_command": "python3 generate.py",
+  "check_command": "python3 generate.py --check",
+  "source_note": "全部内容为人工构造，不含真实论文、个人信息或他人成果。",
+  "disclaimer": "样本只验证检查逻辑是否按预期报出问题，不代表真实论文的版式质量，也不能据此宣称合规。",
+  "spec_source_note": "规范值取自 rules/nku-graduate/general.yaml：R1 纸张 A4、上下 3.8cm、左右 3.2cm、页眉页脚 3.0cm、装订线 0；R2 篇眉宋体 10.5 磅居中、奇偶页相同、各部分首页也要有；R3 页码、前置大写罗马、正文阿拉伯。",
+  "rounding_note": "实测 Word 16 存出来的 A4 是 11907×16839 twips、3.8cm 是 2154 twips，不是教科书上的 11906×16838 / 2155。检查用 0.1cm 容差吸收这种取整差，不做精确比较。",
+  "samples": [
+    {
+      "file": "document_baseline_correct.docx",
+      "description": "A4、规范四边距、规范页眉页脚距离、装订线 0、页眉有内容、页脚是 PAGE 域",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "document_paper_wrong.docx",
+      "description": "唯一偏差：Letter 纸张 12240×15840",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D1", "title": "纸张尺寸不是 A4", "hasClause": true }]
+    },
+    {
+      "file": "document_margin_wrong.docx",
+      "description": "唯一偏差：上下页边距 2.5cm，左右不变",
+      "expected_issue_count": 2,
+      "expected_issues": [
+        { "code": "D2", "title": "上页边距不符合规范", "hasClause": true },
+        { "code": "D2", "title": "下页边距不符合规范", "hasClause": true }
+      ],
+      "note": "左右不该跟着报，测试里断言了这一点"
+    },
+    {
+      "file": "document_hf_distance_wrong.docx",
+      "description": "唯一偏差：页眉与页脚距边界 1.27cm",
+      "expected_issue_count": 2,
+      "expected_issues": [
+        { "code": "D3", "title": "页眉距边界不符合规范", "hasClause": true },
+        { "code": "D3", "title": "页脚距边界不符合规范", "hasClause": true }
+      ]
+    },
+    {
+      "file": "document_gutter_wrong.docx",
+      "description": "唯一偏差：装订线 1cm",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D4", "title": "装订线不符合规范", "hasClause": true }]
+    },
+    {
+      "file": "document_no_header.docx",
+      "description": "唯一偏差：所有节都没有页眉引用",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D6", "title": "全文没有页眉内容", "hasClause": true }]
+    },
+    {
+      "file": "document_empty_header.docx",
+      "description": "唯一偏差：页眉引用了部件，但里面没有文字",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D6", "title": "全文没有页眉内容", "hasClause": true }],
+      "note": "按全文报一条，不逐节报——Word 会给每节都建空的页眉页脚引用，逐节判会连封面一起报"
+    },
+    {
+      "file": "document_footer_text.docx",
+      "description": "唯一偏差：页脚里是手打的数字 1，不是 PAGE 域",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D7", "title": "全文没有页码域", "hasClause": true }]
+    },
+    {
+      "file": "document_even_odd.docx",
+      "description": "唯一偏差：settings 开了 evenAndOddHeaders",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D5", "title": "开启了奇偶页不同", "hasClause": true }]
+    },
+    {
+      "file": "document_toc_manual.docx",
+      "description": "唯一偏差：有「目录」标题，但目录条目是手打的",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D9", "title": "目录不是自动生成的域", "hasClause": true }]
+    },
+    {
+      "file": "document_toc_auto.docx",
+      "description": "合规：目录是 TOC 域",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "document_blank_page.docx",
+      "description": "唯一偏差：空段落里带分页符",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D10", "title": "疑似空白页：空段落里带分页符", "hasClause": false }],
+      "note": "空白页在 XML 层面判不准，属惯例提示，不计入规范符合性"
+    },
+    {
+      "file": "document_sections_same_numbering.docx",
+      "description": "唯一偏差：两节页码格式都是 decimal",
+      "expected_issue_count": 1,
+      "expected_issues": [{ "code": "D8", "title": "各节页码格式相同，未区分前置部分与正文", "hasClause": true }]
+    },
+    {
+      "file": "document_sections_mixed_numbering.docx",
+      "description": "合规：两节分别用 upperRoman 与 decimal",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    }
+  ]
+}
