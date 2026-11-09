@@ -1,4 +1,7 @@
 # 从领取任务到合并
+
+> 第一次参与，先走一遍[十分钟上手](ai-onboarding.md)：跑通 `analyze --demo` 再回来读这一页。给 AI 干活的话，让它先读根目录 [AGENTS.md](../AGENTS.md)。
+
 1. 接受负责人发来的 GitHub 仓库邀请，打开 Issues，读背景、目录边界、验收与依赖。
 2. 在一个无阻塞的 Issue 留言“我领取，预计完成日期…”。负责人确认 assignee 后开工；一人先领取一个任务。
 3. 安装 Git 与 .NET 10 SDK，克隆仓库：
