@@ -14,7 +14,7 @@
 dotnet --version
 ```
 
-输出要是 `10.x`。低于 10，`global.json` 会直接把你挡下来（报 `NETSDK1045`），不用怀疑代码。
+输出要是 `10.x`。低于 10，`global.json` 会直接把你挡下来（报 `NETSDK1045`），不用怀疑代码。没装就去 https://dotnet.microsoft.com/download/dotnet/10.0 装 SDK，不要装 Runtime，编译器在 SDK 里。
 
 CLI 在 Windows、macOS、Linux 都能跑。只有两件事要 Windows + 桌面版 Word：打开带批注的标注副本，和装 VSTO 插件。
 
@@ -41,6 +41,8 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 ```
 
 ### 第一个应该长这样
+
+下面两块**只是关键行摘录**。实际输出还会打印报告头（`模式`、`输入文件`、`状态`）、`未覆盖范围`、每条问题后面的 `修复级别` 和 `说明`，以及最后一行 `提示`。多出这几行是正常的，逐行比对时只看下面这些字段。
 
 ```
 诊断数量：0
@@ -71,7 +73,10 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
       实际：10.5pt
 ```
 
-对上了，就算跑通了。对不上先看第 4 节。
+对上了，就算跑通了。
+
+对不上分两种：**只是多出几行**，那是上面说的报告头，不用管；**关键的几个数字不对**（`诊断数量` 不是 0 或 3、`期望/实际` 对不上、`已检查范围` 全是 0 而诊断却是 3），先看第 4 节的环境问题，环境没问题再开 issue 把输出贴上去。
+
 
 ### 一个必须看懂的地方
 
@@ -81,7 +86,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ### 实际要多久
 
-2026-11-09 在本机从零克隆计时（不含装 .NET SDK、不含第一次拉 NuGet 包）：
+纯命令时间，2026-11-09 本机从零克隆（不含装 .NET SDK、不含第一次拉 NuGet 包）：
 
 | 步骤 | 用时 |
 | --- | --- |
@@ -91,6 +96,10 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 | `dotnet test`（362 条） | 20 秒 |
 | 两遍 `analyze --demo` | 3 秒 |
 | 合计 | **63 秒** |
+
+这些数字单机单次采样，上下浮动几秒很正常，别拿来当性能基准。
+
+真正该看的是墙钟：2026-11-10 让一个完全不了解这个仓库的会话，只拿着这份文件从零走了一遍——从敲 `git clone` 到两个 demo 跑完 **95 秒**，算上读文档和踩 clone 证书坑，总共 **2 分 02 秒**。离十分钟还远。
 
 首次装 SDK 和还原 NuGet 包要另算，视网络十几分钟不等。真卡人的不是这几分钟，是第 4 节里那几个报错。
 
@@ -173,25 +182,31 @@ fatal: unable to access 'https://github.com/...': schannel: next InitializeSecur
 CRYPT_E_NO_REVOCATION_CHECK (0x80092012) - 吊销服务器无法验证证书是否已吊销
 ```
 
-Windows 上走 schannel 时，网络查不到证书吊销列表就会这样。先试关掉吊销检查：
+Windows 上走 schannel 时，网络查不到证书吊销列表就会这样。
 
-```powershell
-git -c http.schannelCheckRevoke=false clone https://github.com/lzmp666/nku-thesis-tool.git
-```
-
-多数 Windows git 到这一步就能过，能过就固化：
-
-```powershell
-git config --global http.schannelCheckRevoke false
-```
-
-还报同一个错，就只能是临时关掉校验，跑这一次，别写进全局配置：
+**先试这条**，它对单次命令生效，不动全局配置：
 
 ```powershell
 git -c http.sslVerify=false clone https://github.com/lzmp666/nku-thesis-tool.git
 ```
 
-这两种都试过还是不行，基本是本地根证书或出口被拦，找管理员要证书，不要硬扛。
+能过就完事了。这条的代价是这一次不校验证书，所以只用于 clone 公开仓库这一次，别固化。
+
+如果连它都过不去，才考虑关吊销检查（有些 Windows git 认这个参数，有些版本不认，实测有差异）：
+
+```powershell
+git -c http.schannelCheckRevoke=false clone https://github.com/lzmp666/nku-thesis-tool.git
+```
+
+能过就固化下来：
+
+```powershell
+git config --global http.schannelCheckRevoke false
+```
+
+两条都不行，基本是本地根证书或出口被拦，找管理员要证书，不要硬扛。
+
+> 顺序说明：先给的 `sslVerify=false` 是实测在本仓库多次跑通的；`schannelCheckRevoke=false` 更"正规"但换台机器可能不认，所以放后面。踩过一次坑就够了，别两条轮流试。
 
 ### 要挂代理
 
@@ -232,6 +247,21 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 ```
 
 然后拿 Word 打开 `artifacts/known.annotated.docx`。该看到三处黄色高亮，每处挂一条中文批注，说明期望值和实际值。输入文件不会被改，已有的输出文件不会被覆盖。
+
+手边没有 Word，也能先确认文件里确实写进去了（不用装任何东西）：
+
+```powershell
+$ProgressPreference = 'SilentlyContinue'
+Copy-Item artifacts/known.annotated.docx artifacts/known.zip -Force
+Expand-Archive artifacts/known.zip artifacts/known -Force
+$h = (Select-String -Path artifacts/known/word/document.xml -Pattern 'w:highlight' -AllMatches).Matches.Count
+$c = (Select-String -Path artifacts/known/word/comments.xml -Pattern '<comment ' -AllMatches).Matches.Count
+"高亮 $h 处，批注 $c 条"
+```
+
+期望输出 `高亮 3 处，批注 3 条`。这只证明高亮和批注写进去了，证明不了 Word 里显示得对不对，最终还得用 Word 看一眼。
+
+> `artifacts/` 下的东西不进版本控制：`.gitignore` 里有 `*.docx`，`git status` 看不到刚生成的文件是正常的，`ls artifacts/` 能看到就是生成了。
 
 **验证 VSTO 插件**（任务窗格侧）
 
