@@ -27,6 +27,7 @@ public sealed class StyleAnalyzer
         var styledParagraphs = new List<StyledParagraphInfo>();
         var unstyledParagraphs = new List<UnstyledParagraphInfo>();
         var invalidStyleParagraphs = new List<StyledParagraphInfo>();
+        var overriddenParagraphs = new List<DirectFormatOverrideInfo>();
 
         foreach (var para in paragraphs)
         {
@@ -55,6 +56,20 @@ public sealed class StyleAnalyzer
                 // 套用了样式的段落
                 allStyles.TryGetValue(pStyle, out var styleName);
                 styledParagraphs.Add(new StyledParagraphInfo(pStyle, styleName ?? pStyle, preview, inTable));
+
+                // 套了样式不代表格式生效：run 上的直接格式优先级高于样式，
+                // 只改 styles.xml 对这类段落无效。以前这里算「已归属」直接放过，
+                // 于是「改样式→全文自动刷新」在真实文档上是假的，报告还是 0 条。
+                var overrides = DirectFormatCleaner.DetectOverrides(para);
+                if (overrides.Count > 0)
+                {
+                    overriddenParagraphs.Add(new DirectFormatOverrideInfo(
+                        pStyle,
+                        styleName ?? pStyle,
+                        preview,
+                        string.Join("、", overrides),
+                        inTable));
+                }
             }
         }
 
@@ -62,7 +77,8 @@ public sealed class StyleAnalyzer
             allStyles,
             styledParagraphs,
             unstyledParagraphs,
-            invalidStyleParagraphs);
+            invalidStyleParagraphs,
+            overriddenParagraphs);
     }
 
     private static Dictionary<string, string> ExtractAllStyles(XDocument? stylesDoc)
@@ -120,8 +136,17 @@ public sealed record StyleAnalysisResult(
     Dictionary<string, string> AllStyles,
     List<StyledParagraphInfo> StyledParagraphs,
     List<UnstyledParagraphInfo> UnstyledParagraphs,
-    List<StyledParagraphInfo> InvalidStyleParagraphs);
+    List<StyledParagraphInfo> InvalidStyleParagraphs,
+    List<DirectFormatOverrideInfo> DirectFormatOverrides);
 
 public sealed record StyledParagraphInfo(string StyleId, string StyleName, string Preview, bool InTable);
 
 public sealed record UnstyledParagraphInfo(string Preview, string DirectFormat, bool InTable);
+
+/// <summary>套了样式、但仍有直接格式压在上面的段落。</summary>
+public sealed record DirectFormatOverrideInfo(
+    string StyleId,
+    string StyleName,
+    string Preview,
+    string Overrides,
+    bool InTable);

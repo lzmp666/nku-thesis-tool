@@ -310,6 +310,235 @@ public sealed class StyleSystemTests
         }
     }
 
+    [Fact]
+    public void AssignerResolvesStyleByWNameWhenStyleIdIsLocalized()
+    {
+        var path = NewTempDocxPath();
+        var output = NewTempDocxPath();
+        try
+        {
+            // 真实文档里常见：正文样式的 styleId 是 a，w:name 才是 Normal
+            CreateDocx(path, new XElement(W("body"), P("本章介绍研究背景。")), ("a", "Normal"));
+
+            var writer = new StringWriter();
+            var result = new StyleAutoAssigner(writer).AutoAssignStyles(path, output);
+
+            Assert.Equal(1, result.TotalAssigned);
+            Assert.Equal(0, result.ParagraphsWithoutUsableStyle);
+            // 写进去的必须是样式表里真实存在的 id，不能硬写 "Normal"
+            Assert.Equal("a", ReadAssignedStyles(output)["本章介绍研究背景。"]);
+        }
+        finally { TryDelete(path); TryDelete(output); }
+    }
+
+    [Fact]
+    public void AssignerReportsParagraphsWithoutUsableStyle()
+    {
+        var path = NewTempDocxPath();
+        var output = NewTempDocxPath();
+        try
+        {
+            // 样式表里连正文样式都没有，套不上就得说出来，不能报「无需调整」
+            CreateDocx(path, new XElement(W("body"), P("一段正文。")), ("X", "Body Text"));
+
+            var result = new StyleAutoAssigner(new StringWriter()).AutoAssignStyles(path, output);
+
+            Assert.Equal(0, result.TotalAssigned);
+            Assert.Equal(1, result.ParagraphsWithoutUsableStyle);
+        }
+        finally { TryDelete(path); TryDelete(output); }
+    }
+
+    [Fact]
+    public void AnalyzerIgnoresParagraphMarkFormatting()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            // 段落标记上的加粗（pPr/rPr）只作用于回车符，不影响正文，不该报成「被压住」
+            var para = new XElement(W("p"),
+                new XElement(W("pPr"),
+                    new XElement(W("pStyle"), new XAttribute(W("val"), "Normal")),
+                    new XElement(W("rPr"), new XElement(W("b")))),
+                new XElement(W("r"), new XElement(W("t"), "段落标记带加粗的正文")));
+
+            CreateDocx(path, new XElement(W("body"), para), ("Normal", "Normal"));
+
+            var result = new StyleAnalyzer().Analyze(path);
+
+            Assert.Empty(result.DirectFormatOverrides);
+        }
+        finally { TryDelete(path); }
+    }
+
+    // ---------- Issue #118：清除压过样式的直接格式 ----------
+    [Fact]
+    public void CleanerRemovesOverridesButKeepsSuperscriptAndLanguage()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var run = new XElement(W("r"),
+                new XElement(W("rPr"),
+                    new XElement(W("rFonts"),
+                        new XAttribute(W("ascii"), "Times New Roman"),
+                        new XAttribute(W("eastAsia"), "宋体")),
+                    new XElement(W("sz"), new XAttribute(W("val"), "21")),
+                    new XElement(W("szCs"), new XAttribute(W("val"), "21")),
+                    new XElement(W("b")),
+                    new XElement(W("vertAlign"), new XAttribute(W("val"), "superscript")),
+                    new XElement(W("lang"), new XAttribute(W("val"), "en-US"))),
+                new XElement(W("t"), "上标引用"));
+
+            var para = new XElement(W("p"),
+                new XElement(W("pPr"), new XElement(W("pStyle"), new XAttribute(W("val"), "Normal"))),
+                run);
+
+            CreateDocx(path, new XElement(W("body"), para), ("Normal", "Normal"));
+
+            var result = new DirectFormatCleaner().Clean(path, path);
+
+            Assert.Equal(1, result.RunsTouched);
+
+            var rPr = FirstRunProperties(path);
+            Assert.NotNull(rPr);
+            // 该由样式管的，全清掉
+            Assert.Null(rPr!.Element(W("rFonts")));
+            Assert.Null(rPr.Element(W("sz")));
+            Assert.Null(rPr.Element(W("szCs")));
+            Assert.Null(rPr.Element(W("b")));
+            // 不属于「格式与样式打架」的，一个都不能丢
+            Assert.NotNull(rPr.Element(W("vertAlign")));
+            Assert.NotNull(rPr.Element(W("lang")));
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void CleanerSkipsParagraphsWithoutUsableStyle()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var para = new XElement(W("p"),
+                new XElement(W("r"),
+                    new XElement(W("rPr"), new XElement(W("sz"), new XAttribute(W("val"), "21"))),
+                    new XElement(W("t"), "没有样式的段落")));
+
+            CreateDocx(path, new XElement(W("body"), para), ("Normal", "Normal"));
+
+            var result = new DirectFormatCleaner().Clean(path, path);
+
+            // 没有样式时直接格式就是它唯一的格式，清掉等于把版面抹平
+            Assert.Equal(1, result.ParagraphsSkippedNoStyle);
+            Assert.Equal(0, result.ParagraphsTouched);
+            Assert.NotNull(FirstRunProperties(path)?.Element(W("sz")));
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void CleanerKeepsParagraphSpacingAndAlignment()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var para = new XElement(W("p"),
+                new XElement(W("pPr"),
+                    new XElement(W("pStyle"), new XAttribute(W("val"), "Normal")),
+                    new XElement(W("jc"), new XAttribute(W("val"), "center")),
+                    new XElement(W("ind"), new XAttribute(W("firstLineChars"), "200")),
+                    new XElement(W("spacing"),
+                        new XAttribute(W("before"), "240"),
+                        new XAttribute(W("after"), "240"),
+                        new XAttribute(W("line"), "360"),
+                        new XAttribute(W("lineRule"), "auto"))),
+                new XElement(W("r"), new XElement(W("t"), "居中的图题")));
+
+            CreateDocx(path, new XElement(W("body"), para), ("Normal", "Normal"));
+
+            new DirectFormatCleaner().Clean(path, path);
+
+            var pPr = ReadDocumentXml(path).Root!.Element(W("body"))!.Element(W("p"))!.Element(W("pPr"))!;
+
+            // 缩进和行距归样式管
+            Assert.Null(pPr.Element(W("ind")));
+            var spacing = pPr.Element(W("spacing"))!;
+            Assert.Null(spacing.Attribute(W("line")));
+            Assert.Null(spacing.Attribute(W("lineRule")));
+            // 段前段后和对齐保留：标题靠它们撑版面，样式里没有对应定义
+            Assert.Equal("240", spacing.Attribute(W("before"))!.Value);
+            Assert.Equal("240", spacing.Attribute(W("after"))!.Value);
+            Assert.Equal("center", pPr.Element(W("jc"))!.Attribute(W("val"))!.Value);
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void AnalyzerReportsStyledParagraphStillOverriddenByDirectFormat()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var overridden = new XElement(W("p"),
+                new XElement(W("pPr"), new XElement(W("pStyle"), new XAttribute(W("val"), "Normal"))),
+                new XElement(W("r"),
+                    new XElement(W("rPr"), new XElement(W("sz"), new XAttribute(W("val"), "21"))),
+                    new XElement(W("t"), "套了样式但字号是手动的")));
+
+            CreateDocx(path, new XElement(W("body"), overridden, P("干净段落", style: "Normal")),
+                ("Normal", "Normal"));
+
+            var result = new StyleAnalyzer().Analyze(path);
+
+            // 以前这里报 0 条：套了样式就算「已归属」，直接格式完全看不见
+            var item = Assert.Single(result.DirectFormatOverrides);
+            Assert.Contains("手动字号", item.Overrides);
+            Assert.Contains("套了样式", item.Preview);
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void FullFormatClearsDirectFormattingSoStyleTakesEffect()
+    {
+        var path = NewTempDocxPath();
+        var outputPath = NewTempDocxPath();
+        var backupDir = Path.Combine(Path.GetTempPath(), "nku-undo-tests-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var para = new XElement(W("p"),
+                new XElement(W("pPr"), new XElement(W("pStyle"), new XAttribute(W("val"), "Normal"))),
+                new XElement(W("r"),
+                    new XElement(W("rPr"), new XElement(W("sz"), new XAttribute(W("val"), "21"))),
+                    new XElement(W("t"), "字号被手动设成五号的正文")));
+
+            CreateDocx(path, new XElement(W("body"), para), ("Normal", "Normal"));
+
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var command = NewFullFormatCommand(CliAssembly, output, error, backupDir);
+
+            var exitCode = Execute(command, new[] { path, outputPath });
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("【2/6】清除压过样式的手动格式", output.ToString());
+
+            // run 上的手动字号没了，样式才真正说了算
+            Assert.Null(FirstRunProperties(outputPath)?.Element(W("sz")));
+
+            // 样式定义里正文是小四（24 半磅），Word 打开就是小四
+            var normalStyle = ReadStyle(outputPath, "Normal");
+            Assert.Equal("24", normalStyle.Element(W("rPr"))!.Element(W("sz"))!.Attribute(W("val"))!.Value);
+        }
+        finally
+        {
+            TryDelete(path);
+            TryDelete(outputPath);
+            try { Directory.Delete(backupDir, true); } catch (IOException) { }
+        }
+    }
+
     // ---------- 测试辅助 ----------
 
     private static readonly System.Reflection.Assembly CliAssembly = LoadCliAssembly();
@@ -326,6 +555,24 @@ public sealed class StyleSystemTests
         var undo = new UndoManager(backupDir);
         return System.Activator.CreateInstance(type, new object?[] { null, null, undo, output, error })!;
     }
+
+    private static XDocument ReadDocumentXml(string docxPath)
+    {
+        using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var entry = archive.GetEntry("word/document.xml")!;
+        using var reader = new StreamReader(entry.Open());
+        return XDocument.Load(reader);
+    }
+
+    /// <summary>取正文里第一个带文字的 run 的 rPr。</summary>
+    private static XElement? FirstRunProperties(string docxPath) =>
+        ReadDocumentXml(docxPath).Root!
+            .Element(W("body"))!
+            .Descendants(W("r"))
+            .Where(r => r.Element(W("t")) != null)
+            .Select(r => r.Element(W("rPr")))
+            .FirstOrDefault();
 
     /// <summary>读文档里某个 styleId 对应的样式定义。</summary>
     private static XElement ReadStyle(string docxPath, string styleId)

@@ -80,6 +80,27 @@ public sealed class StyleAnalyzeCommand
                 _output.WriteLine($"  ... 还有 {result.UnstyledParagraphs.Count - 10} 段");
             }
 
+            _output.WriteLine();
+
+            if (result.DirectFormatOverrides.Count > 0)
+            {
+                _output.WriteLine($"⚠️ 套了样式、但格式仍被手动设置压住：{result.DirectFormatOverrides.Count} 段");
+                _output.WriteLine("（Word 里手动格式优先级高于样式，这些段落的字体字号不会跟着样式变）");
+                foreach (var para in result.DirectFormatOverrides.Take(10))
+                {
+                    var where = para.InTable ? "（表格内）" : string.Empty;
+                    _output.WriteLine($"  - \"{para.Preview}\"  样式：{para.StyleName}  [{para.Overrides}]{where}");
+                }
+                if (result.DirectFormatOverrides.Count > 10)
+                {
+                    _output.WriteLine($"  ... 还有 {result.DirectFormatOverrides.Count - 10} 段");
+                }
+            }
+            else
+            {
+                _output.WriteLine("✅ 套用样式的段落没有被直接格式覆盖，改样式会真正生效。");
+            }
+
             return 0;
         }
         catch (Exception ex)

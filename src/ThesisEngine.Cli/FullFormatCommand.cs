@@ -61,28 +61,56 @@ public sealed class FullFormatCommand
             // 0. 修改前先保存快照（备份），撤销时回滚
             var changeDescription =
                 "一键完整格式化：自动套用段落样式、" +
+                "清除压过样式的手动格式、" +
                 "修改样式定义（正文宋体小四 1.5 倍行距、各级标题黑体）、" +
                 "表格改三线表、图片居中、修正跨页问题";
             var backupId = _undo.BackupBeforeModify(inputPath, outputPath, changeDescription);
-            _output.WriteLine($"【0/5】已创建修改前快照（备份 ID：{backupId}）");
+            _output.WriteLine($"【0/6】已创建修改前快照（备份 ID：{backupId}）");
             _output.WriteLine($"  - 如对结果不满意，可运行 undo 命令一键撤销：{outputPath}");
             _output.WriteLine();
 
             // 1. 自动给无样式段落套样式
-            _output.WriteLine("【1/5】自动识别并套用段落样式");
+            _output.WriteLine("【1/6】自动识别并套用段落样式");
             _output.WriteLine("  - 检测无样式段落（含表格内段落）");
             _output.WriteLine("  - 识别章/节/小节标题、摘要、参考文献等结构");
             _output.WriteLine("  - 其他段落套用正文样式");
             var autoAssigner = new StyleAutoAssigner(_output);
             var assignment = autoAssigner.AutoAssignStyles(inputPath, outputPath);
-            if (assignment.TotalAssigned == 0)
+            if (assignment.ParagraphsWithoutUsableStyle > 0)
+            {
+                _output.WriteLine($"  ⚠️ {assignment.ParagraphsWithoutUsableStyle} 个段落找不到可用样式" +
+                    "（文档样式表里没有正文样式），这些段落保持原样");
+            }
+            if (assignment.TotalAssigned == 0 && assignment.ParagraphsWithoutUsableStyle == 0)
             {
                 _output.WriteLine("所有段落都已有样式归属，无需调整。");
             }
             _output.WriteLine();
 
-            // 2. 修改样式定义
-            _output.WriteLine("【2/5】修改样式定义");
+            // 2. 清除压过样式的直接格式
+            // 这一步是「改样式 → 全文生效」成立的前提：段落已经套上样式了，
+            // 但只要 run 上还留着手动字号，Word 就按手动的渲染，样式改了也看不出来。
+            _output.WriteLine("【2/6】清除压过样式的手动格式");
+            _output.WriteLine("  - 段落：缩进、行距（段前段后和对齐方式保留）");
+            _output.WriteLine("  - 文字：字体、字号、加粗、斜体、下划线、颜色");
+            _output.WriteLine("  - 上下标、域、文本框不动");
+
+            var cleaner = new DirectFormatCleaner();
+            var cleaning = cleaner.Clean(outputPath, outputPath);
+
+            _output.WriteLine($"  - 已清理 {cleaning.RunsTouched} 处文字格式、{cleaning.ParagraphsTouched} 个段落" +
+                (cleaning.RemovedCounts.Count > 0
+                    ? "：" + string.Join("、", cleaning.RemovedCounts.Select(kv => $"{kv.Key}×{kv.Value}"))
+                    : string.Empty));
+            if (cleaning.ParagraphsSkippedNoStyle > 0)
+            {
+                _output.WriteLine($"  - 另有 {cleaning.ParagraphsSkippedNoStyle} 个段落没有可用样式，未清理" +
+                    "（这些段落的格式就是手动设的，删掉等于把版面抹平）");
+            }
+            _output.WriteLine();
+
+            // 3. 修改样式定义
+            _output.WriteLine("【3/6】修改样式定义");
             _output.WriteLine("  - 正文 Normal：宋体 小四，1.5倍行距");
             _output.WriteLine("  - 一级标题：黑体 三号");
             _output.WriteLine("  - 二级标题：黑体 四号");
@@ -116,23 +144,23 @@ public sealed class FullFormatCommand
 
             _output.WriteLine();
 
-            // 3. 修正图表格式
-            _output.WriteLine("【3/5】修正图表格式");
+            // 4. 修正图表格式
+            _output.WriteLine("【4/6】修正图表格式");
             _output.WriteLine("  - 所有表格改为三线表");
             _output.WriteLine("  - 所有图片居中对齐");
             _figureRewriter.ApplyThreeLineTables(outputPath, outputPath);
             _figureRewriter.CenterAlignImages(outputPath, outputPath);
             _output.WriteLine();
 
-            // 4. 修正跨页问题
-            _output.WriteLine("【4/5】修正跨页问题");
+            // 5. 修正跨页问题
+            _output.WriteLine("【5/6】修正跨页问题");
             _output.WriteLine("  - 孤行控制，避免段落最后一行单独在一页");
             _output.WriteLine("  - 与下段同页，避免标题和正文分开");
             _figureRewriter.FixPageBreaks(outputPath, outputPath);
             _output.WriteLine();
 
-            // 5. 完成
-            _output.WriteLine("【5/5】完成");
+            // 6. 完成
+            _output.WriteLine("【6/6】完成");
             _output.WriteLine($"  - 输出：{outputPath}");
             _output.WriteLine();
             if (skippedStyles.Count > 0)

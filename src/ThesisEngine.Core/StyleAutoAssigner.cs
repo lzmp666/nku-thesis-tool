@@ -16,8 +16,8 @@ namespace ThesisEngine.Core;
 /// - "[N]" 开头的参考文献条目 → Bibliography
 /// - 摘要段落 → Abstract
 /// - 其他 → Normal
-/// 所有候选样式都必须真实存在于文档样式表中，否则回退 Normal；
-/// 表格内的无样式段落同样会被识别并套样式。
+/// 所有候选样式都按 <c>w:name</c> 在文档样式表里解析成真实 styleId，找不到就回退正文样式；
+/// 正文样式也缺失时不动该段落，并计入「找不到可用样式」。表格内的无样式段落同样会被识别并套样式。
 /// </summary>
 public sealed class StyleAutoAssigner
 {
@@ -56,7 +56,8 @@ public sealed class StyleAutoAssigner
     /// <summary>一次自动套用的统计结果。</summary>
     public sealed record StyleAssignmentResult(
         int TotalAssigned,
-        IReadOnlyDictionary<string, int> AssignedCounts);
+        IReadOnlyDictionary<string, int> AssignedCounts,
+        int ParagraphsWithoutUsableStyle = 0);
 
     /// <summary>
     /// 自动识别文档结构并给无样式段落套用样式（含表格内段落）。
@@ -64,11 +65,12 @@ public sealed class StyleAutoAssigner
     public StyleAssignmentResult AutoAssignStyles(string inputPath, string outputPath)
     {
         var doc = ReadDocumentXml(inputPath);
-        var availableStyles = ReadAvailableStyleIds(inputPath);
+        var styleIndex = ReadStyleIndex(inputPath);
         var body = doc.Root?.Element(W + "body")
             ?? throw new InvalidDataException("文档中没有 body");
 
         var assignedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var withoutStyle = 0;
 
         foreach (var para in body.Descendants(W + "p"))
         {
@@ -81,8 +83,12 @@ public sealed class StyleAutoAssigner
             var text = GetParagraphText(para);
             if (string.IsNullOrWhiteSpace(text)) continue;
 
-            var candidate = Classify(text, para, availableStyles);
-            if (candidate == null) continue;
+            var candidate = Classify(text, para, styleIndex);
+            if (candidate == null)
+            {
+                withoutStyle++;
+                continue;
+            }
 
             if (pPr == null)
             {
@@ -105,7 +111,8 @@ public sealed class StyleAutoAssigner
 
         var result = new StyleAssignmentResult(
             assignedCounts.Values.Sum(),
-            assignedCounts);
+            assignedCounts,
+            withoutStyle);
 
         _output.WriteLine($"已自动给 {result.TotalAssigned} 个无样式段落套用样式" +
             (result.AssignedCounts.Count > 0
@@ -118,8 +125,9 @@ public sealed class StyleAutoAssigner
     /// <summary>
     /// 根据文本内容识别段落应归属的样式。
     /// 候选样式不存在于样式表时回退 Normal；Normal 也不存在时返回 null（跳过）。
+    /// 返回值是样式表里**真实存在的 styleId**，不一定是候选名——两者常常对不上。
     /// </summary>
-    private static string? Classify(string text, XElement para, IReadOnlySet<string> availableStyles)
+    private static string? Classify(string text, XElement para, IReadOnlyDictionary<string, string> styleIndex)
     {
         var trimmed = text.Trim();
         var isBold = para.Descendants(W + "b").Any();
@@ -142,7 +150,7 @@ public sealed class StyleAutoAssigner
         else
             candidate = "Normal";
 
-        return Resolve(candidate, availableStyles);
+        return Resolve(candidate, styleIndex);
     }
 
     private static bool IsAbstractParagraph(string trimmed) =>
@@ -150,35 +158,56 @@ public sealed class StyleAutoAssigner
         trimmed.StartsWith("Abstract", StringComparison.OrdinalIgnoreCase) ||
         trimmed.StartsWith("ABSTRACT", StringComparison.Ordinal);
 
-    /// <summary>候选样式存在就返回；否则回退 Normal；Normal 也缺失时跳过。</summary>
-    private static string? Resolve(string candidate, IReadOnlySet<string> availableStyles)
+    /// <summary>
+    /// 候选样式存在就返回它的真实 styleId；否则回退正文样式；正文样式也缺失时返回 null。
+    /// 注意这里按 <c>w:name</c> 找，不按 styleId 找：styleId 只是文档内部名字，
+    /// 第三方工具导出的文档常把它写成 a / 1 之类，名字却还是 Normal。
+    /// 只按 id 匹配会让整篇文档一个样式都套不上，而且报告显示「0 个段落需要调整」，
+    /// 看着像没事，实际什么都没做。
+    /// </summary>
+    private static string? Resolve(string candidate, IReadOnlyDictionary<string, string> styleIndex)
     {
-        if (availableStyles.Contains(candidate)) return candidate;
-        if (availableStyles.Contains("Normal")) return "Normal";
+        if (styleIndex.TryGetValue(NormalizeStyleName(candidate), out var id)) return id;
+        if (styleIndex.TryGetValue(NormalizeStyleName("Normal"), out var normalId)) return normalId;
         return null;
     }
+
+    /// <summary>样式名比较口径：去空白、忽略大小写（heading 1 等价 Heading1）。</summary>
+    private static string NormalizeStyleName(string name) =>
+        new string(name.Where(c => !char.IsWhiteSpace(c)).ToArray()).ToLowerInvariant();
 
     private static string GetParagraphText(XElement para) =>
         para.Descendants(W + "t").Select(t => t.Value).Aggregate("", (a, b) => a + b);
 
-    /// <summary>读取样式表中实际存在的样式 ID（含默认样式）。</summary>
-    private static IReadOnlySet<string> ReadAvailableStyleIds(string docxPath)
+    /// <summary>
+    /// 读样式表，建立「规范化样式名 → 真实 styleId」的索引。
+    /// 没有 w:name 的样式用 styleId 兜底，保证按 id 写的旧文档仍然能用。
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> ReadStyleIndex(string docxPath)
     {
-        var styles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var index = new Dictionary<string, string>(StringComparer.Ordinal);
         using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
         var entry = archive.GetEntry("word/styles.xml");
-        if (entry == null) return styles;
+        if (entry == null) return index;
 
         using var reader = new StreamReader(entry.Open());
         var stylesDoc = XDocument.Load(reader);
         foreach (var style in stylesDoc.Root?.Elements(W + "style") ?? Enumerable.Empty<XElement>())
         {
             var styleId = style.Attribute(W + "styleId")?.Value;
-            if (!string.IsNullOrEmpty(styleId))
-                styles.Add(styleId);
+            if (string.IsNullOrEmpty(styleId)) continue;
+
+            var name = style.Element(W + "name")?.Attribute(W + "val")?.Value;
+
+            // 名字优先，id 作为补充键，两个都能命中。
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                index.TryAdd(NormalizeStyleName(name), styleId);
+            }
+            index.TryAdd(NormalizeStyleName(styleId), styleId);
         }
-        return styles;
+        return index;
     }
 
     private static XDocument ReadDocumentXml(string docxPath)
