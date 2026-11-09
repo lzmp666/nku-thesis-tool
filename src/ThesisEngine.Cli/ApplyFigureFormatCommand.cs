@@ -54,15 +54,18 @@ public sealed class ApplyFigureFormatCommand
             var backupId = _undo.BackupBeforeModify(
                 inputPath,
                 outputPath,
-                "图表排版：所有表格改为三线表，所有图片居中对齐");
-            _output.WriteLine($"  [0/2] 已创建修改前快照（备份 ID：{backupId}），不满意可运行 undo 撤销");
+                "图表排版：所有表格改为三线表，所有图片居中对齐，修正跨页设置");
+            _output.WriteLine($"  [0/3] 已创建修改前快照（备份 ID：{backupId}），不满意可运行 undo 撤销");
             _output.WriteLine();
 
-            _output.WriteLine("  [1/2] 将所有表格改为三线表");
+            _output.WriteLine("  [1/3] 将所有表格改为三线表");
             _rewriter.ApplyThreeLineTables(inputPath, outputPath);
 
-            _output.WriteLine("  [2/2] 将所有图片居中对齐");
+            _output.WriteLine("  [2/3] 将所有图片居中对齐");
             _rewriter.CenterAlignImages(outputPath, outputPath);
+
+            _output.WriteLine("  [3/3] 修正跨页设置（孤行控制、题注保持同页）");
+            _rewriter.FixPageBreaks(outputPath, outputPath);
 
             _output.WriteLine();
             _output.WriteLine($"✅ 完成！输出文件：{outputPath}");
