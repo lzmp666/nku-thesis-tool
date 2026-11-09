@@ -217,6 +217,99 @@ public sealed class StyleSystemTests
         finally { TryDelete(path); }
     }
 
+    // ---------- StyleRewriter 样式查找兜底（#116）----------
+
+    /// <summary>
+    /// 有些文档把正文样式的 styleId 本地化成 a / 1 之类，w:name 仍是 Normal。
+    /// 只按 styleId 精确匹配会认定「没有正文样式」，整条格式化链断掉。
+    /// </summary>
+    [Fact]
+    public void RewriterFallsBackToStyleNameWhenStyleIdIsLocalized()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var body = new XElement(W("body"), P("正文段落", style: "a"));
+            CreateDocx(path, body, ("a", "Normal"));
+
+            Assert.True(new StyleRewriter().HasStyle(path, "Normal"));
+
+            new StyleRewriter().SetStyleFontSize(path, path, "Normal", 12);
+
+            var style = ReadStyle(path, "a");
+            Assert.Equal("24", style.Element(W("rPr"))?.Element(W("sz"))?.Attribute(W("val"))?.Value);
+        }
+        finally { TryDelete(path); }
+    }
+
+    /// <summary>
+    /// Word 内置名带空格（heading 1），请求方习惯写 Heading1，要能对上。
+    /// </summary>
+    [Fact]
+    public void RewriterMatchesBuiltInNameIgnoringSpacesAndCase()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            var body = new XElement(W("body"), P("一级标题", style: "x9"));
+            CreateDocx(path, body, ("x9", "heading 1"));
+
+            new StyleRewriter().SetStyleFontSize(path, path, "Heading1", 16);
+
+            var style = ReadStyle(path, "x9");
+            Assert.Equal("32", style.Element(W("rPr"))?.Element(W("sz"))?.Attribute(W("val"))?.Value);
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void HasStyleReturnsFalseWhenNeitherIdNorNameMatches()
+    {
+        var path = NewTempDocxPath();
+        try
+        {
+            CreateDocx(path, new XElement(W("body"), P("正文", style: "Normal")), ("Normal", "Normal"));
+
+            Assert.True(new StyleRewriter().HasStyle(path, "Normal"));
+            Assert.False(new StyleRewriter().HasStyle(path, "GhostStyle"));
+        }
+        finally { TryDelete(path); }
+    }
+
+    /// <summary>
+    /// 样式表里没有 Heading1…Caption 时，full-format 要跳过并说明，而不是整条命令中止。
+    /// </summary>
+    [Fact]
+    public void FullFormatSkipsMissingStylesInsteadOfAborting()
+    {
+        var path = NewTempDocxPath();
+        var outputPath = NewTempDocxPath();
+        var backupDir = Path.Combine(Path.GetTempPath(), "nku-undo-tests-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            CreateDocx(path, new XElement(W("body"), P("正文段落", style: "a")), ("a", "Normal"));
+
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var command = NewFullFormatCommand(CliAssembly, output, error, backupDir);
+
+            var exitCode = Execute(command, new[] { path, outputPath });
+
+            Assert.Equal(0, exitCode);
+            Assert.True(File.Exists(outputPath));
+            // 正文样式走名字兜底认出来了，不该出现在跳过名单里
+            Assert.Contains("跳过", output.ToString());
+            Assert.Contains("Heading1", output.ToString());
+            Assert.DoesNotContain("没有 Normal", output.ToString());
+        }
+        finally
+        {
+            TryDelete(path);
+            TryDelete(outputPath);
+            try { Directory.Delete(backupDir, true); } catch (IOException) { }
+        }
+    }
+
     // ---------- 测试辅助 ----------
 
     private static readonly System.Reflection.Assembly CliAssembly = LoadCliAssembly();
@@ -225,6 +318,25 @@ public sealed class StyleSystemTests
     {
         var type = cli.GetType("ThesisEngine.Cli.StyleAnalyzeCommand")!;
         return System.Activator.CreateInstance(type, null, output, error)!;
+    }
+
+    private static object NewFullFormatCommand(System.Reflection.Assembly cli, TextWriter output, TextWriter error, string backupDir)
+    {
+        var type = cli.GetType("ThesisEngine.Cli.FullFormatCommand")!;
+        var undo = new UndoManager(backupDir);
+        return System.Activator.CreateInstance(type, new object?[] { null, null, undo, output, error })!;
+    }
+
+    /// <summary>读文档里某个 styleId 对应的样式定义。</summary>
+    private static XElement ReadStyle(string docxPath, string styleId)
+    {
+        using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var entry = archive.GetEntry("word/styles.xml")!;
+        using var reader = new StreamReader(entry.Open());
+        var doc = XDocument.Load(reader);
+        return doc.Root!.Elements(W("style"))
+            .Single(s => s.Attribute(W("styleId"))?.Value == styleId);
     }
 
     private static int Execute(object command, string[] args)

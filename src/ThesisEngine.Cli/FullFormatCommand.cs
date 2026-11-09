@@ -48,6 +48,9 @@ public sealed class FullFormatCommand
                 Path.GetDirectoryName(inputPath) ?? "",
                 Path.GetFileNameWithoutExtension(inputPath) + "_南开格式完整版.docx");
 
+        // 中途失败时把这次新建的输出删掉，别留一个只做了一半的文件让人误以为完成了。
+        var outputExistedBefore = File.Exists(outputPath);
+
         try
         {
             _output.WriteLine("=" + new string('=', 50));
@@ -86,16 +89,31 @@ public sealed class FullFormatCommand
             _output.WriteLine("  - 三级标题：黑体 小四");
             _output.WriteLine("  - 摘要、参考文献、题注样式");
 
-            _styleRewriter.SetStyleFontName(outputPath, outputPath, "Normal", "宋体", "Times New Roman");
-            _styleRewriter.SetStyleFontSize(outputPath, outputPath, "Normal", 12);
-            _styleRewriter.SetStyleLineSpacing(outputPath, outputPath, "Normal", 1.5);
+            // 正文样式是全局基础，缺了整条链都会失真，所以和其它样式一样走容错，
+            // 只把缺的那几项记下来，不要因为一个样式名对不上就中止整条命令。
+            var skippedStyles = new List<string>();
 
-            SafeApplyStyle(outputPath, "Heading1", "黑体", "Times New Roman", 16);
-            SafeApplyStyle(outputPath, "Heading2", "黑体", "Times New Roman", 14);
-            SafeApplyStyle(outputPath, "Heading3", "黑体", "Times New Roman", 12);
-            SafeApplyStyle(outputPath, "Abstract", "宋体", "Times New Roman", 12);
-            SafeApplyStyle(outputPath, "Bibliography", "宋体", "Times New Roman", 9);
-            SafeApplyStyle(outputPath, "Caption", "宋体", "Times New Roman", 9);
+            void ApplyStyle(string styleId, string cnFont, double fontSize, double? lineSpacing = null)
+            {
+                if (!SafeApplyStyle(outputPath, styleId, cnFont, "Times New Roman", fontSize, lineSpacing))
+                {
+                    skippedStyles.Add(styleId);
+                }
+            }
+
+            ApplyStyle("Normal", "宋体", 12, 1.5);
+            ApplyStyle("Heading1", "黑体", 16);
+            ApplyStyle("Heading2", "黑体", 14);
+            ApplyStyle("Heading3", "黑体", 12);
+            ApplyStyle("Abstract", "宋体", 12);
+            ApplyStyle("Bibliography", "宋体", 9);
+            ApplyStyle("Caption", "宋体", 9);
+
+            if (skippedStyles.Count > 0)
+            {
+                _output.WriteLine($"  ⚠️ 样式表中没有 {string.Join("、", skippedStyles)}，这几项保持原样");
+            }
+
             _output.WriteLine();
 
             // 3. 修正图表格式
@@ -117,7 +135,15 @@ public sealed class FullFormatCommand
             _output.WriteLine("【5/5】完成");
             _output.WriteLine($"  - 输出：{outputPath}");
             _output.WriteLine();
-            _output.WriteLine("✅ 全部格式化完成！");
+            if (skippedStyles.Count > 0)
+            {
+                _output.WriteLine($"完成，{skippedStyles.Count} 项跳过（{string.Join("、", skippedStyles)}）。");
+                _output.WriteLine("  这几项在文档样式表里不存在，不是改失败，是这篇文档里没有对应的样式。");
+            }
+            else
+            {
+                _output.WriteLine("✅ 全部格式化完成！");
+            }
             _output.WriteLine("提示：打开文件检查一下，如有问题可运行 undo 命令撤销。");
             _output.WriteLine($"      （备份 ID：{backupId}，可用 undo --list 查看全部备份）");
 
@@ -126,20 +152,45 @@ public sealed class FullFormatCommand
         catch (Exception ex)
         {
             _error.WriteLine($"失败：{ex.Message}");
+
+            // 这次才生成的文件属于半成品，删掉；原本就存在的文件不动。
+            if (!outputExistedBefore && File.Exists(outputPath))
+            {
+                try
+                {
+                    File.Delete(outputPath);
+                    _error.WriteLine($"已删除未完成的输出文件：{outputPath}");
+                }
+                catch (IOException deleteError)
+                {
+                    _error.WriteLine($"未完成的输出文件删除失败（{deleteError.Message}），请手动确认：{outputPath}");
+                }
+            }
+
             return 1;
         }
     }
 
-    private void SafeApplyStyle(string path, string styleId, string cnFont, string enFont, double fontSize)
+    /// <summary>
+    /// 套用一组样式属性；样式不存在时跳过并返回 false，由调用方汇总告知用户。
+    /// </summary>
+    private bool SafeApplyStyle(string path, string styleId, string cnFont, string enFont, double fontSize, double? lineSpacing = null)
     {
         try
         {
             _styleRewriter.SetStyleFontName(path, path, styleId, cnFont, enFont);
             _styleRewriter.SetStyleFontSize(path, path, styleId, fontSize);
+            if (lineSpacing.HasValue)
+            {
+                _styleRewriter.SetStyleLineSpacing(path, path, styleId, lineSpacing.Value);
+            }
+
+            return true;
         }
         catch (ArgumentException)
         {
             // 样式不存在就跳过
+            return false;
         }
     }
 }
