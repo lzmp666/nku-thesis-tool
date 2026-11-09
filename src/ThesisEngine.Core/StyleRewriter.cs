@@ -23,9 +23,7 @@ public sealed class StyleRewriter
         var stylesDoc = ReadStylesXml(inputPath);
 
         // 修改 stylesDoc
-        var styleElement = stylesDoc.Root?
-            .Elements(W + "style")
-            .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
+        var styleElement = FindStyle(stylesDoc, styleId)
             ?? throw new ArgumentException($"找不到样式：{styleId}");
 
         var rPr = styleElement.Element(W + "rPr");
@@ -64,9 +62,7 @@ public sealed class StyleRewriter
         var stylesDoc = ReadStylesXml(inputPath);
 
         // 修改 stylesDoc
-        var styleElement = stylesDoc.Root?
-            .Elements(W + "style")
-            .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
+        var styleElement = FindStyle(stylesDoc, styleId)
             ?? throw new ArgumentException($"找不到样式：{styleId}");
 
         var rPr = styleElement.Element(W + "rPr");
@@ -101,9 +97,7 @@ public sealed class StyleRewriter
 
         var stylesDoc = ReadStylesXml(inputPath);
 
-        var styleElement = stylesDoc.Root?
-            .Elements(W + "style")
-            .FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId)
+        var styleElement = FindStyle(stylesDoc, styleId)
             ?? throw new ArgumentException($"找不到样式：{styleId}");
 
         var pPr = styleElement.Element(W + "pPr");
@@ -124,6 +118,44 @@ public sealed class StyleRewriter
 
         WriteStylesXml(inputPath, outputPath, stylesDoc);
     }
+
+    /// <summary>
+    /// 文档里是否存在可用的样式（风格 id 或内置名能对上其一即可）。
+    /// </summary>
+    public bool HasStyle(string docxPath, string styleId)
+    {
+        var stylesDoc = ReadStylesXml(docxPath);
+        return FindStyle(stylesDoc, styleId) != null;
+    }
+
+    /// <summary>
+    /// 按 styleId 找样式，找不到再按内置名兜底。
+    /// </summary>
+    /// <remarks>
+    /// styleId 不是规范属性，只是文档内部的名字。Word 中文版、WPS、以及部分
+    /// 第三方库重写过的文档，常把正文样式写成 <c>w:styleId="a"</c>，但
+    /// <c>w:name</c> 仍然是 <c>Normal</c>。只按 styleId 精确匹配会直接判定
+    /// 「文档没有正文样式」，整条格式化链在这里断掉。
+    /// </remarks>
+    private static XElement? FindStyle(XDocument stylesDoc, string styleId)
+    {
+        var styles = stylesDoc.Root?.Elements(W + "style").ToList();
+        if (styles == null || styles.Count == 0) return null;
+
+        var byId = styles.FirstOrDefault(s => s.Attribute(W + "styleId")?.Value == styleId);
+        if (byId != null) return byId;
+
+        // 内置名可能带空格（heading 1），去掉空格再比，大小写不敏感。
+        var target = NormalizeStyleName(styleId);
+        return styles.FirstOrDefault(s =>
+            string.Equals(
+                NormalizeStyleName(s.Element(W + "name")?.Attribute(W + "val")?.Value),
+                target,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeStyleName(string? name)
+        => name?.Replace(" ", "").Replace("\u3000", "") ?? string.Empty;
 
     private static XDocument ReadStylesXml(string docxPath)
     {
