@@ -11,3 +11,4 @@ TestResults/
 /src/ThesisAddIn.VSTO/*.pfx
 !tests/fixtures/synthetic/*.docx
 !tests/fixtures/synthetic/full-thesis/*.docx
+!tests/fixtures/synthetic/formula/*.docx

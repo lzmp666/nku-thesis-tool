@@ -1,0 +1,124 @@
+{
+  "sample_set": "formula/check-only",
+  "purpose": "Issue #114 第一档：公式排版检查，读出公式并检四项格式，只查不改",
+  "formal_compliance": false,
+  "status": "synthetic",
+  "generator": "generate.py",
+  "generation_command": "python3 generate.py",
+  "check_command": "python3 generate.py --check",
+  "source_note": "全部内容为人工构造，公式为简单占位表达式，不含真实论文、个人信息或他人成果。包骨架照 demo/clean_sample.docx 的写法内联生成。",
+  "disclaimer": "样本只验证检查逻辑是否按预期报出问题，不代表真实论文的排版质量，也不能据此宣称合规。",
+  "page_setup_note": "sectPr 用规范值（A4、上下 3.8cm、左右 3.2cm），版心宽 8278 twips，右制表位以此为准。",
+  "samples": [
+    {
+      "file": "formula_baseline_correct.docx",
+      "description": "2 个独立公式（一个靠 pPr/jc 居中、一个靠 m:oMathParaPr/jc 居中）+ 2 个行内公式，式号、字体、间距全部合规",
+      "expected_block_count": 2,
+      "expected_inline_count": 2,
+      "expected_clause_issues": 0,
+      "expected_convention_issues": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "formula_not_centered.docx",
+      "description": "唯一偏差：公式段左对齐（pPr/jc 与 m:oMathParaPr/jc 都是 left）",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 0,
+      "expected_convention_issues": 1,
+      "expected_issues": [
+        {
+          "code": "F1",
+          "title": "独立公式未居中",
+          "hasClause": false,
+          "note": "规范未规定公式位置，按排版惯例报，不计入规范符合性"
+        }
+      ]
+    },
+    {
+      "file": "formula_number_not_right_aligned.docx",
+      "description": "唯一偏差：公式段没有右制表位，段落对齐是居中而非右对齐，式号实际停在居中的位置",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 1,
+      "expected_convention_issues": 0,
+      "expected_issues": [
+        {
+          "code": "F2",
+          "title": "式号未右对齐",
+          "hasClause": true,
+          "basis": "R13（4.7 表4.6）：序号右对齐"
+        }
+      ]
+    },
+    {
+      "file": "formula_number_format_wrong.docx",
+      "description": "式号写成裸数字 3、字体宋体、字号小四，三项同时偏离 R13",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 3,
+      "expected_convention_issues": 0,
+      "expected_issues": [
+        { "code": "F3", "title": "式号未加圆括号", "hasClause": true },
+        { "code": "F3", "title": "式号西文字体不对", "hasClause": true },
+        { "code": "F3", "title": "式号字号不对", "hasClause": true }
+      ]
+    },
+    {
+      "file": "formula_spacing_wrong.docx",
+      "description": "唯一偏差：公式段段前段后各 6 磅（R11 要求 0 磅）",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 1,
+      "expected_convention_issues": 0,
+      "expected_issues": [
+        {
+          "code": "F5",
+          "title": "公式段段前段后有间距",
+          "hasClause": true,
+          "basis": "R11（4.7 表4.6）：段前 0 磅、段后 0 磅"
+        }
+      ]
+    },
+    {
+      "file": "formula_table_row_correct.docx",
+      "description": "两列表格排版：公式在左格、式号在右格且右对齐。用于确认表格排版能被识别，且不因「段落未居中」误报",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 0,
+      "expected_convention_issues": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "formula_word_native_correct.docx",
+      "description": "Word 16 原生写法：式号抄在公式对象内部（m:r 里 w:tab + m:t），段落居中且有右制表位。结构照 2026-11-09 在 Word 16.0 上实测的输出构造",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 0,
+      "expected_convention_issues": 0,
+      "expected_issues": [],
+      "note": "只读 w:t 的实现会认不出式号，这一条就是守它的"
+    },
+    {
+      "file": "formula_word_native_number_not_aligned.docx",
+      "description": "同一套 Word 原生写法，但段落左对齐且没有右制表位",
+      "expected_block_count": 1,
+      "expected_inline_count": 0,
+      "expected_clause_issues": 1,
+      "expected_convention_issues": 1,
+      "expected_issues": [
+        { "code": "F2", "title": "式号未右对齐", "hasClause": true },
+        { "code": "F1", "title": "独立公式未居中", "hasClause": false }
+      ]
+    },
+    {
+      "file": "formula_inline_only.docx",
+      "description": "只有行内公式，共 2 个。独立公式数应为 0，问题数应为 0",
+      "expected_block_count": 0,
+      "expected_inline_count": 2,
+      "expected_clause_issues": 0,
+      "expected_convention_issues": 0,
+      "expected_issues": []
+    }
+  ]
+}
