@@ -31,21 +31,38 @@ public sealed class FigureTableAnalyzer
 
         var images = body.Descendants().Where(e => e.Name.LocalName == "blip").ToList();
         var tables = body.Elements(W + "tbl").ToList();
+        var styles = TryReadStylesXml(archive);
 
         return new FigureTableAnalysisResult(
             ImagesCount: images.Count,
             TablesCount: tables.Count,
             PageBreakIssues: FindPageBreakIssues(body),
-            TableIssues: FindTableIssues(tables));
+            TableIssues: FindTableIssues(tables, styles));
     }
 
-    private static List<string> FindTableIssues(List<XElement> tables)
+    private static XDocument? TryReadStylesXml(ZipArchive archive)
+    {
+        var entry = archive.GetEntry("word/styles.xml");
+        if (entry == null) return null;
+        using var reader = new StreamReader(entry.Open());
+        return XDocument.Load(reader);
+    }
+
+    private static List<string> FindTableIssues(List<XElement> tables, XDocument? styles)
     {
         var issues = new List<string>();
         for (var index = 0; index < tables.Count; index++)
         {
             var number = index + 1;
-            var borders = tables[index].Element(W + "tblPr")?.Element(W + "tblBorders");
+            var tableProperties = tables[index].Element(W + "tblPr");
+            var borders = tableProperties?.Element(W + "tblBorders");
+            if (borders == null)
+            {
+                // 没有直接边框时，按表格引用的样式解析实际生效的边框。
+                var styleId = (string?)tableProperties?.Element(W + "tblStyle")?.Attribute(W + "val");
+                borders = FigureTableStyleWriter.FindTableBorders(styles, styleId);
+            }
+
             if (borders == null)
             {
                 // 边框可能继承自表格样式，仅凭 document.xml 无法确认它是不是三线表。

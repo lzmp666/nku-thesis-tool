@@ -130,6 +130,7 @@ public sealed class FigureTableAnalyzerTests
             Assert.NotEmpty(before.TableIssues);
 
             new FigureTableRewriter().ApplyThreeLineTables(input, output);
+            new FigureTableRewriter().CenterAlignImages(output, output);
             new FigureTableRewriter().FixPageBreaks(output, output);
 
             var after = analyzer.Analyze(output);
@@ -137,24 +138,45 @@ public sealed class FigureTableAnalyzerTests
             Assert.Empty(after.TableIssues);
             Assert.Empty(after.PageBreakIssues);
 
-            // 表头线 0.5 磅（sz=4），且表头之外不得残留单元格边框。
+            // 排版通过样式实现：表格套用 NKUThreeLine、图片段落套用 NKUFigure，
+            // 不写直接边框/直接对齐；表头线 0.5 磅写在样式的首行条件格式里。
             using (var check = ZipFile.OpenRead(output))
             {
-                using var reader = new StreamReader(check.GetEntry("word/document.xml")!.Open());
-                var xml = XDocument.Load(reader);
-                XNamespace w = W;
-                var rows = xml.Descendants(w + "tbl").First().Elements(w + "tr").ToList();
-                var headerBorder = rows[0].Elements(w + "tc").First()
-                    .Element(w + "tcPr")?.Element(w + "tcBorders")?.Element(w + "bottom");
-                Assert.NotNull(headerBorder);
-                Assert.Equal("4", (string?)headerBorder!.Attribute(w + "sz"));
-                foreach (var row in rows.Skip(1))
+                XDocument xml;
+                using (var reader = new StreamReader(check.GetEntry("word/document.xml")!.Open()))
                 {
-                    foreach (var cell in row.Elements(w + "tc"))
-                    {
-                        Assert.Null(cell.Element(w + "tcPr")?.Element(w + "tcBorders"));
-                    }
+                    xml = XDocument.Load(reader);
                 }
+
+                XNamespace w = W;
+                var tableProperties = xml.Descendants(w + "tbl").First().Element(w + "tblPr");
+                Assert.Equal("NKUThreeLine", (string?)tableProperties?.Element(w + "tblStyle")?.Attribute(w + "val"));
+                Assert.Null(tableProperties?.Element(w + "tblBorders"));
+                Assert.DoesNotContain(xml.Descendants(w + "tcPr"), cell => cell.Element(w + "tcBorders") != null);
+
+                var figureParagraphs = xml.Descendants(w + "p")
+                    .Where(paragraph => paragraph.Descendants().Any(e => e.Name.LocalName == "blip"))
+                    .ToList();
+                Assert.NotEmpty(figureParagraphs);
+                foreach (var paragraph in figureParagraphs)
+                {
+                    var properties = paragraph.Element(w + "pPr");
+                    Assert.Equal("NKUFigure", (string?)properties?.Element(w + "pStyle")?.Attribute(w + "val"));
+                    Assert.Null(properties?.Element(w + "jc"));
+                }
+
+                XDocument styles;
+                using (var reader = new StreamReader(check.GetEntry("word/styles.xml")!.Open()))
+                {
+                    styles = XDocument.Load(reader);
+                }
+
+                var tableStyle = styles.Descendants(w + "style")
+                    .First(style => (string?)style.Attribute(w + "styleId") == "NKUThreeLine");
+                var headerBottom = tableStyle.Descendants(w + "tblStylePr").Descendants(w + "bottom").First();
+                Assert.Equal("4", (string?)headerBottom.Attribute(w + "sz"));
+                Assert.NotNull(styles.Descendants(w + "style")
+                    .FirstOrDefault(style => (string?)style.Attribute(w + "styleId") == "NKUFigure"));
             }
 
             // 在真实文档包上校验：新增的段落属性必须符合 OOXML 结构，否则 Word 会报文件损坏。
