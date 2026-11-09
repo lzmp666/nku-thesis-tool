@@ -70,6 +70,33 @@ public sealed class FigureTableAnalyzerTests
     }
 
     [Fact]
+    public void VisibleCellBordersAreReportedEvenWhenTableBordersLookThreeLine()
+    {
+        var path = CreateDocx("""
+            <w:tbl>
+              <w:tblPr>
+                <w:tblBorders>
+                  <w:top w:val="single" w:sz="12"/>
+                  <w:left w:val="nil"/>
+                  <w:bottom w:val="single" w:sz="12"/>
+                  <w:right w:val="nil"/>
+                  <w:insideH w:val="nil"/>
+                  <w:insideV w:val="nil"/>
+                </w:tblBorders>
+              </w:tblPr>
+              <w:tr><w:tc><w:tcPr><w:tcBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/></w:tcBorders></w:tcPr>
+                <w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            """);
+        try
+        {
+            var issue = Assert.Single(new FigureTableAnalyzer().Analyze(path).TableIssues);
+            Assert.Contains("单元格", issue);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void PageBreakBeforeAndTableCaptionWithoutKeepNextAreReported()
     {
         var path = CreateDocx("""
@@ -109,6 +136,26 @@ public sealed class FigureTableAnalyzerTests
             Assert.Equal(before.TablesCount, after.TablesCount);
             Assert.Empty(after.TableIssues);
             Assert.Empty(after.PageBreakIssues);
+
+            // 表头线 0.5 磅（sz=4），且表头之外不得残留单元格边框。
+            using (var check = ZipFile.OpenRead(output))
+            {
+                using var reader = new StreamReader(check.GetEntry("word/document.xml")!.Open());
+                var xml = XDocument.Load(reader);
+                XNamespace w = W;
+                var rows = xml.Descendants(w + "tbl").First().Elements(w + "tr").ToList();
+                var headerBorder = rows[0].Elements(w + "tc").First()
+                    .Element(w + "tcPr")?.Element(w + "tcBorders")?.Element(w + "bottom");
+                Assert.NotNull(headerBorder);
+                Assert.Equal("4", (string?)headerBorder!.Attribute(w + "sz"));
+                foreach (var row in rows.Skip(1))
+                {
+                    foreach (var cell in row.Elements(w + "tc"))
+                    {
+                        Assert.Null(cell.Element(w + "tcPr")?.Element(w + "tcBorders"));
+                    }
+                }
+            }
 
             // 在真实文档包上校验：新增的段落属性必须符合 OOXML 结构，否则 Word 会报文件损坏。
             using var package = WordprocessingDocument.Open(output, false);

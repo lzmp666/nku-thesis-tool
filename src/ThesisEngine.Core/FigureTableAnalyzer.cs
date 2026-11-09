@@ -62,10 +62,43 @@ public sealed class FigureTableAnalyzer
             if (IsBorderVisible(borders.Element(W + "left")) || IsBorderVisible(borders.Element(W + "right")))
             {
                 issues.Add($"表格 {number} 存在左右外框线；三线表只保留顶线、表头下线和底线");
+                continue;
+            }
+
+            if (HasUnexpectedCellBorders(tables[index]))
+            {
+                // Word 中单元格边框优先于表格边框，只改表级设置等于没改。
+                issues.Add($"表格 {number} 的单元格设置了可见边框（单元格边框优先于表格边框），三线表不会生效");
             }
         }
 
         return issues;
+    }
+
+    /// <summary>
+    /// 检查单元格级 <c>tcBorders</c>：除表头行（第一行）的下边框外，
+    /// 任何可见的单元格边框都会覆盖表级三线表设置。
+    /// </summary>
+    private static bool HasUnexpectedCellBorders(XElement table)
+    {
+        var rows = table.Elements(W + "tr").ToList();
+        for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+        {
+            foreach (var cell in rows[rowIndex].Elements(W + "tc"))
+            {
+                var cellBorders = cell.Element(W + "tcPr")?.Element(W + "tcBorders");
+                if (cellBorders == null) continue;
+
+                foreach (var side in new[] { "top", "left", "right", "insideH", "insideV" })
+                {
+                    if (IsExplicitlyVisible(cellBorders.Element(W + side))) return true;
+                }
+
+                if (rowIndex > 0 && IsExplicitlyVisible(cellBorders.Element(W + "bottom"))) return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -75,6 +108,18 @@ public sealed class FigureTableAnalyzer
     private static bool IsBorderVisible(XElement? border)
     {
         if (border == null) return true;
+        var value = (string?)border.Attribute(W + "val") ?? "single";
+        return !value.Equals("nil", StringComparison.OrdinalIgnoreCase)
+            && !value.Equals("none", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 显式写在 <c>tcBorders</c> 里的边线是否可见。这里“缺少某一侧”表示继承表级设置，
+    /// 不能像表级那样保守地算作可见。
+    /// </summary>
+    private static bool IsExplicitlyVisible(XElement? border)
+    {
+        if (border == null) return false;
         var value = (string?)border.Attribute(W + "val") ?? "single";
         return !value.Equals("nil", StringComparison.OrdinalIgnoreCase)
             && !value.Equals("none", StringComparison.OrdinalIgnoreCase);

@@ -46,7 +46,13 @@ public sealed class FigureTableRewriter
                 Border("insideV", "nil", null));
             InsertOrdered(tblPr, borders, TablePropertySequence);
 
-            // 表头下边框：逐单元格设置 tcBorders/bottom。
+            // 单元格级边框优先级高于表级：必须全部清除，否则 Word 打开仍是全框线。
+            foreach (var cell in table.Descendants(W + "tc"))
+            {
+                cell.Element(W + "tcPr")?.Element(W + "tcBorders")?.Remove();
+            }
+
+            // 表头下边框：0.5 磅细线（sz 以 1/8 磅为单位，0.5pt = 4）。
             var firstRow = table.Elements(W + "tr").FirstOrDefault();
             if (firstRow != null)
             {
@@ -67,7 +73,7 @@ public sealed class FigureTableRewriter
                     }
 
                     cellBorders.Element(W + "bottom")?.Remove();
-                    InsertOrdered(cellBorders, Border("bottom", "single", "6"), TableBorderSequence);
+                    InsertOrdered(cellBorders, Border("bottom", "single", "4"), TableBorderSequence);
                 }
             }
         }
