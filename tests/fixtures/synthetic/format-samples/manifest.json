@@ -10,6 +10,11 @@
   "baseline_note": "中文宋体、西文 Times New Roman、正文 12pt、行距 1.5 倍；页边距上/下/右 2.5cm、左 3cm；标题黑体 16pt 居中不加粗。这是假设测试基线，不是南开校规；正式规则与学校来源审核仍是 pending。",
   "source_note": "全部文字由 generate.py 的 TEXT / HEADING 常量构造，不含真实论文、学生或导师信息。",
   "disclaimer": "「校验通过」只表示这 10 份样本的 OOXML 维度与清单一致，不代表格式合规，不代表引擎已实现对应诊断或补丁，也不代替 Word 桌面版打开副本的兼容性验证。表中预期均为人工预期，不是引擎运行结果。",
+  "word_validation": {
+    "current": "word-validation-2026-11-10.json",
+    "previous": "word-validation.json",
+    "note": "两份都是 Word 16 实机逐段读数（字体/字号/行距 + 全部节边距 + 内存改 Normal 后的跟随情况）。当前文件覆盖 10/10 份样本、8 段的多节样本含承载首个 sectPr 的空段落；2026-10-06 那份同体例，但多节样本只记了 7 段，漏掉了该空段落。两份不是同一次运行，不能互相替代。"
+  },
   "samples": [
     {
       "file": "baseline_correct.docx",
