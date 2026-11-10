@@ -6,15 +6,22 @@ Issue #5 的 10 个自建结构样本，未复制真实论文。基线是假设�
 
 中文宋体、西文 Times New Roman、正文 12pt、行距 1.5 倍；页边距上/下/右 2.5cm、左 3cm。标题黑体 16pt、居中、不加粗。规范修改时同时更新 BASE、构造器/断言及本文，不声称仅改一个字典即可完成所有更新。
 
-从仓库根目录执行（Python 3.9+）：
+只校验已提交的样本，从仓库根目录执行，**不需要装任何第三方包**（只用 Python 标准库 `zipfile` + `ElementTree`）：
+
+```sh
+python3 tests/fixtures/synthetic/format-samples/generate.py --check-only
+```
+
+重新生成 10 份 `.docx` 才需要 python-docx==1.2.0（MIT，见 `requirements.txt`）：
 
 ```sh
 python -m pip install -r tests/fixtures/synthetic/format-samples/requirements.txt
-python tests/fixtures/synthetic/format-samples/generate.py --check
-python tests/fixtures/synthetic/format-samples/generate.py --check-only
+python3 tests/fixtures/synthetic/format-samples/generate.py --check
 ```
 
---check 会重新生成；--check-only 只读取已提交样本。ZIP 排序、时间戳和非个人元数据固定；相同 Python/python-docx 环境下重复生成可逐字节核对。校验所有样本的字体、字号、行距、全部节边距、文本、对照继承和唯一覆盖属性，不以生成成功等于验证成功。
+--check 会重新生成再校验；--check-only 只读取已提交样本，不写盘。ZIP 排序、时间戳和非个人元数据固定；相同 Python/python-docx 环境下重复生成可逐字节核对。校验所有样本的字体、字号、行距、全部节边距、文本、对照继承和唯一覆盖属性，不以生成成功等于验证成功。
+
+缺 python-docx 时，`--check` 会打印可执行的安装提示并指向 `--check-only`，不是裸 traceback。仓库根目录另有 `python3 tests/fixtures/synthetic/verify_fixtures.py`，把本目录的结构断言纳入统一校验，并额外做 manifest ↔ 生成器 ↔ 磁盘的清单一致性核对。
 
 ## 场景与定位
 

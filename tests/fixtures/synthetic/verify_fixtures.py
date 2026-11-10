@@ -1,13 +1,15 @@
-"""逐部件校验已提交的合成样本与生成器产物是否一致。
+"""校验已提交的合成样本：逐部件重建 + 结构断言 + 清单一致性。
 
-各生成器的 --check 是整文件逐字节比对，适合在同一台机器上复现；一旦 Python 或
-zlib 版本变化，deflate 流可能不同，逐字节比对就会误报。本脚本只比较：
+三类判据分开算，不混为一谈：
 
-  * ZIP 条目名与顺序
-  * 每个条目解压后的字节（CRC 由 zipfile 顺带校验）
-
-不比较压缩流、时间戳、外部属性、注释。因此在 ubuntu-latest / windows-2022
-上都能得到同样结论，适合放进 CI。生成器仍然只改自己目录下的样本。
+  * 逐部件重建：导入零依赖生成器在内存里重建样本，比较 ZIP 条目名/顺序与
+    每个条目解压后的字节，忽略 deflate 流、时间戳、外部属性、注释。这样在
+    Python / zlib 版本不同的机器上不会因压缩流差异误报。
+  * 结构断言：format-samples/ 的重建依赖 python-docx，干净检出无法重建，
+    因此只调用它零依赖的 verify() 逐项核对 OOXML 维度。这**不是**逐字节
+    复现，也不等于格式合规结论。
+  * 清单一致性：manifest.samples / 生成器清单 / 磁盘上的 .docx 三方比对，
+    抓「新增样本忘写 manifest」「孤儿 docx」「生成器没覆盖」这类漏项。
 
 用法（从仓库根目录）：
     python3 tests/fixtures/synthetic/verify_fixtures.py
@@ -15,6 +17,7 @@ zlib 版本变化，deflate 流可能不同，逐字节比对就会误报。本�
 """
 import argparse
 import importlib.util
+import json
 import sys
 import zipfile
 from io import BytesIO
@@ -30,10 +33,28 @@ GENERATORS = [
     ("demo", "generate_checked_sample.py", "OUTPUT", "build_bytes", False),
 ]
 
+# (目录, 生成器文件, 结构校验函数)；只做维度断言，不在内存重建 docx
+STRUCTURE_VERIFIERS = [
+    ("format-samples", "generate.py", "verify"),
+]
+
+# (目录, 是否比对生成器清单)
+# full-thesis 的两份 docx 由命令行 --output 指定，生成器没有固定清单常量，
+# 因此只比 manifest ↔ 磁盘；这一点在输出里明说，不假装也查了生成器。
+LIST_SPECS = [
+    ("document", True),
+    ("formula", True),
+    ("demo", True),
+    ("format-samples", True),
+    ("full-thesis", False),
+]
+
 
 def load_generator(directory, filename):
     path = HERE / directory / filename
     module_name = "_fixture_gen_" + directory + "_" + Path(filename).stem
+    if module_name in sys.modules:
+        return sys.modules[module_name]
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法加载生成器：{path}")
@@ -73,6 +94,63 @@ def diff_parts(expected, actual):
     return problems
 
 
+def diff_lists(declared, generated, disk, check_generated=True):
+    """纯函数：比 manifest 声明、生成器清单、磁盘文件三个集合。"""
+    problems = []
+    for name in sorted(disk - declared):
+        problems.append("未登记样本：%s（磁盘有，manifest 无）" % name)
+    for name in sorted(declared - disk):
+        problems.append("manifest 声明缺失：%s" % name)
+    if check_generated:
+        for name in sorted(disk - generated):
+            problems.append("生成器未覆盖：%s" % name)
+        for name in sorted(generated - disk):
+            problems.append("生成器声明但磁盘无：%s" % name)
+    return problems
+
+
+def generator_samples():
+    """返回 {目录: 生成器能产出的样本文件名集合}。"""
+    result = {}
+    for directory, filename, names_attr, _, _ in GENERATORS:
+        source = getattr(load_generator(directory, filename), names_attr)
+        names = list(source) if isinstance(source, (dict, list, tuple)) else [source]
+        result.setdefault(directory, set()).update(Path(str(n)).name for n in names)
+    fs = load_generator("format-samples", "generate.py")
+    result.setdefault("format-samples", set()).update(n + ".docx" for n in fs.SAMPLES)
+    return result
+
+
+def manifest_samples(directory):
+    path = HERE / directory / "manifest.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    samples = data.get("samples")
+    if not isinstance(samples, list):
+        return None
+    return {s["file"] if isinstance(s, dict) else s for s in samples}
+
+
+def check_lists():
+    """返回 (问题描述列表, 磁盘 docx 总数)。"""
+    problems = []
+    generated = generator_samples()
+    disk_total = 0
+    for directory, compare_generated in LIST_SPECS:
+        folder = HERE / directory
+        disk = {p.name for p in folder.glob("*.docx")}
+        disk_total += len(disk)
+        declared = manifest_samples(directory)
+        if declared is None:
+            problems.append("%s/manifest.json 缺少 samples 清单" % directory)
+            continue
+        owned = generated.get(directory, set())
+        for issue in diff_lists(declared, owned, disk, compare_generated):
+            problems.append("%s：%s" % (directory, issue))
+    return problems, disk_total
+
+
 def rezip(data, level, timestamp):
     """换一个压缩级别和时间戳重建 ZIP，用来模拟另一台机器上的产物。"""
     parts = read_parts(data)
@@ -86,7 +164,7 @@ def rezip(data, level, timestamp):
 
 
 def self_test():
-    """证明这套比较既容忍压缩流差异，又能抓出内容改动。"""
+    """证明比较判据既不误报也不漏报；不读任何样本文件。"""
     module = load_generator("demo", "generate_samples.py")
     original = module.build_bytes("known_issues_sample.docx")
     expected = read_parts(original)
@@ -103,11 +181,29 @@ def self_test():
     index = next(i for i, (name, _) in enumerate(parts) if name == "word/document.xml")
     payload = parts[index][1].replace("宋体".encode("utf-8"), "楷体".encode("utf-8"))
     parts[index] = ("word/document.xml", payload)
-    caught = diff_parts(expected, parts) != []
-    checks.append(("改一个部件的文字会被发现", caught))
+    checks.append(("改一个部件的文字会被发现", diff_parts(expected, parts) != []))
 
     missing = [pair for pair in expected if pair[0] != "word/styles.xml"]
     checks.append(("少一个部件会被发现", diff_parts(expected, missing) != []))
+
+    one = {"a.docx"}
+    checks.append(("清单三方一致时无问题", diff_lists(one, one, one) == []))
+    checks.append((
+        "manifest 漏声明会被发现",
+        any("未登记样本" in p for p in diff_lists(set(), one, one)),
+    ))
+    checks.append((
+        "manifest 声明了不存在的样本会被发现",
+        any("声明缺失" in p for p in diff_lists({"a.docx", "b.docx"}, one, one)),
+    ))
+    checks.append((
+        "生成器漏覆盖会被发现",
+        any("生成器未覆盖" in p for p in diff_lists(one, set(), one)),
+    ))
+    checks.append((
+        "关闭生成器比对时不误报",
+        diff_lists(one, set(), one, check_generated=False) == [],
+    ))
 
     for label, ok in checks:
         print(("PASS  " if ok else "FAIL  ") + label)
@@ -147,14 +243,26 @@ def main():
             for issue in diff_parts(expected_parts, read_parts(target.read_bytes())):
                 problems.append("%s/%s：%s" % (directory, name, issue))
 
+    structure_count = 0
+    for directory, filename, func_name in STRUCTURE_VERIFIERS:
+        module = load_generator(directory, filename)
+        structure_count += len(module.SAMPLES)
+        for issue in getattr(module, func_name)(HERE / directory):
+            problems.append("%s：%s" % (directory, issue))
+
+    list_problems, disk_total = check_lists()
+    problems.extend(list_problems)
+
     if problems:
         for issue in problems:
             print("不一致：" + issue)
         print("校验失败：%d 处" % len(problems))
         return 1
     print(
-        "校验通过：%d 个生成器、%d 份样本、%d 个 ZIP 部件逐部件一致"
-        % (len(GENERATORS), sample_count, part_count)
+        "校验通过：逐部件重建 %d 个生成器 / %d 份样本 / %d 个部件；"
+        "结构校验 %d 组 / %d 份样本；清单一致性 %d 个目录 / %d 份 docx"
+        % (len(GENERATORS), sample_count, part_count,
+           len(STRUCTURE_VERIFIERS), structure_count, len(LIST_SPECS), disk_total)
     )
     return 0
 
