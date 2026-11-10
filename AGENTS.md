@@ -36,7 +36,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```
 
 `Directory.Build.props` 开了 `TreatWarningsAsErrors`，冒出一个警告就是构建失败，别想着先放着。
-基线（2026-11-09，main）：build 0 警告 0 错误，test 362 条全过。这个数会随 main 涨，别写死进代码或断言总数。
+基线（2026-11-10，main）：build 0 警告 0 错误，test 430 条全过。这个数会随 main 涨，别写死进代码或断言总数。
 
 ## 4. 目录边界
 
@@ -60,45 +60,37 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```powershell
 # 演示诊断：正确样本 0 条，问题样本 3 条
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx
-
+# 只跑文档级：--scope all|paragraph|document，默认 all 把文档级报告附在段落级后面
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --scope document
 # 写一份带批注和黄色的标注副本（输出目录要先存在，已有文件不覆盖）
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --annotated-output artifacts/known.annotated.docx
-
 # 样式体系：哪些段落没套样式、套了样式又被直接格式覆盖
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-styles tests/fixtures/synthetic/demo/clean_sample.docx
-
 # 图表：图片/表格数量与排版问题
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-figures tests/fixtures/synthetic/full-thesis/synthetic_object_layout_errors.docx
-
 # 公式：居中式号字体字号（F1–F5）
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-formula tests/fixtures/synthetic/formula/formula_word_native_correct.docx
-
-# 文档级：纸张页边距页眉页脚页码目录（D1–D10）
+# 文档级：纸张页边距页眉页脚页码目录与篇眉页码字体（D1–D12）
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-document tests/fixtures/synthetic/document/document_baseline_correct.docx
-
 # 套用南开格式：只改样式定义，不给输出名就加「_nku格式」后缀
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-nku-format tests/fixtures/synthetic/demo/clean_sample.docx artifacts/run_nku.docx
-
 # 图表格式写入：三线表、图片居中、跨页保护
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-figure-format tests/fixtures/synthetic/full-thesis/synthetic_object_layout_errors.docx artifacts/run_fig.docx
-
-# 公式格式写入：居中、式号右对齐、Cambria Math、段距归零；改不了的在输出里列出来
+# 公式格式写入：居中、式号右对齐、Cambria Math、段距归零
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-formula-format tests/fixtures/synthetic/formula/formula_number_not_right_aligned.docx artifacts/run_formula.docx
-
+# 文档级格式写入：只动 sectPr 的纸张与页边距，改完自动复诊
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-document-format tests/fixtures/synthetic/document/document_margin_wrong.docx artifacts/run_doc.docx
 # 一步到位：备份 + 套样式 + 改图表
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- full-format tests/fixtures/synthetic/demo/clean_sample.docx artifacts/run_full.docx
-
 # 撤销：按输出文件定位，先备份到系统临时目录的 nku-thesis-tool-backups
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- undo artifacts/run_nku.docx
-
 # 规则问答：没配 DEEPSEEK_API_KEY 就走本地规则
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- chat "正文行距多少"
-
 # 结构识别：出角色候选和大纲，--format-output 才写入
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- structure tests/fixtures/synthetic/full-thesis/synthetic_complete_thesis.docx --report artifacts/structure.json
 ```
 
-写入型命令（`apply-*`、`full-format`、`structure --format-output`、`analyze --annotated-output`）一律另存新文件，不改输入。默认输出名带中文后缀，要精确控制就显式给第二个参数。
+写入型命令（`apply-*`、`full-format`、`structure --format-output`、`analyze --annotated-output`）一律另存新文件，不改输入。`apply-document-format` 只写 `sectPr` 下的 `pgSz` / `pgMar`，目录、页码、空白页只报告不改。默认输出名带中文后缀，要精确控制就显式给第二个参数。
 
 ## 6. 提交规范
 
@@ -147,3 +139,5 @@ Issue → 分支 → PR，一步不能跳。直接推 `main` 视为没做。
 - [docs/architecture.md](docs/architecture.md)：数据流与写入边界
 - [docs/qa-sop.md](docs/qa-sop.md)：自测怎么做
 - [docs/demo/README.md](docs/demo/README.md)：演示的预期输出
+- [docs/rule-notes/page-setup.md](docs/rule-notes/page-setup.md)：文档级检查的判断口径
+- [docs/research/word-112-acceptance.md](docs/research/word-112-acceptance.md)：Word 实机核验读数与截图

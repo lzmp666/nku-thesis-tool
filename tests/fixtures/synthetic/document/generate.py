@@ -30,45 +30,87 @@ SPEC_HF = dict(header=1701, footer=1701)
 FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 
 
-def header_xml(text):
-    body = "" if not text else (
-        '<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="宋体"/>'
-        f'<w:sz w:val="21"/><w:szCs w:val="21"/></w:rPr><w:t>{text}</w:t></w:r>'
+def rpr(font_cn="宋体", font_western="Times New Roman", size=21):
+    return (
+        f'<w:rPr><w:rFonts w:ascii="{font_western}" w:hAnsi="{font_western}" w:eastAsia="{font_cn}"/>'
+        f'<w:sz w:val="{size}"/><w:szCs w:val="{size}"/></w:rPr>'
     )
+
+
+def header_xml(text, *, font_cn="宋体", font_western="Times New Roman", size=21,
+               align="center", via_style=False):
+    """R2：篇眉宋体 10.5 磅（sz=21）居中。
+
+    via_style=True 时刻意不在 run 上写 rPr，改用 pStyle 引用 styles.xml 里的
+    Header 样式，用来验证检查器真的展开了样式链，不是只看显式 rPr。
+    """
+    body = ""
+    if text:
+        direct = "" if via_style else rpr(font_cn=font_cn, font_western=font_western, size=size)
+        body = f'<w:r>{direct}<w:t>{text}</w:t></w:r>'
+    ppr = ""
+    if via_style:
+        ppr = '<w:pPr><w:pStyle w:val="Header"/></w:pPr>'
+    elif align != "center":
+        ppr = f'<w:pPr><w:jc w:val="{align}"/></w:pPr>'
+    else:
+        ppr = '<w:pPr><w:jc w:val="center"/></w:pPr>'
     return (
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        f'<w:hdr xmlns:w="{W_NS}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr>{body}</w:p></w:hdr>'
+        f'<w:hdr xmlns:w="{W_NS}"><w:p>{ppr}{body}</w:p></w:hdr>'
     )
 
 
-def footer_xml(mode):
-    """mode：'field' 用 PAGE 域，'text' 手打数字，'empty' 空页脚。"""
+def footer_xml(mode, *, font_cn="宋体", size=21, align="center", via_style=False):
+    """mode：'field' 用 PAGE 域，'text' 手打数字，'empty' 空页脚。
+
+    页码显示结果那个 run 决定页码长什么样，rPr 写在它上面；
+    fldChar / instrText 那些 run 不产生可见文字，检查器会跳过。
+    """
+    direct = "" if via_style else rpr(font_cn=font_cn, size=size)
+    tpl = f'<w:r>{direct}<w:t>{{}}</w:t></w:r>'
     if mode == "field":
         runs = (
             '<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
             '<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
             '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
-            '<w:r><w:t>1</w:t></w:r>'
+            + tpl.format("1") +
             '<w:r><w:fldChar w:fldCharType="end"/></w:r>'
         )
     elif mode == "text":
-        runs = '<w:r><w:t>1</w:t></w:r>'
+        runs = tpl.format("1")
     else:
         runs = ""
+    ppr = ""
+    if via_style:
+        ppr = '<w:pPr><w:pStyle w:val="Footer"/></w:pPr>'
+    elif align != "center":
+        ppr = f'<w:pPr><w:jc w:val="{align}"/></w:pPr>'
+    else:
+        ppr = '<w:pPr><w:jc w:val="center"/></w:pPr>'
     return (
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        f'<w:ftr xmlns:w="{W_NS}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr>{runs}</w:p></w:ftr>'
+        f'<w:ftr xmlns:w="{W_NS}"><w:p>{ppr}{runs}</w:p></w:ftr>'
     )
 
 
-def styles_xml():
+def styles_xml(with_hf_styles=False):
+    """with_hf_styles=True 时把 R2/R3 的字体字号定义在样式里，页眉页脚靠 pStyle 继承。"""
+    extra = ""
+    if with_hf_styles:
+        extra = (
+            f'<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/>'
+            f'<w:pPr><w:jc w:val="center"/></w:pPr>{rpr()}</w:style>'
+            f'<w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/>'
+            f'<w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/></w:pPr>{rpr()}</w:style>'
+        )
     return (
         f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         f'<w:styles xmlns:w="{W_NS}">'
         '<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="24"/></w:rPr></w:rPrDefault>'
         "<w:pPrDefault><w:pPr/></w:pPrDefault></w:docDefaults>"
-        '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>'
-        "</w:styles>"
+        f'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>'
+        f"{extra}</w:styles>"
     )
 
 
@@ -136,20 +178,24 @@ def document_xml(body_xml):
     )
 
 
-def content_types(with_header_footer):
+def content_types(with_header_footer, with_styles=True):
     extra = ""
     if with_header_footer:
         extra = (
             '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>'
             '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'
         )
+    styles_override = (
+        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+        if with_styles else ""
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+        f'{styles_override}'
         '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>'
         f"{extra}</Types>"
     )
@@ -163,17 +209,21 @@ ROOT_RELS = (
 )
 
 
-def document_rels(with_header_footer):
+def document_rels(with_header_footer, with_styles=True):
     extra = ""
     if with_header_footer:
         extra = (
             '<Relationship Id="rId10" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>'
             '<Relationship Id="rId11" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
         )
+    styles_rel = (
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        if with_styles else ""
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        f'{styles_rel}'
         '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>'
         f"{extra}</Relationships>"
     )
@@ -190,6 +240,21 @@ def build_docx(config):
     header_ref = config.get("header_ref", True)
     footer_ref = config.get("footer_ref", True)
     has_parts = header_ref or footer_ref
+    no_styles = config.get("no_styles", False)
+
+    header_kwargs = dict(
+        font_cn=config.get("header_font", "宋体"),
+        font_western=config.get("header_western", "Times New Roman"),
+        size=config.get("header_size", 21),
+        align=config.get("header_align", "center"),
+        via_style=config.get("hf_via_style", False),
+    )
+    footer_kwargs = dict(
+        font_cn=config.get("footer_font", "宋体"),
+        size=config.get("footer_size", 21),
+        align=config.get("footer_align", "center"),
+        via_style=config.get("hf_via_style", False),
+    )
 
     body = ""
     body += paragraph("合成样本正文第一段，用于占位。")
@@ -199,7 +264,11 @@ def build_docx(config):
     elif config.get("toc") == "manual":
         body += paragraph("目录")
         body += paragraph("第一章 引言    1")
-    if config.get("blank_page"):
+    if config.get("true_blank_page"):
+        # 两个连续的空段落各带一个分页符：Word 实测第 2 页整页空白。
+        body += empty_paragraph_with_page_break()
+        body += empty_paragraph_with_page_break()
+    elif config.get("blank_page"):
         body += empty_paragraph_with_page_break()
     body += paragraph("合成样本正文第二段。")
 
@@ -214,17 +283,18 @@ def build_docx(config):
     body += final_sect
 
     entries = [
-        ("[Content_Types].xml", content_types(has_parts)),
+        ("[Content_Types].xml", content_types(has_parts, with_styles=not no_styles)),
         ("_rels/.rels", ROOT_RELS),
         ("word/document.xml", document_xml(body)),
-        ("word/_rels/document.xml.rels", document_rels(has_parts)),
-        ("word/styles.xml", styles_xml()),
+        ("word/_rels/document.xml.rels", document_rels(has_parts, with_styles=not no_styles)),
         ("word/settings.xml", settings_xml(config.get("even_odd", False))),
     ]
+    if not no_styles:
+        entries.append(("word/styles.xml", styles_xml(config.get("hf_via_style", False))))
     if header_ref:
-        entries.append(("word/header1.xml", header_xml(config.get("header_text", "第一章 引言"))))
+        entries.append(("word/header1.xml", header_xml(header_text, **header_kwargs)))
     if footer_ref:
-        entries.append(("word/footer1.xml", footer_xml(footer_mode)))
+        entries.append(("word/footer1.xml", footer_xml(footer_mode, **footer_kwargs)))
 
     return entries
 
@@ -258,6 +328,30 @@ SAMPLES = {
     "document_sections_same_numbering.docx": dict(sections=2, number_format="decimal"),
     # 合规：两节分别用罗马与阿拉伯
     "document_sections_mixed_numbering.docx": dict(sections=2),
+
+    # ---- 第二档（11/29）：R2 篇眉 / R3 页码的字体字号与居中 ----
+    # 每个样本只偏离一个维度，正样本在基线里。
+    "document_header_font_wrong.docx": dict(header_font="黑体"),
+    "document_header_size_wrong.docx": dict(header_size=24),
+    "document_header_left_aligned.docx": dict(header_align="left"),
+    "document_footer_font_wrong.docx": dict(footer_font="黑体"),
+    "document_footer_size_wrong.docx": dict(footer_size=24),
+    "document_footer_left_aligned.docx": dict(footer_align="left"),
+    # 合规：全西文篇眉按 R2 的 Abstract 条款用 Times New Roman
+    "document_abstract_header_correct.docx": dict(header_text="Abstract"),
+    # 偏差：全西文篇眉却用了 Arial
+    "document_abstract_header_wrong.docx": dict(header_text="Abstract", header_western="Arial"),
+    # 合规：字体字号居中都写在 styles.xml 的 Header / Footer 样式里，靠 pStyle 继承
+    "document_hf_style_inherited.docx": dict(hf_via_style=True),
+    # 0 条问题但不能算「查过」：没有 styles.xml，页眉页脚又没有显式 rPr/jc，
+    # 三个维度都判不出来。报告必须把「压根没查」写出来。
+    "document_no_styles_part.docx": dict(no_styles=True, hf_via_style=True),
+    # 对照：同样没有 styles.xml，但 run 和段落显式写了值，这些维度照样能判
+    "document_no_styles_explicit.docx": dict(no_styles=True),
+    # 合规：字体写成 SimSun / TimesNewRoman（无空格），检查器要认这些别名
+    "document_font_aliases.docx": dict(header_font="SimSun", header_western="TimesNewRoman", footer_font="SimSun"),
+    # 偏差：连续两个空段落各带分页符，Word 实测会真的多出一整页空白
+    "document_true_blank_page.docx": dict(true_blank_page=True),
 }
 
 

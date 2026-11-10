@@ -24,20 +24,20 @@ public sealed class DocumentAnalyzer
     private static readonly XNamespace Rel = "http://schemas.openxmlformats.org/package/2006/relationships";
 
     /// <summary>1 cm 对应的 twips。</summary>
-    private const double TwipsPerCm = 566.9291338582677;
+    internal const double TwipsPerCm = 566.9291338582677;
 
     /// <summary>页面尺寸容差，0.1cm。Word 按整 twips 存储，取整误差远小于这个数。</summary>
-    private const double ToleranceCm = 0.1;
+    internal const double ToleranceCm = 0.1;
 
     // R1（4.1 表4.1）规定值
-    private const double MarginTopBottomCm = 3.8;
-    private const double MarginLeftRightCm = 3.2;
-    private const double HeaderFooterCm = 3.0;
-    private const double GutterCm = 0.0;
+    internal const double MarginTopBottomCm = 3.8;
+    internal const double MarginLeftRightCm = 3.2;
+    internal const double HeaderFooterCm = 3.0;
+    internal const double GutterCm = 0.0;
 
     // A4 210×297mm
-    private const double A4WidthCm = 21.0;
-    private const double A4HeightCm = 29.7;
+    internal const double A4WidthCm = 21.0;
+    internal const double A4HeightCm = 29.7;
 
     /// <summary>页码域指令。要排除 NUMPAGES——那是总页数，不是页码。</summary>
     private static readonly Regex PageFieldPattern =
@@ -56,6 +56,7 @@ public sealed class DocumentAnalyzer
         var document = LoadXml(archive, "word/document.xml")
             ?? throw new InvalidDataException("文档中没有 document.xml");
         var settings = LoadXml(archive, "word/settings.xml");
+        var styles = LoadXml(archive, "word/styles.xml");
         var relationships = ReadRelationships(archive);
 
         var body = document.Root?.Element(W + "body")
@@ -82,20 +83,28 @@ public sealed class DocumentAnalyzer
 
         CheckWholeDocument(sections, sectionElements, archive, relationships, evenAndOdd, body, issues);
 
+        // R2 / R3 的字体字号与居中。样式链展开不了的部分不报问题，单列「未判定」。
+        var formatResult = CheckHeaderFooterFormats(sectionElements, archive, relationships, styles, issues);
+
+        var uncheckedItems = UncheckedItems
+            .Concat(formatResult.Undetermined)
+            .ToList();
+
         return new DocumentAnalysisResult(
             sections,
             issues,
             HasTocField: HasField(body, TocFieldPattern),
             EvenAndOddHeaders: evenAndOdd,
             UpdateFieldsOnOpen: IsSettingOn(settings, "updateFields"),
-            UncheckedItems: UncheckedItems);
+            PartReadings: formatResult.Readings,
+            UncheckedItems: uncheckedItems);
     }
 
     /// <summary>
     /// 按文档顺序取所有 sectPr。分节符写在段落属性里，最后一节写在 body 末尾。
     /// 顺序错了后面每一项都会对应到错误的节上，所以单独一步。
     /// </summary>
-    private static List<XElement> CollectSectionProperties(XElement body)
+    internal static List<XElement> CollectSectionProperties(XElement body)
     {
         var result = new List<XElement>();
         foreach (var paragraph in body.Descendants(W + "p"))
@@ -369,8 +378,12 @@ public sealed class DocumentAnalyzer
     }
 
     /// <summary>
-    /// 疑似空白页。只报两种确定性较高的情形，其余在 XML 层面判不了——
-    /// 段后间距、表格跨页这些要真实分页才行，不靠推测凑数。
+    /// 疑似空白页。只报 XML 层面能确定的情形，段后间距、表格跨页要真实分页才判得准，
+    /// 不靠推测凑数。
+    ///
+    /// Word 16 双页视图实测修正了一处口径：单个空段落带分页符只是「多出一页」，
+    /// 第二页仍有正文，并不存在整页空白。真正造成整页空白的是连续两个以上的
+    /// 空段落各带分页符，所以把这两种分开报，措辞也不混用。
     /// </summary>
     private static void CheckBlankPages(XElement body, List<DocumentIssue> issues)
     {
@@ -379,27 +392,43 @@ public sealed class DocumentAnalyzer
         for (var i = 0; i < paragraphs.Count; i++)
         {
             var paragraph = paragraphs[i];
-            var empty = string.IsNullOrWhiteSpace(
-                string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value)));
 
-            if (empty && paragraph.Descendants(W + "br")
-                    .Any(br => br.Attribute(W + "type")?.Value == "page"))
+            if (IsEmptyParagraph(paragraph) && HasPageBreak(paragraph))
             {
+                var last = i;
+                while (last + 1 < paragraphs.Count &&
+                       IsEmptyParagraph(paragraphs[last + 1]) &&
+                       HasPageBreak(paragraphs[last + 1]))
+                {
+                    last++;
+                }
+
+                if (last > i)
+                {
+                    issues.Add(new DocumentIssue(
+                        Code: "D10",
+                        Title: "连续分页符造成整页空白",
+                        Basis: "排版惯例（规范未规定空白页，本条不计入规范符合性）",
+                        SectionIndex: 0,
+                        Current: $"第 {i + 1}–{last + 1} 段是连续 {last - i + 1} 个空段落，各带一个分页符",
+                        Expected: "只留一个分页符，删掉多余的空段落（Word 实测这种写法会多出一整页空白）"));
+                    i = last;
+                    continue;
+                }
+
                 issues.Add(new DocumentIssue(
                     Code: "D10",
                     Title: "疑似空白页：空段落里带分页符",
                     Basis: "排版惯例（规范未规定空白页，本条不计入规范符合性）",
                     SectionIndex: 0,
-                    Current: $"第 {i + 1} 段是空段落，内含分页符",
-                    Expected: "删掉这个空段落，分页放到真正要起新页的段落上"));
+                    Current: $"第 {i + 1} 段是空段落，内含分页符；Word 实测只会多一页，第二页仍有正文，不等于整页空白",
+                    Expected: "确认是否真要另起一页；要的话把分页放到起新页的段落上并删掉空段落"));
             }
 
             var pageBreakBefore = paragraph.Element(W + "pPr")?.Element(W + "pageBreakBefore") != null;
             if (!pageBreakBefore || i == 0) continue;
 
-            var previousEmpty = string.IsNullOrWhiteSpace(
-                string.Concat(paragraphs[i - 1].Descendants(W + "t").Select(t => t.Value)));
-            if (!previousEmpty) continue;
+            if (!IsEmptyParagraph(paragraphs[i - 1])) continue;
 
             issues.Add(new DocumentIssue(
                 Code: "D10",
@@ -409,6 +438,188 @@ public sealed class DocumentAnalyzer
                 Current: $"第 {i} 段为空，第 {i + 1} 段设置了段前分页",
                 Expected: "删掉空段落，只保留段前分页"));
         }
+    }
+
+    private static bool IsEmptyParagraph(XElement paragraph) =>
+        string.IsNullOrWhiteSpace(
+            string.Concat(paragraph.Descendants(W + "t").Select(node => node.Value)));
+
+    private static bool HasPageBreak(XElement paragraph) =>
+        paragraph.Descendants(W + "br")
+            .Any(br => br.Attribute(W + "type")?.Value == "page");
+
+    /// <summary>
+    /// R2 篇眉、R3 页码的字体字号与居中。
+    ///
+    /// 两处刻意收窄口径：
+    /// 一、页脚只判含 PAGE 域的段落。R3 管的是页码，页脚里放校名、密级之类
+    ///     的段落不归它管，硬判会报一堆改不掉的问题。
+    /// 二、全西文的篇眉按 R2「Abstract 部分用 Times New Roman」判；含中文的按
+    ///     「宋体」判。XML 层面认不出哪一节是 Abstract，只能按文字近似，这条
+    ///     在「未检查」里也写明了。
+    /// </summary>
+    private static PartFormatResult CheckHeaderFooterFormats(
+        IReadOnlyList<XElement> sectionElements,
+        ZipArchive archive,
+        IReadOnlyDictionary<string, string> relationships,
+        XDocument? styles,
+        List<DocumentIssue> issues)
+    {
+        var allReadings = new List<PartFormatReading>();
+        var undetermined = new List<string>();
+
+        foreach (var (name, part) in ResolveParts(sectionElements, archive, relationships, "headerReference"))
+        {
+            var result = PartFormatReader.Read(part, name, styles);
+            undetermined.AddRange(result.Undetermined);
+            allReadings.AddRange(result.Readings);
+            DescribeUndetermined(result.Readings, "篇眉", undetermined);
+
+            foreach (var reading in result.Readings)
+            {
+                CheckPartFormat(reading, "D11", "篇眉", westernFontByClause: true, issues);
+            }
+        }
+
+        foreach (var (name, part) in ResolveParts(sectionElements, archive, relationships, "footerReference"))
+        {
+            var paragraphs = part.Root?.Descendants(W + "p").ToList() ?? new List<XElement>();
+            var result = PartFormatReader.Read(part, name, styles);
+            undetermined.AddRange(result.Undetermined);
+            allReadings.AddRange(result.Readings);
+
+            var pageFieldParagraphs = result.Readings
+                .Where(reading => reading.ParagraphIndex <= paragraphs.Count &&
+                                  HasField(paragraphs[reading.ParagraphIndex - 1], PageFieldPattern))
+                .ToList();
+
+            var otherCount = result.Readings.Count - pageFieldParagraphs.Count;
+            if (otherCount > 0)
+            {
+                undetermined.Add(
+                    $"{name}：{otherCount} 个文字段落不含 PAGE 域，R3 只规定页码，这些段落的字体字号未判定");
+            }
+
+            foreach (var reading in pageFieldParagraphs)
+            {
+                CheckPartFormat(reading, "D12", "页码", westernFontByClause: false, issues);
+            }
+            DescribeUndetermined(pageFieldParagraphs, "页码", undetermined);
+        }
+
+        return new PartFormatResult(allReadings, undetermined);
+    }
+
+    /// <summary>
+    /// 判不出来的维度逐条写进「未检查」。报告里 0 条问题必须能看出
+    /// 是「查了没问题」还是「这一项压根没查」。
+    /// </summary>
+    private static void DescribeUndetermined(
+        IEnumerable<PartFormatReading> readings,
+        string subject,
+        List<string> undetermined)
+    {
+        foreach (var reading in readings)
+        {
+            var missing = new List<string>();
+            if (!reading.FontResolved) missing.Add("字体（rPr 与样式链里都没有 rFonts）");
+            if (!reading.SizeResolved) missing.Add("字号（rPr 与样式链里都没有 w:sz）");
+            if (!reading.AlignmentResolved) missing.Add("对齐（没写 jc 且样式链不可用）");
+            if (missing.Count == 0) continue;
+
+            undetermined.Add(
+                $"{reading.PartName} 第 {reading.ParagraphIndex} 段：{subject}的" +
+                $"{string.Join("、", missing)}未判定，不计入 0 条问题");
+        }
+    }
+
+    private static void CheckPartFormat(
+        PartFormatReading reading,
+        string code,
+        string subject,
+        bool westernFontByClause,
+        List<DocumentIssue> issues)
+    {
+        var location = $"{reading.PartName} 第 {reading.ParagraphIndex} 段「{TrimForReport(reading.Text)}」";
+        var isAbstract = westernFontByClause && reading.WesternOnly;
+
+        var fontBasis = westernFontByClause
+            ? "R2（4.1 表4.1）：篇眉宋体 10.5 磅居中；Abstract 部分用 Times New Roman 10.5 磅"
+            : "R3（4.1 表4.1）：页码宋体 10.5 磅居中";
+        var sizeBasis = westernFontByClause
+            ? "R2（4.1 表4.1）：篇眉 10.5 磅（五号）"
+            : "R3（4.1 表4.1）：页码 10.5 磅（五号）";
+        var alignmentBasis = westernFontByClause
+            ? "R2（4.1 表4.1）：篇眉居中"
+            : "R3（4.1 表4.1）：页码居中";
+
+        if (reading.FontResolved)
+        {
+            var expectedFont = isAbstract ? "Times New Roman" : "宋体";
+            var actualFont = isAbstract ? reading.WesternFont : reading.EastAsiaFont;
+            var matched = isAbstract
+                ? PartFormatReader.IsTimesNewRoman(actualFont)
+                : PartFormatReader.IsSimSun(actualFont);
+
+            if (!matched)
+            {
+                issues.Add(new DocumentIssue(
+                    Code: code,
+                    Title: $"{subject}字体不符合规范",
+                    Basis: fontBasis,
+                    SectionIndex: 0,
+                    Current: $"{location} 当前 {actualFont ?? "未设置"}",
+                    Expected: expectedFont));
+            }
+        }
+
+        if (reading.SizeResolved && reading.SizeHalfPoints != PartFormatReader.RequiredSizeHalfPoints)
+        {
+            issues.Add(new DocumentIssue(
+                Code: code,
+                Title: $"{subject}字号不符合规范",
+                Basis: sizeBasis,
+                SectionIndex: 0,
+                Current: $"{location} 当前 {reading.SizeHalfPoints / 2.0:0.#} 磅（sz={reading.SizeHalfPoints}）",
+                Expected: "10.5 磅（sz=21）"));
+        }
+
+        if (reading.AlignmentResolved &&
+            !string.Equals(reading.Alignment, "center", StringComparison.OrdinalIgnoreCase))
+        {
+            issues.Add(new DocumentIssue(
+                Code: code,
+                Title: $"{subject}未居中",
+                Basis: alignmentBasis,
+                SectionIndex: 0,
+                Current: $"{location} 当前对齐方式 {reading.Alignment}",
+                Expected: "居中（w:jc=center）"));
+        }
+    }
+
+    private static string TrimForReport(string text) =>
+        text.Length <= 20 ? text : text[..20] + "…";
+
+    /// <summary>按部件名去重：多个节引用同一个页眉部件，不该读三遍报三遍。</summary>
+    private static List<(string Name, XDocument Part)> ResolveParts(
+        IReadOnlyList<XElement> sectionElements,
+        ZipArchive archive,
+        IReadOnlyDictionary<string, string> relationships,
+        string referenceName)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<(string, XDocument)>();
+
+        foreach (var reference in sectionElements.SelectMany(sectPr => sectPr.Elements(W + referenceName)))
+        {
+            var name = ResolvePartName(reference, relationships);
+            if (name is null || !seen.Add(name)) continue;
+
+            var part = LoadXml(archive, name);
+            if (part is not null) result.Add((name, part));
+        }
+
+        return result;
     }
 
     private static bool HasPartContent(
@@ -500,8 +711,9 @@ public sealed class DocumentAnalyzer
     private static readonly IReadOnlyList<string> UncheckedItems = new[]
     {
         "某一节页眉为空：多节文档的封面节本来就没有页眉，规范只说「从中文摘要开始」，判不出哪节是封面，只报全文缺失",
-        "页眉字体字号（R2 宋体 10.5 磅）与页眉横线：页眉部件的样式链未展开，本档未查",
-        "页码字体字号（R3 宋体 10.5 磅）与居中位置：页脚通常继承样式，显式设置才判得准，本档未查",
+        "页眉横线：R2/R3 只规定了字体字号与居中，没有规定有无横线，没有条款依据，不查",
+        "页眉是否为 Abstract 部分：XML 层面认不出章节归属，只能按文字是否全为西文近似，判错的可能要人工确认",
+        "同一页眉/页脚段落里多个 run 格式不一致：取哪个值都不代表这一段，标未判定，需人工看",
         "正文从第一章起编阿拉伯数字：要判断哪一节是「第一章」，靠 XML 判不准，需人工确认",
         "奇偶页是否真的「内容相同」：只查了是否开启奇偶页不同，未比对奇偶页眉文字",
         "空白页的完整判定：段后间距、表格跨页导致的空白要真实分页才算得准，只报两种确定性情形",
@@ -515,6 +727,7 @@ public sealed record DocumentAnalysisResult(
     bool HasTocField,
     bool EvenAndOddHeaders,
     bool UpdateFieldsOnOpen,
+    IReadOnlyList<PartFormatReading> PartReadings,
     IReadOnlyList<string> UncheckedItems)
 {
     public IEnumerable<DocumentIssue> ClauseIssues => Issues.Where(issue => issue.HasClause);

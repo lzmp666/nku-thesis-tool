@@ -141,6 +141,24 @@ public sealed class DocumentAnalyzerTests
         Assert.Equal("D10", issue.Code);
         Assert.False(issue.HasClause);
         Assert.Empty(result.ClauseIssues);
+        // 单个分页符只多一页，第二页仍有正文，措辞不许说成整页空白。
+        Assert.Contains("不等于整页空白", issue.Current);
+    }
+
+    /// <summary>
+    /// Word 16 实测修正的口径：连续两个空段落各带分页符，才会真的多出一整页空白
+    /// （共 3 页，第 2 页无正文）。见 docs/research/word-112-acceptance.md。
+    /// </summary>
+    [Fact]
+    public void ConsecutivePageBreaksReportARealBlankPage()
+    {
+        var result = Analyze("document_true_blank_page.docx");
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("D10", issue.Code);
+        Assert.Equal("连续分页符造成整页空白", issue.Title);
+        Assert.False(issue.HasClause);
+        Assert.Contains("连续 2 个空段落", issue.Current);
     }
 
     [Fact]
@@ -281,6 +299,117 @@ public sealed class DocumentAnalyzerTests
             Assert.DoesNotContain(result.Issues, issue => issue.Code == "D6");
         }
         finally { File.Delete(path); }
+    }
+
+    // ---- 第二档（11/29）：R2 篇眉 / R3 页码的字体字号与居中 ----
+
+    [Theory]
+    [InlineData("document_header_font_wrong.docx", "D11", "篇眉字体不符合规范", "R2")]
+    [InlineData("document_header_size_wrong.docx", "D11", "篇眉字号不符合规范", "R2")]
+    [InlineData("document_header_left_aligned.docx", "D11", "篇眉未居中", "R2")]
+    [InlineData("document_footer_font_wrong.docx", "D12", "页码字体不符合规范", "R3")]
+    [InlineData("document_footer_size_wrong.docx", "D12", "页码字号不符合规范", "R3")]
+    [InlineData("document_footer_left_aligned.docx", "D12", "页码未居中", "R3")]
+    [InlineData("document_abstract_header_wrong.docx", "D11", "篇眉字体不符合规范", "R2")]
+    public void EachHeaderFooterDeviationIsReportedOnce(
+        string sample, string code, string title, string clause)
+    {
+        var result = Analyze(sample);
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal(code, issue.Code);
+        Assert.Equal(title, issue.Title);
+        Assert.StartsWith(clause, issue.Basis);
+        Assert.True(issue.HasClause);
+        Assert.All(result.PartReadings, reading => Assert.True(reading.FullyResolved));
+    }
+
+    [Theory]
+    [InlineData("document_baseline_correct.docx")]
+    [InlineData("document_abstract_header_correct.docx")]
+    [InlineData("document_hf_style_inherited.docx")]
+    [InlineData("document_font_aliases.docx")]
+    [InlineData("document_no_styles_explicit.docx")]
+    [InlineData("document_toc_auto.docx")]
+    [InlineData("document_sections_mixed_numbering.docx")]
+    public void CompliantHeaderFooterFormatsProduceNoIssues(string sample)
+    {
+        var result = Analyze(sample);
+
+        Assert.Empty(result.Issues);
+        Assert.NotEmpty(result.PartReadings);
+        Assert.All(result.PartReadings, reading => Assert.True(reading.FullyResolved));
+    }
+
+    /// <summary>字体字号居中写在样式里，靠 pStyle 继承；只看显式 rPr 的检查会漏。</summary>
+    [Fact]
+    public void StyleChainIsExpandedThroughParagraphStyle()
+    {
+        var result = Analyze("document_hf_style_inherited.docx");
+
+        var header = Assert.Single(result.PartReadings, reading => reading.PartName.EndsWith("header1.xml"));
+        Assert.Equal("宋体", header.EastAsiaFont);
+        Assert.Equal(21, header.SizeHalfPoints);
+        Assert.Equal("center", header.Alignment);
+    }
+
+    /// <summary>
+    /// 关键回归：0 条问题也可能是「压根没判」。这个样本没有 styles.xml，
+    /// 也没有显式 rPr / jc，三个维度都读不到值，必须在结果里标出来。
+    /// </summary>
+    [Fact]
+    public void ZeroIssuesDoesNotMeanCheckedWhenStyleChainIsMissing()
+    {
+        var result = Analyze("document_no_styles_part.docx");
+
+        Assert.Empty(result.Issues);
+        Assert.Equal(2, result.PartReadings.Count);
+        Assert.All(result.PartReadings, reading => Assert.False(reading.FullyResolved));
+        Assert.Contains(result.UncheckedItems, item => item.Contains("未判定，不计入 0 条问题"));
+    }
+
+    /// <summary>缺 styles.xml 但显式写了值时，能判的维度不该被一起丢掉。</summary>
+    [Fact]
+    public void ExplicitValuesAreStillJudgedWithoutStylesPart()
+    {
+        var result = Analyze("document_no_styles_explicit.docx");
+
+        Assert.Empty(result.Issues);
+        Assert.All(result.PartReadings, reading => Assert.True(reading.FullyResolved));
+        Assert.Contains(result.UncheckedItems, item => item.Contains("样式链不可用"));
+    }
+
+    /// <summary>手打数字的页脚由 D7 管，R3 的字体字号不该跟着报一遍。</summary>
+    [Fact]
+    public void PlainNumberFooterIsNotReportedAgainstR3FontRules()
+    {
+        var result = Analyze("document_footer_text.docx");
+
+        Assert.Single(result.Issues);
+        Assert.DoesNotContain(result.Issues, issue => issue.Code == "D12");
+        Assert.Contains(result.UncheckedItems, item => item.Contains("不含 PAGE 域"));
+    }
+
+    /// <summary>全西文篇眉走 R2 的 Abstract 条款，期望值是 Times New Roman 而不是宋体。</summary>
+    [Fact]
+    public void WesternOnlyHeaderExpectsTimesNewRoman()
+    {
+        var result = Analyze("document_abstract_header_wrong.docx");
+
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("Times New Roman", issue.Expected);
+        var reading = Assert.Single(result.PartReadings, item => item.PartName.EndsWith("header1.xml"));
+        Assert.True(reading.WesternOnly);
+    }
+
+    /// <summary>两节引用同一个页眉页脚部件，读数只该有一份，不能逐节刷屏。</summary>
+    [Fact]
+    public void SharedHeaderFooterPartsAreReadOnce()
+    {
+        var result = Analyze("document_sections_same_numbering.docx");
+
+        Assert.Equal(2, result.Sections.Count);
+        Assert.Equal(2, result.PartReadings.Count);
     }
 
     private static DocumentAnalysisResult Analyze(string sampleName)
