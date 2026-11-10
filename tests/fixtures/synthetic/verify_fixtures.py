@@ -1,6 +1,6 @@
 """校验已提交的合成样本：逐部件重建 + 结构断言 + 清单一致性。
 
-三类判据分开算，不混为一谈：
+四类判据分开算，不混为一谈：
 
   * 逐部件重建：导入零依赖生成器在内存里重建样本，比较 ZIP 条目名/顺序与
     每个条目解压后的字节，忽略 deflate 流、时间戳、外部属性、注释。这样在
@@ -10,10 +10,14 @@
     复现，也不等于格式合规结论。
   * 清单一致性：manifest.samples / 生成器清单 / 磁盘上的 .docx 三方比对，
     抓「新增样本忘写 manifest」「孤儿 docx」「生成器没覆盖」这类漏项。
+  * 可选重建：--with-rebuild 时，若本机装有 python-docx，再把 format-samples
+    也做一遍逐部件重建校验；没装就跳过并说明，不算失败。默认不开，因为这条
+    路径依赖第三方包。
 
 用法（从仓库根目录）：
     python3 tests/fixtures/synthetic/verify_fixtures.py
     python3 tests/fixtures/synthetic/verify_fixtures.py --self-test
+    python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild
 """
 import argparse
 import importlib.util
@@ -36,6 +40,12 @@ GENERATORS = [
 # (目录, 生成器文件, 结构校验函数)；只做维度断言，不在内存重建 docx
 STRUCTURE_VERIFIERS = [
     ("format-samples", "generate.py", "verify"),
+]
+
+# (目录, 生成器文件, 样本清单属性, 构造函数, 依赖的顶层模块名)；
+# 重建需要第三方依赖，只在 --with-rebuild 且依赖可用时执行。
+REBUILD_VERIFIERS = [
+    ("format-samples", "generate.py", "SAMPLES", "build_bytes", "docx"),
 ]
 
 # (目录, 是否比对生成器清单)
@@ -151,6 +161,38 @@ def check_lists():
     return problems, disk_total
 
 
+def rebuild_problems():
+    """对需要第三方依赖的生成器做逐部件重建校验。
+
+    返回 (问题描述列表, 校验份数, 跳过原因)。依赖缺失时不算失败，
+    跳过原因如实说明，不把「没查」写成「查了没问题」。
+    """
+    problems = []
+    checked = 0
+    skipped = []
+    for directory, filename, names_attr, builder_name, dependency in REBUILD_VERIFIERS:
+        if importlib.util.find_spec(dependency) is None:
+            skipped.append("%s 需要 %s（pip install python-docx）" % (directory, dependency))
+            continue
+        module = load_generator(directory, filename)
+        builder = getattr(module, builder_name)
+        source = getattr(module, names_attr)
+        for name, config in source.items():
+            target = HERE / directory / (name + ".docx")
+            if not target.exists():
+                problems.append("%s/%s 缺失" % (directory, name))
+                continue
+            try:
+                rebuilt = builder(config)
+            except Exception as exc:
+                problems.append("%s/%s 重建失败：%s" % (directory, name, exc))
+                continue
+            checked += 1
+            for issue in diff_parts(read_parts(rebuilt), read_parts(target.read_bytes())):
+                problems.append("%s/%s：%s" % (directory, name, issue))
+    return problems, checked, ("；".join(skipped) if skipped else None)
+
+
 def rezip(data, level, timestamp):
     """换一个压缩级别和时间戳重建 ZIP，用来模拟另一台机器上的产物。"""
     parts = read_parts(data)
@@ -204,16 +246,39 @@ def self_test():
         "关闭生成器比对时不误报",
         diff_lists(one, set(), one, check_generated=False) == [],
     ))
+    checks.append(("缺依赖时重建校验跳过而非失败", _self_test_rebuild_skips()))
 
     for label, ok in checks:
         print(("PASS  " if ok else "FAIL  ") + label)
     return 0 if all(ok for _, ok in checks) else 1
 
 
+def _self_test_rebuild_skips():
+    """把依赖探测临时改成「找不到」，确认重建校验返回跳过原因而不是问题列表。"""
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        if name in {entry[4] for entry in REBUILD_VERIFIERS}:
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    importlib.util.find_spec = fake_find_spec
+    try:
+        problems, checked, reason = rebuild_problems()
+    finally:
+        importlib.util.find_spec = real_find_spec
+    return problems == [] and checked == 0 and reason is not None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--self-test", action="store_true", help="验证本脚本自身的判据，不读样本"
+    )
+    parser.add_argument(
+        "--with-rebuild",
+        action="store_true",
+        help="额外对依赖第三方包的生成器做逐部件重建校验（需要 python-docx，缺失则跳过）",
     )
     args = parser.parse_args()
     if args.self_test:
@@ -253,6 +318,12 @@ def main():
     list_problems, disk_total = check_lists()
     problems.extend(list_problems)
 
+    rebuild_count = 0
+    skip_reason = None
+    if args.with_rebuild:
+        rebuild_issues, rebuild_count, skip_reason = rebuild_problems()
+        problems.extend(rebuild_issues)
+
     if problems:
         for issue in problems:
             print("不一致：" + issue)
@@ -264,6 +335,11 @@ def main():
         % (len(GENERATORS), sample_count, part_count,
            len(STRUCTURE_VERIFIERS), structure_count, len(LIST_SPECS), disk_total)
     )
+    if args.with_rebuild:
+        if skip_reason:
+            print("重建校验已跳过：%s" % skip_reason)
+        else:
+            print("重建校验通过：%d 组 / %d 份样本逐部件一致" % (len(REBUILD_VERIFIERS), rebuild_count))
     return 0
 
 
