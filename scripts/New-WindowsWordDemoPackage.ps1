@@ -1,10 +1,11 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts'),
     [string]$CertificateThumbprint = $env:THESIS_VSTO_CERT_THUMBPRINT,
     [string]$AddinOutputDirectory,
     [switch]$IncludeStructureCli,
+    [switch]$ValidateSamplesOnly,
     [switch]$Force
 )
 
@@ -26,6 +27,26 @@ if ($IncludeStructureCli) {
 }
 $sampleRoot = Join-Path $root 'tests\fixtures\synthetic\demo'
 $fullThesisRoot = Join-Path $root 'tests\fixtures\synthetic\full-thesis'
+# One list drives both the preflight check and the copy step, so adding a sample
+# cannot leave one of the two behind.
+$sampleFiles = @('known_issues_sample.docx', 'clean_sample.docx', 'clean_checked_sample.docx', 'manifest.json', 'README.md')
+$fullThesisFiles = @('synthetic_complete_thesis.docx', 'synthetic_object_layout_errors.docx', 'manifest.json', 'README.md')
+foreach ($name in $sampleFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $sampleRoot $name) -PathType Leaf)) {
+        throw "缺少合成样例文件：$name"
+    }
+}
+foreach ($name in $fullThesisFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $fullThesisRoot $name) -PathType Leaf)) {
+        throw "缺少完整合成论文样例：$name"
+    }
+}
+if ($ValidateSamplesOnly) {
+    Write-Host "samples ($($sampleFiles.Count)): $($sampleFiles -join ', ')"
+    Write-Host "full-thesis ($($fullThesisFiles.Count)): $($fullThesisFiles -join ', ')"
+    Write-Host 'Sample list validated; no package was built.'
+    return
+}
 $requiredAddin = @('ThesisAddIn.VSTO.dll', 'ThesisAddIn.VSTO.vsto', 'ThesisAddIn.VSTO.dll.manifest')
 foreach ($name in $requiredAddin) {
     if (-not (Test-Path -LiteralPath (Join-Path $addinOutput $name) -PathType Leaf)) { throw "缺少 Release 加载项输出：$name。请先完成签名构建。" }
@@ -34,12 +55,6 @@ foreach ($name in $requiredAddin) {
 # executable is optional and is not emitted when UseAppHost=false.
 foreach ($name in @('ThesisEngine.ProtocolHost.dll', 'ThesisEngine.ProtocolHost.runtimeconfig.json', 'ThesisEngine.ProtocolHost.deps.json')) {
     if (-not (Test-Path -LiteralPath (Join-Path $engineOutput $name) -PathType Leaf)) { throw "缺少 Release 引擎输出：$name。请先构建 ProtocolHost。" }
-}
-foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $sampleRoot $name) -PathType Leaf)) { throw "缺少合成样例文件：$name" }
-}
-foreach ($name in @('synthetic_complete_thesis.docx', 'manifest.json', 'README.md')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $fullThesisRoot $name) -PathType Leaf)) { throw "缺少完整合成论文样例：$name" }
 }
 if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) { throw '请设置 THESIS_VSTO_CERT_THUMBPRINT 或传入 -CertificateThumbprint。' }
 
@@ -138,12 +153,12 @@ try {
         New-Item -ItemType Directory -Path $researchStage | Out-Null
         Copy-Item -LiteralPath (Join-Path $root 'docs\research\unstyled-thesis-open-source-2026-10-26.md') -Destination $researchStage
     }
-    foreach ($name in @('known_issues_sample.docx', 'clean_sample.docx', 'manifest.json', 'README.md')) {
+    foreach ($name in $sampleFiles) {
         Copy-Item -LiteralPath (Join-Path $sampleRoot $name) -Destination $samplesStage
     }
     $fullThesisStage = Join-Path $samplesStage 'full-thesis'
     New-Item -ItemType Directory -Path $fullThesisStage | Out-Null
-    foreach ($name in @('synthetic_complete_thesis.docx', 'synthetic_object_layout_errors.docx', 'manifest.json', 'README.md')) {
+    foreach ($name in $fullThesisFiles) {
         Copy-Item -LiteralPath (Join-Path $fullThesisRoot $name) -Destination $fullThesisStage
     }
     Copy-Item -LiteralPath (Join-Path $root 'scripts\Test-WindowsWordDemoEnvironment.ps1') -Destination (Join-Path $stage 'Preflight.ps1')
