@@ -54,5 +54,16 @@
     "image clarity, semantic correctness and visual layout",
     "equation formatting",
     "headers and footers"
-  ]
+  ],
+  "samples": [
+    {
+      "file": "synthetic_complete_thesis.docx",
+      "description": "上面的 file / sha256 / plannedDiagnostics 描述的是这份主样本；14 页人工合成论文，含中英文摘要、目录、六章正文、图表、公式、参考文献、附录与致谢"
+    },
+    {
+      "file": "synthetic_object_layout_errors.docx",
+      "description": "在主样本基础上把一幅图片与一张固定列宽表格设为 600 pt，故意超出所在分节 456.1 pt 可用宽度；由 generate_object_layout_errors.py --output 生成，预期 11 组合并问题。详见 README.md"
+    }
+  ],
+  "sampleListNote": "file / sha256 等单文件字段保留给主样本；samples 列出目录里全部已提交 docx，供 verify_fixtures.py 做清单一致性核对。生成器输出名由命令行参数决定，因此该目录不比对生成器清单。"
 }

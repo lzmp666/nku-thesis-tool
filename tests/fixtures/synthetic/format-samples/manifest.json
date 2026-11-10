@@ -1,0 +1,55 @@
+{
+  "sample_set": "format-samples/issue-5",
+  "purpose": "Issue #5 的 10 份自建结构样本，核对中西文字体、字号、行距、全部节页边距、样式继承与唯一覆盖属性",
+  "formal_compliance": false,
+  "status": "synthetic-draft",
+  "generator": "generate.py",
+  "generation_command": "python3 generate.py --check",
+  "check_command": "python3 generate.py --check-only",
+  "generator_note": "重建 10 份 docx 需要 python-docx==1.2.0（MIT，见 requirements.txt）；校验已提交样本只需要 Python 标准库（zipfile + ElementTree），干净检出无需 pip install。生成器固定 ZIP 条目排序、时间戳 (2000-01-01) 与 deflate，10 份样本之间只有 word/document.xml 不同。verify() 是只读的结构断言，不重建 docx，也不等于逐字节复现。",
+  "baseline_note": "中文宋体、西文 Times New Roman、正文 12pt、行距 1.5 倍；页边距上/下/右 2.5cm、左 3cm；标题黑体 16pt 居中不加粗。这是假设测试基线，不是南开校规；正式规则与学校来源审核仍是 pending。",
+  "source_note": "全部文字由 generate.py 的 TEXT / HEADING 常量构造，不含真实论文、学生或导师信息。",
+  "disclaimer": "「校验通过」只表示这 10 份样本的 OOXML 维度与清单一致，不代表格式合规，不代表引擎已实现对应诊断或补丁，也不代替 Word 桌面版打开副本的兼容性验证。表中预期均为人工预期，不是引擎运行结果。",
+  "samples": [
+    {
+      "file": "baseline_correct.docx",
+      "description": "无偏差；仅本文列出的基线维度匹配，不表示全面合规"
+    },
+    {
+      "file": "font_family_cn_wrong.docx",
+      "description": "所有正文中文楷体；预期定位正文 run 中文字体不匹配"
+    },
+    {
+      "file": "font_ascii_wrong.docx",
+      "description": "所有正文西文 Arial；预期西文/数字字体不匹配，不误报中文字体"
+    },
+    {
+      "file": "font_size_wrong.docx",
+      "description": "所有正文 10.5pt；直接 sz=21，基线 sz=24"
+    },
+    {
+      "file": "line_spacing_wrong.docx",
+      "description": "正文单倍行距，标题仍为基线 1.5 倍"
+    },
+    {
+      "file": "margin_wrong.docx",
+      "description": "第 1 节左边距 2cm，其余边距不变"
+    },
+    {
+      "file": "style_override_control.docx",
+      "description": "正文 run 无 rPr，从 Normal 继承宋体 / Times New Roman / 12pt；改变 Normal 后正文随之改变"
+    },
+    {
+      "file": "style_override_wrong.docx",
+      "description": "仅正文第二段 run 写 eastAsia=楷体；其他 run 仍继承，改变 Normal 中文字体时该段维持楷体"
+    },
+    {
+      "file": "multisection_control.docx",
+      "description": "两节全部边距匹配；必须遍历全部节"
+    },
+    {
+      "file": "multisection_margin_wrong.docx",
+      "description": "仅第 2 节左边距 2.5cm；预期只报告第 2 节，不误报第 1 节"
+    }
+  ]
+}
