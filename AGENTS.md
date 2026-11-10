@@ -101,7 +101,7 @@ python3 tests/fixtures/synthetic/verify_fixtures.py
 python3 tests/fixtures/synthetic/verify_fixtures.py --self-test
 ```
 
-前者核对逐部件重建、结构断言与 manifest ↔ 生成器 ↔ 磁盘的清单一致性，后者验证这两条判据本身既不误报也不漏报。
+前者核对逐部件重建、结构断言与 manifest ↔ 生成器 ↔ 磁盘的清单一致性，后者验证这两条判据本身既不误报也不漏报。装了 python-docx 时可再加严一档：`python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild`，它把 `format-samples/` 的 10 份样本也做一遍逐部件重建校验；没装就跳过并打印原因，退出码仍是 0。
 
 ## 6. 提交规范
 

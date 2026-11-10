@@ -23,6 +23,14 @@ python3 tests/fixtures/synthetic/format-samples/generate.py --check
 
 缺 python-docx 时，`--check` 会打印可执行的安装提示并指向 `--check-only`，不是裸 traceback。仓库根目录另有 `python3 tests/fixtures/synthetic/verify_fixtures.py`，把本目录的结构断言纳入统一校验，并额外做 manifest ↔ 生成器 ↔ 磁盘的清单一致性核对。
 
+装了 python-docx 时还可以加严一档：
+
+```sh
+python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild
+```
+
+它在结构断言之外，再把本目录 10 份样本做一遍**逐部件重建校验**（重建结果与仓库文件的每个 ZIP 部件逐一比对，忽略 deflate 流与时间戳）。没装 python-docx 就跳过并打印原因，退出码仍是 0——跳过不等于通过。
+
 ## 场景与定位
 
 每个错误文件只偏离一个格式维度，其余属性按基线核对。正文按“正文段”计数，标题不计入；在 document.xml 中首标题为 p[1]，正文第二段为 p[3]。

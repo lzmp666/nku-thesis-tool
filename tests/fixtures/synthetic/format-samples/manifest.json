@@ -6,7 +6,7 @@
   "generator": "generate.py",
   "generation_command": "python3 generate.py --check",
   "check_command": "python3 generate.py --check-only",
-  "generator_note": "重建 10 份 docx 需要 python-docx==1.2.0（MIT，见 requirements.txt）；校验已提交样本只需要 Python 标准库（zipfile + ElementTree），干净检出无需 pip install。生成器固定 ZIP 条目排序、时间戳 (2000-01-01) 与 deflate，10 份样本之间只有 word/document.xml 不同。verify() 是只读的结构断言，不重建 docx，也不等于逐字节复现。",
+  "generator_note": "重建 10 份 docx 需要 python-docx==1.2.0（MIT，见 requirements.txt）；校验已提交样本只需要 Python 标准库（zipfile + ElementTree），干净检出无需 pip install。生成器固定 ZIP 条目排序、时间戳 (2000-01-01) 与 deflate，10 份样本之间只有 word/document.xml 不同。verify() 是只读的结构断言，不重建 docx，也不等于逐字节复现；装了 python-docx 后可用仓库根目录的 verify_fixtures.py --with-rebuild 再加严一档，逐部件比对重建结果与仓库文件。",
   "baseline_note": "中文宋体、西文 Times New Roman、正文 12pt、行距 1.5 倍；页边距上/下/右 2.5cm、左 3cm；标题黑体 16pt 居中不加粗。这是假设测试基线，不是南开校规；正式规则与学校来源审核仍是 pending。",
   "source_note": "全部文字由 generate.py 的 TEXT / HEADING 常量构造，不含真实论文、学生或导师信息。",
   "disclaimer": "「校验通过」只表示这 10 份样本的 OOXML 维度与清单一致，不代表格式合规，不代表引擎已实现对应诊断或补丁，也不代替 Word 桌面版打开副本的兼容性验证。表中预期均为人工预期，不是引擎运行结果。",
