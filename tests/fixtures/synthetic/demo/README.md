@@ -2,7 +2,7 @@
 
 本目录用于 Issue #27 的 Demo Sprint 最小验收，包含：
 
-- `generate_samples.py`：生成原有两份 `.docx`，依赖 `python-docx`
+- `generate_samples.py`：零依赖，生成原有两份 `.docx`，支持 `--check` 逐字节校验
 - `generate_checked_sample.py`：零依赖，生成 `clean_checked_sample.docx`，支持 `--check` 逐字节校验
 - `clean_sample.docx`：极简样本，段落级 0 条但同时写着「已检查 0 个正文文本片段」，保留作反面教材
 - `clean_checked_sample.docx`：真正走完两级检查链路的干净样本
@@ -13,21 +13,22 @@
 
 ## 重新生成
 
-原有两份由 `generate_samples.py` 生成，需要 Python 和 `python-docx`：
+两个生成器都只用 Python 标准库，不需要 `python-docx` 或 `lxml`：
 
 ```bash
-python3 -m pip install python-docx
 python3 tests/fixtures/synthetic/demo/generate_samples.py
-```
-
-该脚本会覆盖当前目录下的 `clean_sample.docx` 和 `known_issues_sample.docx`。本机没装 `python-docx` 也能跑下面这个零依赖脚本，它只碰新样本：
-
-```bash
+python3 tests/fixtures/synthetic/demo/generate_samples.py --check
 python3 tests/fixtures/synthetic/demo/generate_checked_sample.py
 python3 tests/fixtures/synthetic/demo/generate_checked_sample.py --check
 ```
 
-`--check` 只比对不写盘，ZIP 条目顺序和时间戳都固定。原有两份当前没有纳入逐字节校验：历史上有过手工调整，重新生成的字节不保证与仓库里的一致，所以改它们之前先看清差异，别拿 `--check` 的结果当判据。
+`--check` 只比对不写盘。ZIP 条目顺序、时间戳、压缩参数都固定，三份样本现在都能逐字节校验；不带 `--check` 运行会覆盖同名文件，两个生成器的产物不要互相覆盖。
+
+`known_issues_sample.docx` 有一段历史：以前由 `python-docx` 生成，`word/document.xml` 后来被单独替换过（BOM、CRLF、缩进、小写 `utf-8` 声明、无末尾换行，时间戳也和其余部件不同），那段 deflate 流不是 Python zlib 写出来的，旧文件因此无法逐字节复现。2026-11-10 按原 XML 部件重建了容器：**六个部件的解压字节与旧文件逐字节相同，文件整体字节不同；`clean_sample.docx` 本身则完全没变**。重建件在真 Word `16.0`（Build `20527`，`Path=Office16`，不是 WPS 的 COM 兼容层）里打开临时副本：5 段、1 页、纸张 21.001 × 29.7 cm，三段正文的东亚字体 / 西文字体 / 字号分别读作「黑体 + Times New Roman + 12」「宋体 + Arial + 12」「宋体 + Times New Roman + 10.5」，与三项预期诊断一致；关闭时不保存，仓库里样本的 SHA-256 前后一致，没有留下 `~$` 锁文件。CLI 复跑仍是 3 条诊断、`已检查 3 个正文文本片段`。这些读数说明 Word 能正常解释这份包，不构成规范合规结论。那段与其余部件不同的排版风格是历史产物，不是规范要求，为保持诊断行为一致而原样保留。
+
+**历史验收记录里的 SHA-256 对应重建前的字节**（例如 `docs/demo/word-109-task-pane.md`、`docs/vsto-addin-verification.md`）。那些是当时的实测记录，没有回改；现在引用样本哈希要用重建后的值，不能用旧值来断言样本被改坏。
+
+逐字节 `--check` 只在本机跑：CI 用的是 `tests/fixtures/synthetic/verify_fixtures.py` 的逐部件比对，忽略 deflate 流和时间戳，避免不同 Python / zlib 版本之间的抖动。本仓库 `format-samples/` 目录另有一套依赖 `python-docx` 的生成器，不在本目录范围内。
 
 ## 两级链路的干净样本
 

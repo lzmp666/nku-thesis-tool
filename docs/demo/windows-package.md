@@ -21,7 +21,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -InstallRo
 
 脚本会先预检，再将文件放入目标目录，并写入 `HKCU\Software\Microsoft\Office\Word\Addins\ThesisAddIn.VSTO` 与当前用户的 `THESIS_ENGINE_PROTOCOL_HOST` 环境变量。它保留安装前同名注册值/环境变量供卸载恢复。已存在但不含本工具安装记录的目录不会被覆盖。
 
-安装后关闭并重新启动 Word。在 Word 功能区打开“论文格式检查”，先从 `samples/full-thesis` 打开 `synthetic_complete_thesis.docx` 做完整论文验收；该人工合成稿约 14 页，含中英文摘要、六章正文、图、表和公式，并预设三处文字格式问题。`samples` 根目录的 `known_issues_sample.docx` 与 `clean_sample.docx` 可用于快速验证。所有样例都不构成规范合规结论。完整步骤见包内及安装目录中的 `docs/word-acceptance.md`。
+安装后关闭并重新启动 Word。在 Word 功能区打开“论文格式检查”，先从 `samples/full-thesis` 打开 `synthetic_complete_thesis.docx` 做完整论文验收；该人工合成稿约 14 页，含中英文摘要、六章正文、图、表和公式，并预设三处文字格式问题。`samples` 根目录三份样本用于快速验证：`known_issues_sample.docx`（预设三项问题）、`clean_sample.docx`（段落级 0 条，但报告同时写「已检查 0 个正文文本片段」，属于压根没进检查范围，保留作「0 条不等于干净」的反面教材）、`clean_checked_sample.docx`（段落级「已检查 3 个正文文本片段」且 0 条，文档级「完整判定 2 / 2」且已检查项目均符合）。所有样例都不构成规范合规结论。完整步骤见包内及安装目录中的 `docs/word-acceptance.md`。
 
 ## 更新与卸载
 
@@ -53,6 +53,12 @@ $env:THESIS_VSTO_CERT_THUMBPRINT = '<当前用户开发证书指纹>'
 .\scripts\New-WindowsWordDemoPackage.ps1
 # 可选：需要结构 CLI 时，用下面命令替换上一条
 # .\scripts\New-WindowsWordDemoPackage.ps1 -IncludeStructureCli
+```
+
+只核对包内样本清单、不需要签名构建产物时，用 `-ValidateSamplesOnly`：它检查两份清单里的每个文件是否存在，打印清单后退出，不生成 ZIP，也不要求干净的 Git 工作树。预检和拷贝共用同一份清单数组，新增样本不会只改到一处；以前 `full-thesis/synthetic_object_layout_errors.docx` 只出现在拷贝清单里、没有预检，现在也在预检里。打包脚本本身带 UTF-8 BOM，中文提示在 Windows PowerShell 5.1 下不会乱码。
+
+```powershell
+.\scripts\New-WindowsWordDemoPackage.ps1 -ValidateSamplesOnly
 ```
 
 若在构建后手工重签，先签 `.dll.manifest`，再使用 `mage -Update <file.vsto> -AppManifest <file.dll.manifest> -Install false -CertHash <thumbprint>` 更新并签署部署清单。Mage 的 `-Install` 默认值是 true；VSTO 清单必须保留 false。打包和安装脚本会核对该属性及最终程序集清单的大小、哈希，阻止签名有效但依赖哈希过期的包。

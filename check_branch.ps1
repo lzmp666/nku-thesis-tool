@@ -1,8 +1,24 @@
-$git = "C:\Users\guo11\AppData\Local\GitHubDesktop\app-3.6.6\resources\app\git\cmd\git.exe"
-$cred = "protocol=https`nhost=github.com`n`n" | & $git credential fill 2>&1 | Out-String
-$pass = (($cred -split "`n" | Where-Object { $_ -like "password=*" }) -replace "password=","").Trim()
-$h = @{ Authorization = "Bearer $pass"; Accept = "application/vnd.github+json"; "User-Agent" = "Guoooooi" }
-$repo = "lzmp666/nku-thesis-tool"
+# Read-only: print the sha of a branch ref. Never writes to the remote.
+#
+#   .\check_branch.ps1
+#   .\check_branch.ps1 -Repo lzmp666/nku-thesis-tool -Branch main
+#   $env:NKU_THESIS_BRANCH = 'docs/issue-109-ai-onboarding'; .\check_branch.ps1
+[CmdletBinding()]
+param(
+    [string]$Repo = $env:NKU_THESIS_REPO,
+    [string]$Branch = $env:NKU_THESIS_BRANCH
+)
 
-$ref = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/ref/heads/feature/issue-96-chat" -Headers $h
-Write-Host "branch sha: $($ref.object.sha)"
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "scripts\Invoke-GitHubApi.ps1")
+
+$git = Get-NkuGit
+$slug = Get-NkuRepoSlug -Repo $Repo -Git $git
+$name = Get-NkuBranch -Branch $Branch -Git $git -Base "main"
+$headers = Get-NkuGitHubHeaders -Git $git
+
+$ref = Invoke-NkuGitHubApi -Path "repos/$slug/git/ref/heads/$name" -Method Get -Headers $headers
+Write-Host "repo:      $slug"
+Write-Host "branch:    $name"
+Write-Host "sha:       $($ref.object.sha)"
+Write-Host "read-only: no remote object was created or changed"

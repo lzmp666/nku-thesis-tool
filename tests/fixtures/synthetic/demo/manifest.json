@@ -3,14 +3,16 @@
   "purpose": "命令行读取与可定位诊断演示",
   "formal_compliance": false,
   "status": "synthetic-demo-only",
-  "generator": "generate_samples.py",
-  "generation_command": "python3 generate_samples.py",
-  "generator_note": "generate_samples.py 依赖 python-docx，管原有两份样本；clean_checked_sample.docx 由零依赖的 generate_checked_sample.py 生成，支持 --check 逐字节校验。两个生成器的产物不要互相覆盖。",
+  "generator": "generate_samples.py / generate_checked_sample.py",
+  "generation_command": "python3 generate_samples.py && python3 generate_checked_sample.py",
+  "check_command": "python3 generate_samples.py --check && python3 generate_checked_sample.py --check",
+  "generator_note": "两个生成器都只用 Python 标准库，按样本分工：generate_samples.py 管 clean_sample.docx 与 known_issues_sample.docx，generate_checked_sample.py 管 clean_checked_sample.docx，产物不要互相覆盖。ZIP 条目顺序、时间戳、压缩参数固定，--check 逐字节校验三份样本。known_issues_sample.docx 历史上由 python-docx 生成且 word/document.xml 被单独替换过，2026-11-10 按原 XML 部件重建：六个部件内容逐字节相同，容器字节与历史版本不同，已通过 Word 16 打开复核。",
   "source_note": "全部内容为人工构造，不含真实论文、个人信息或敏感材料。",
   "disclaimer": "仅供演示/测试，不代表合规结论",
   "samples": [
     {
       "file": "clean_sample.docx",
+      "generator": "generate_samples.py",
       "description": "极简合成样本，段落级演示规则预期诊断数为 0。注意：报告同时写「已检查 0 个正文文本片段」，这个 0 来自压根没进入检查范围，保留作「0 条不等于干净」的反面教材。仅供演示/测试，不代表合规结论",
       "expected_diagnosis_count": 0,
       "expected_checked_body_fragments": 0,
@@ -30,6 +32,7 @@
     },
     {
       "file": "known_issues_sample.docx",
+      "generator": "generate_samples.py",
       "description": "正文边界可识别且含三项已知格式问题的合成样本，仅供演示/测试，不代表合规结论",
       "expected_diagnosis_count": 3,
       "expected_diagnoses": [
