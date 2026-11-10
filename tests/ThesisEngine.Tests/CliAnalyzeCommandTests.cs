@@ -229,6 +229,154 @@ public sealed class CliAnalyzeCommandTests
         cliAssembly.GetType($"ThesisEngine.Core.{typeName}") ??
         Assembly.Load("ThesisEngine.Core").GetType($"ThesisEngine.Core.{typeName}")!;
 
+    // ---- #112：analyze --scope 的三种口径 ----
+
+    [Fact]
+    public void DocumentScopeSkipsParagraphAnalysis()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        ServiceProxy.Exception = null;
+        ServiceProxy.LastPath = null;
+        var path = CreateInputFile();
+        try
+        {
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+                new[] { "analyze", "--demo", path, "--scope", "document" }, output, error);
+
+            Assert.Null(ServiceProxy.LastPath);
+            Assert.DoesNotContain("诊断数量", output.ToString());
+            // 空文件不是有效 docx，文档级会自己报错，不该被段落级的结果盖过去。
+            Assert.Equal(1, exitCode);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DocumentScopeRendersRealDocumentReport()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        ServiceProxy.Exception = null;
+        ServiceProxy.LastPath = null;
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+            new[] { "analyze", "--demo", SamplePath("document_baseline_correct.docx"), "--scope", "document" },
+            output, error);
+
+        Assert.Equal(0, exitCode);
+        Assert.Null(ServiceProxy.LastPath);
+        Assert.Contains("=== 文档级版式检查报告 ===", output.ToString());
+        Assert.Contains("已检查的文档级项目均符合。", output.ToString());
+        Assert.DoesNotContain("诊断数量", output.ToString());
+    }
+
+    [Fact]
+    public void ParagraphScopeKeepsOnlyTheOriginalReport()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        ServiceProxy.Exception = null;
+        var path = CreateInputFile();
+        try
+        {
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+                new[] { "analyze", "--demo", path, "--scope", "paragraph" }, output, error);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("诊断数量：0", output.ToString());
+            Assert.DoesNotContain("文档级版式检查报告", output.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>默认 all 时文档级是附加报告，它失败不该把段落级的成功改成失败。</summary>
+    [Fact]
+    public void DefaultScopeAppendsDocumentSectionWithoutChangingExitCode()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        ServiceProxy.Exception = null;
+        var path = CreateInputFile();
+        try
+        {
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+                new[] { "analyze", "--demo", path }, output, error);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("诊断数量：0", output.ToString());
+            Assert.Contains("以下为文档级版式检查", output.ToString());
+            Assert.Contains("文档级检查未完成", output.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void InvalidScopeReturnsUsage()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        var path = CreateInputFile();
+        try
+        {
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+                new[] { "analyze", "--demo", path, "--scope", "unknown" }, output, error);
+
+            Assert.Equal(2, exitCode);
+            Assert.Contains("--scope all|paragraph|document", error.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void DocumentScopeRejectsAnnotatedOutput()
+    {
+        var assembly = LoadCliAssembly();
+        ServiceProxy.Result = NewResult(assembly);
+        var path = CreateInputFile();
+        try
+        {
+            var output = new StringWriter();
+            var error = new StringWriter();
+            var exitCode = InvokeWithArgs(NewCommand(assembly, output, error),
+                new[] { "analyze", "--demo", path, "--scope", "document",
+                    "--annotated-output", Path.Combine(Path.GetTempPath(), "unused.docx") },
+                output, error);
+
+            Assert.Equal(2, exitCode);
+            Assert.Contains("没有段落级诊断可标注", error.ToString());
+        }
+        finally { File.Delete(path); }
+    }
+
+    private static int InvokeWithArgs(object command, string[] args, TextWriter output, TextWriter error)
+    {
+        var execute = command.GetType().GetMethod("Execute",
+            new[] { typeof(string[]), typeof(TextWriter), typeof(TextWriter) })!;
+        return (int)execute.Invoke(command, new object[] { args, output, error })!;
+    }
+
+    private static string SamplePath(string sampleName)
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "NkuThesisTool.sln")))
+            root = root.Parent;
+        Assert.NotNull(root);
+        var path = Path.Combine(root!.FullName, "tests", "fixtures", "synthetic", "document", sampleName);
+        Assert.True(File.Exists(path), $"样本不存在：{path}");
+        return path;
+    }
+
     public class ServiceProxy : DispatchProxy
     {
         public static object? Result { get; set; }

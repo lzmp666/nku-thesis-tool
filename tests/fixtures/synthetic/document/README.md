@@ -1,6 +1,7 @@
 # 文档级版式合成样本
 
-Issue #112 的样本集：纸张、页边距、页眉页脚距离、装订线、页眉页脚、页码域、页码格式、目录、疑似空白页。全部人工构造，不含真实论文内容。
+Issue #112 的样本集：纸张、页边距、页眉页脚距离、装订线、页眉页脚、页码域、页码格式、目录、
+空白页，以及第二档的 R2 篇眉 / R3 页码字体字号与居中。全部人工构造，不含真实论文内容。
 
 ## 生成
 
@@ -28,9 +29,26 @@ python tests/fixtures/synthetic/document/generate.py --check  # 只比对，不�
 | document_even_odd | 开启奇偶页不同 | D5 一条 |
 | document_toc_manual | 目录是手打的 | D9 一条 |
 | document_toc_auto | 目录是 TOC 域 | 0 条 |
-| document_blank_page | 空段落带分页符 | D10 一条（惯例） |
+| document_blank_page | 空段落带分页符 | D10 一条（惯例；Word 实测只多 1 页，第 2 页仍有正文） |
 | document_sections_same_numbering | 两节都是 decimal | D8 一条 |
 | document_sections_mixed_numbering | 罗马 + 阿拉伯 | 0 条 |
+| document_header_font_wrong | 篇眉黑体 | D11 一条 |
+| document_header_size_wrong | 篇眉 12 磅 | D11 一条 |
+| document_header_left_aligned | 篇眉左对齐 | D11 一条 |
+| document_footer_font_wrong | 页码黑体 | D12 一条 |
+| document_footer_size_wrong | 页码 12 磅 | D12 一条 |
+| document_footer_left_aligned | 页码左对齐 | D12 一条 |
+| document_abstract_header_correct | 全西文篇眉用 Times New Roman | 0 条 |
+| document_abstract_header_wrong | 全西文篇眉用 Arial | D11 一条 |
+| document_hf_style_inherited | 字体字号居中写在 styles.xml 的样式里 | 0 条 |
+| document_no_styles_part | 无 styles.xml 且无显式 rPr / jc | 0 条，但完整判定 0/2，不能当合规 |
+| document_no_styles_explicit | 无 styles.xml 但显式写了格式 | 0 条 |
+| document_font_aliases | SimSun / TimesNewRoman 别名写法 | 0 条 |
+| document_true_blank_page | 连续两个空段落各带分页符 | D10 一条（Word 实测 3 页、第 2 页整页无正文） |
+
+第二档那批要注意 `document_no_styles_part`：它跑出 0 条，是因为三个维度都**判不出来**，
+不是因为查过没问题。报告头部会显示「完整判定 0 / 2」，末尾「本次未检查」逐条列出原因。
+这条是专门用来守「0 条要能分清查了没问题和压根没查」的规矩。
 
 ## 两条按全文判断的规则，以及为什么
 
@@ -64,10 +82,16 @@ Word 会给每一节都建好 default / even / first 三组页眉页脚引用，
 
 检查用 0.1cm 容差吸收这种取整差，不做精确相等比较。写死 `== 11906` 的检查会把自己的合规样本判成不合规。
 
-## 未验证的部分
+## Word 实机核验
 
-**样本没有在 Word 里打开过**，脚本只能保证 ZIP 与 XML 结构合法。
+2026-11-09 用 Word 16.0（COM 自动化）生成了 A4、3.8/3.2cm、页眉页脚 3.0cm、
+页眉「第一章 引言」、页脚 PAGE 域的文档，`analyze-document` 输出 0 条问题，读数与设置一致。
+上面「按全文判断」和「容差」两条口径都是在那次实测后改的。
 
-但**真实 Word 文档实测过**：2026-11-09 用 Word 16.0（COM 自动化）生成了 A4、3.8/3.2cm、页眉页脚 3.0cm、页眉「第一章 引言」、页脚 PAGE 域的文档，`analyze-document` 输出 0 条问题，读数与设置一致。上面两条「按全文判断」和「容差」的口径都是在那次实测后改的。
+2026-11-10 又把这批合成样本本身放进了 Word 16.0：修复件页边距读回 3.799/3.2/3.0cm、
+纸张 21.001×29.7cm，修复前后 `Content.Text` 逐字相同；页脚是 `Field.Type=33` 的 PAGE 域，
+域结果宋体 10.5 磅、居中；空白页两个样本分别实测 2 页与 3 页，后者第 2 页无正文。
+原始读数、逐页文本与四张截图见 `docs/research/word-112-acceptance.md`。
 
-自动修复（只动 `sectPr`）不在本档范围内，属 11/29 之后的部分。
+正因为这次实测发现「单个空段落带分页符」并不会产生整页空白，才补了
+`document_true_blank_page.docx`，并把 D10 拆成两种措辞。

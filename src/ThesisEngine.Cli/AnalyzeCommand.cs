@@ -1,10 +1,16 @@
 using ThesisEngine.Core;
+using ThesisEngine.Core.Document;
 using System.Xml;
 
 namespace ThesisEngine.Cli;
 
 public sealed class AnalyzeCommand
 {
+    /// <summary>
+    /// #112：文档级报告并入 analyze。默认 all；paragraph 保持老的段落级行为不变。
+    /// </summary>
+    private enum Scope { All, Paragraph, Document }
+
     private readonly IDemoAnalysisService _analysisService;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
@@ -49,7 +55,7 @@ public sealed class AnalyzeCommand
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
-        if (!TryParse(arguments, out var inputPath, out var annotatedOutputPath))
+        if (!TryParse(arguments, out var inputPath, out var annotatedOutputPath, out var scope))
         {
             WriteUsage(error);
             return 2;
@@ -101,6 +107,17 @@ public sealed class AnalyzeCommand
                 }
             }
 
+            if (scope == Scope.Document)
+            {
+                if (annotatedOutputPath is not null)
+                {
+                    error.WriteLine("--scope document 只跑文档级，没有段落级诊断可标注；" +
+                        "要写标注副本请加 --scope paragraph。");
+                    return 2;
+                }
+                return RunDocumentScope(fullInputPath, output, error);
+            }
+
             var result = _analysisService.Analyze(fullInputPath, DemoRuleSet.NkuDraftSample);
             if (result is null)
             {
@@ -113,6 +130,18 @@ public sealed class AnalyzeCommand
                 : WordAnnotationWriter.WriteAnnotatedCopy(fullInputPath, fullOutputPath, result.Diagnostics);
 
             CliReportFormatter.Write(result, output, fullInputPath, writtenOutputPath);
+
+            if (scope == Scope.All)
+            {
+                output.WriteLine();
+                output.WriteLine("=== 以下为文档级版式检查（analyze 默认附带，--scope paragraph 可关掉）===");
+                var documentCode = RunDocumentScope(fullInputPath, output, error);
+                if (documentCode != 0)
+                {
+                    output.WriteLine($"（文档级检查未完成，退出码 {documentCode}；上面的段落级报告不受影响）");
+                }
+            }
+
             return 0;
         }
         catch (UnauthorizedAccessException)
@@ -137,10 +166,20 @@ public sealed class AnalyzeCommand
         }
     }
 
-    private static bool TryParse(IReadOnlyList<string> arguments, out string inputPath, out string? annotatedOutputPath)
+    /// <summary>单独跑文档级，或者作为 all 的第二段附在段落级报告后面。</summary>
+    private static int RunDocumentScope(string path, TextWriter output, TextWriter error) =>
+        new DocumentAnalyzeCommand(output: output, error: error).Execute(new[] { path });
+
+    private static bool TryParse(
+        IReadOnlyList<string> arguments,
+        out string inputPath,
+        out string? annotatedOutputPath,
+        out Scope scope)
     {
         inputPath = string.Empty;
         annotatedOutputPath = null;
+        scope = Scope.All;
+
         if (arguments.Count < 3 ||
             !string.Equals(arguments[0], "analyze", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(arguments[1], "--demo", StringComparison.Ordinal) ||
@@ -150,18 +189,38 @@ public sealed class AnalyzeCommand
         }
 
         inputPath = arguments[2];
-        if (arguments.Count == 3) return true;
-        if (arguments.Count != 5 ||
-            !string.Equals(arguments[3], "--annotated-output", StringComparison.Ordinal) ||
-            string.IsNullOrWhiteSpace(arguments[4]))
+
+        // 两个开关的顺序不固定，挨个扫。原来的 TryParse 写死了「第 4 个参数必须是
+        // --annotated-output」，加 --scope 之后那种写法就不够用了。
+        for (var i = 3; i < arguments.Count; i++)
         {
-            return false;
+            switch (arguments[i])
+            {
+                case "--scope":
+                    if (i + 1 >= arguments.Count) return false;
+                    switch (arguments[++i])
+                    {
+                        case "all": scope = Scope.All; break;
+                        case "paragraph": scope = Scope.Paragraph; break;
+                        case "document": scope = Scope.Document; break;
+                        default: return false;
+                    }
+                    break;
+
+                case "--annotated-output":
+                    if (i + 1 >= arguments.Count || string.IsNullOrWhiteSpace(arguments[i + 1])) return false;
+                    annotatedOutputPath = arguments[++i];
+                    break;
+
+                default:
+                    return false;
+            }
         }
 
-        annotatedOutputPath = arguments[4];
         return true;
     }
 
     private static void WriteUsage(TextWriter error) =>
-        error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx> [--annotated-output <标注副本.docx>]");
+        error.WriteLine("用法：ThesisEngine.Cli analyze --demo <file.docx> " +
+            "[--scope all|paragraph|document] [--annotated-output <标注副本.docx>]");
 }

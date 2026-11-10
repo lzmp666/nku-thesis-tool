@@ -1,3 +1,4 @@
+using System.Xml;
 using ThesisEngine.Core.Document;
 
 namespace ThesisEngine.Cli;
@@ -49,12 +50,27 @@ public sealed class DocumentAnalyzeCommand
             _output.WriteLine($"自动目录（TOC 域）：{(result.HasTocField ? "有" : "无")}");
             _output.WriteLine();
 
+            var judged = result.PartReadings.Count(reading => reading.FullyResolved);
+            _output.WriteLine($"页眉/页码格式：完整判定 {judged} / {result.PartReadings.Count} 个文字段落" +
+                "（未判定的维度逐条列在末尾「本次未检查」里）");
+            _output.WriteLine();
+
             if (result.Sections.Count > 0)
             {
                 _output.WriteLine("--- 页面设置读数 ---");
                 foreach (var section in result.Sections)
                 {
                     WriteSection(section);
+                }
+                _output.WriteLine();
+            }
+
+            if (result.PartReadings.Count > 0)
+            {
+                _output.WriteLine("--- 页眉 / 页码格式读数 ---");
+                foreach (var reading in result.PartReadings)
+                {
+                    WritePartReading(reading);
                 }
                 _output.WriteLine();
             }
@@ -84,7 +100,11 @@ public sealed class DocumentAnalyzeCommand
 
             if (clauseIssues.Count == 0 && conventionIssues.Count == 0)
             {
-                _output.WriteLine("已检查的文档级项目均符合。");
+                var partial = result.PartReadings.Count(reading => !reading.FullyResolved);
+                _output.WriteLine(partial > 0
+                    ? $"已判定的项目未发现问题；但有 {partial} 个页眉/页码段落的部分维度未判定，" +
+                        "不能据此说文档合规（见下方「本次未检查」）。"
+                    : "已检查的文档级项目均符合。");
                 _output.WriteLine();
             }
 
@@ -96,7 +116,8 @@ public sealed class DocumentAnalyzeCommand
 
             return 0;
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is InvalidDataException or IOException or
+            UnauthorizedAccessException or XmlException or ArgumentException)
         {
             _error.WriteLine($"检查失败：{ex.Message}");
             return 1;
@@ -137,6 +158,25 @@ public sealed class DocumentAnalyzeCommand
             _output.WriteLine("  首页不同：已设置");
         }
     }
+
+    private void WritePartReading(PartFormatReading reading)
+    {
+        var font = reading.FontResolved
+            ? $"中文字体 {reading.EastAsiaFont ?? "未设置"} / 西文字体 {reading.WesternFont ?? "未设置"}"
+            : "字体：样式链里没读到，未判定";
+        var size = reading.SizeResolved
+            ? $"{reading.SizeHalfPoints / 2.0:0.#} 磅"
+            : "未判定";
+        var alignment = reading.AlignmentResolved ? reading.Alignment : "未判定";
+
+        _output.WriteLine($"  {reading.PartName} 第 {reading.ParagraphIndex} 段" +
+            $"（{(reading.WesternOnly ? "全西文" : "含中文")}，" +
+            $"样式链{(reading.StylesPartAvailable ? "可用" : "不可用")}）「{Short(reading.Text)}」");
+        _output.WriteLine($"    {font}｜字号 {size}｜对齐 {alignment}" +
+            $"｜{(reading.FullyResolved ? "完整判定" : "有维度未判定，见文末")}");
+    }
+
+    private static string Short(string text) => text.Length <= 20 ? text : text[..20] + "…";
 
     private void WriteIssue(DocumentIssue issue)
     {

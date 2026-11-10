@@ -1,6 +1,6 @@
 {
   "sample_set": "document/page-setup",
-  "purpose": "Issue #112 文档级版式检查：纸张、页边距、页眉页脚距离、装订线、页眉页脚、页码域、页码格式、目录、疑似空白页",
+  "purpose": "Issue #112 文档级版式检查：纸张、页边距、页眉页脚距离、装订线、页眉页脚有无、页码域、页码格式、奇偶页不同、自动目录、疑似空白页；第二档补 R2 篇眉 / R3 页码的字体字号与居中",
   "formal_compliance": false,
   "status": "synthetic",
   "generator": "generate.py",
@@ -8,7 +8,7 @@
   "check_command": "python3 generate.py --check",
   "source_note": "全部内容为人工构造，不含真实论文、个人信息或他人成果。",
   "disclaimer": "样本只验证检查逻辑是否按预期报出问题，不代表真实论文的版式质量，也不能据此宣称合规。",
-  "spec_source_note": "规范值取自 rules/nku-graduate/general.yaml：R1 纸张 A4、上下 3.8cm、左右 3.2cm、页眉页脚 3.0cm、装订线 0；R2 篇眉宋体 10.5 磅居中、奇偶页相同、各部分首页也要有；R3 页码、前置大写罗马、正文阿拉伯。",
+  "spec_source_note": "规范值取自 rules/nku-graduate/general.yaml：R1 纸张 A4、上下 3.8cm、左右 3.2cm、页眉页脚 3.0cm、装订线 0；R2 篇眉宋体 10.5 磅居中、Abstract 部分 Times New Roman 10.5 磅、奇偶页相同、各部分首页也要有；R3 页码宋体 10.5 磅居中、前置大写罗马、正文阿拉伯。页眉横线在 R2/R3 里没有条款，故不检查，只列进报告的「本次未检查」。",
   "rounding_note": "实测 Word 16 存出来的 A4 是 11907×16839 twips、3.8cm 是 2154 twips，不是教科书上的 11906×16838 / 2155。检查用 0.1cm 容差吸收这种取整差，不做精确比较。",
   "samples": [
     {
@@ -21,15 +21,29 @@
       "file": "document_paper_wrong.docx",
       "description": "唯一偏差：Letter 纸张 12240×15840",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D1", "title": "纸张尺寸不是 A4", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D1",
+          "title": "纸张尺寸不是 A4",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_margin_wrong.docx",
       "description": "唯一偏差：上下页边距 2.5cm，左右不变",
       "expected_issue_count": 2,
       "expected_issues": [
-        { "code": "D2", "title": "上页边距不符合规范", "hasClause": true },
-        { "code": "D2", "title": "下页边距不符合规范", "hasClause": true }
+        {
+          "code": "D2",
+          "title": "上页边距不符合规范",
+          "hasClause": true
+        },
+        {
+          "code": "D2",
+          "title": "下页边距不符合规范",
+          "hasClause": true
+        }
       ],
       "note": "左右不该跟着报，测试里断言了这一点"
     },
@@ -38,46 +52,90 @@
       "description": "唯一偏差：页眉与页脚距边界 1.27cm",
       "expected_issue_count": 2,
       "expected_issues": [
-        { "code": "D3", "title": "页眉距边界不符合规范", "hasClause": true },
-        { "code": "D3", "title": "页脚距边界不符合规范", "hasClause": true }
+        {
+          "code": "D3",
+          "title": "页眉距边界不符合规范",
+          "hasClause": true
+        },
+        {
+          "code": "D3",
+          "title": "页脚距边界不符合规范",
+          "hasClause": true
+        }
       ]
     },
     {
       "file": "document_gutter_wrong.docx",
       "description": "唯一偏差：装订线 1cm",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D4", "title": "装订线不符合规范", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D4",
+          "title": "装订线不符合规范",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_no_header.docx",
       "description": "唯一偏差：所有节都没有页眉引用",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D6", "title": "全文没有页眉内容", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D6",
+          "title": "全文没有页眉内容",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_empty_header.docx",
       "description": "唯一偏差：页眉引用了部件，但里面没有文字",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D6", "title": "全文没有页眉内容", "hasClause": true }],
+      "expected_issues": [
+        {
+          "code": "D6",
+          "title": "全文没有页眉内容",
+          "hasClause": true
+        }
+      ],
       "note": "按全文报一条，不逐节报——Word 会给每节都建空的页眉页脚引用，逐节判会连封面一起报"
     },
     {
       "file": "document_footer_text.docx",
       "description": "唯一偏差：页脚里是手打的数字 1，不是 PAGE 域",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D7", "title": "全文没有页码域", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D7",
+          "title": "全文没有页码域",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_even_odd.docx",
       "description": "唯一偏差：settings 开了 evenAndOddHeaders",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D5", "title": "开启了奇偶页不同", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D5",
+          "title": "开启了奇偶页不同",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_toc_manual.docx",
       "description": "唯一偏差：有「目录」标题，但目录条目是手打的",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D9", "title": "目录不是自动生成的域", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D9",
+          "title": "目录不是自动生成的域",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_toc_auto.docx",
@@ -89,20 +147,163 @@
       "file": "document_blank_page.docx",
       "description": "唯一偏差：空段落里带分页符",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D10", "title": "疑似空白页：空段落里带分页符", "hasClause": false }],
-      "note": "空白页在 XML 层面判不准，属惯例提示，不计入规范符合性"
+      "expected_issues": [
+        {
+          "code": "D10",
+          "title": "疑似空白页：空段落里带分页符",
+          "hasClause": false
+        }
+      ],
+      "note": "Word 16 实测只多 1 页、第 2 页仍有正文，并不存在整页空白；报告里已写明这一点，见 docs/research/word-112-acceptance.md"
     },
     {
       "file": "document_sections_same_numbering.docx",
       "description": "唯一偏差：两节页码格式都是 decimal",
       "expected_issue_count": 1,
-      "expected_issues": [{ "code": "D8", "title": "各节页码格式相同，未区分前置部分与正文", "hasClause": true }]
+      "expected_issues": [
+        {
+          "code": "D8",
+          "title": "各节页码格式相同，未区分前置部分与正文",
+          "hasClause": true
+        }
+      ]
     },
     {
       "file": "document_sections_mixed_numbering.docx",
       "description": "合规：两节分别用 upperRoman 与 decimal",
       "expected_issue_count": 0,
       "expected_issues": []
+    },
+    {
+      "file": "document_header_font_wrong.docx",
+      "description": "唯一偏差：篇眉中文字体写成黑体（R2 应为宋体）",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D11",
+          "title": "篇眉字体不符合规范",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_header_size_wrong.docx",
+      "description": "唯一偏差：篇眉字号 12 磅（sz=24）",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D11",
+          "title": "篇眉字号不符合规范",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_header_left_aligned.docx",
+      "description": "唯一偏差：篇眉段落左对齐",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D11",
+          "title": "篇眉未居中",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_footer_font_wrong.docx",
+      "description": "唯一偏差：页码中文字体写成黑体（R3 应为宋体）",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D12",
+          "title": "页码字体不符合规范",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_footer_size_wrong.docx",
+      "description": "唯一偏差：页码字号 12 磅（sz=24）",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D12",
+          "title": "页码字号不符合规范",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_footer_left_aligned.docx",
+      "description": "唯一偏差：页码段落左对齐",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D12",
+          "title": "页码未居中",
+          "hasClause": true
+        }
+      ]
+    },
+    {
+      "file": "document_abstract_header_correct.docx",
+      "description": "合规：全西文篇眉按 R2 的 Abstract 条款用 Times New Roman 10.5 磅居中",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "document_abstract_header_wrong.docx",
+      "description": "唯一偏差：全西文篇眉用了 Arial，不是 R2 要求的 Times New Roman",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D11",
+          "title": "篇眉字体不符合规范",
+          "hasClause": true
+        }
+      ],
+      "note": "按文字是否全为西文近似识别 Abstract 部分；XML 判不出章节归属，这项口径在 docs/rule-notes/page-setup.md 里写明"
+    },
+    {
+      "file": "document_hf_style_inherited.docx",
+      "description": "合规：字体字号居中都写在 styles.xml 的 Header / Footer 样式里，靠 pStyle 继承",
+      "expected_issue_count": 0,
+      "expected_issues": [],
+      "note": "验证检查器真的展开了样式链，不是只看 run 上的显式 rPr"
+    },
+    {
+      "file": "document_no_styles_part.docx",
+      "description": "0 条问题，但没有 styles.xml 且没有显式 rPr / jc，三个维度全部未判定",
+      "expected_issue_count": 0,
+      "expected_issues": [],
+      "note": "这是「压根没查」的对照：报告必须显示完整判定 0 / 2，并在「本次未检查」里逐条列出，不能当成合规"
+    },
+    {
+      "file": "document_no_styles_explicit.docx",
+      "description": "对照：同样没有 styles.xml，但 run 与段落显式写了值，这些维度照样能判",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "document_font_aliases.docx",
+      "description": "合规：字体写成 SimSun / TimesNewRoman（无空格），检查器按别名认",
+      "expected_issue_count": 0,
+      "expected_issues": []
+    },
+    {
+      "file": "document_true_blank_page.docx",
+      "description": "偏差：连续两个空段落各带一个分页符，Word 16 实测共 3 页且第 2 页整页无正文",
+      "expected_issue_count": 1,
+      "expected_issues": [
+        {
+          "code": "D10",
+          "title": "连续分页符造成整页空白",
+          "hasClause": false
+        }
+      ],
+      "note": "本档新增。这是 Word 实机验证逼出来的：单个空段落带分页符并不会造成整页空白，第一档把它和真正的空白页混成一条了"
     }
-  ]
+  ],
+  "second_round_note": "第二档（11/29）通过 styles.xml 的样式链展开判定字体字号与居中：run 的 rPr → 段落 pStyle → basedOn → docDefaults。样式链断了且没有显式值时，该维度标「未判定」而不是报问题；document_no_styles_part.docx 就是「0 条但压根没判」的对照样本。"
 }
