@@ -1,0 +1,618 @@
+{
+    "date":  "2026-11-10",
+    "word_version":  "16.0",
+    "word_build":  "16.0.20527",
+    "os":  "Microsoft Windows NT 10.0.26200.0",
+    "method":  "Documents.Open readonly, no save; effective formatting; in-memory Normal CN font set to 黑体 then discarded",
+    "note":  "本轮样本字节未变（重建路径 SHA-256 前后一致），此文件是 2026-11-10 用 Word 16 重跑的完整读数。changed_normal_cn 与 word-validation.json（2026-10-06）同义：内存里把 Normal 中文字体改成黑体后，若有正文段跟随变化，就记录第 1、2 个正文段的实际中文字体，否则为空数组。fonts_after_normal_cn 始终记录改动后第 1、2 个正文段的实际中文字体，可看出被 run 直接格式挡住因而未跟随的段。与 2026-10-06 那份的差别：多节样本本文件是 8 段，旧文件是 7 段——旧文件漏记了承载首个 sectPr 的空段落，本文件补上了。",
+    "files":  [
+                  {
+                      "file":  "baseline_correct.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "font_ascii_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Arial",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Arial",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Arial",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "font_family_cn_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "楷体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "楷体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "楷体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "楷体",
+                                                    "楷体"
+                                                ]
+                  },
+                  {
+                      "file":  "font_size_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  10.5,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  10.5,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  10.5,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "line_spacing_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  0,
+                                             "spacing":  12
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  0,
+                                             "spacing":  12
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  0,
+                                             "spacing":  12
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "margin_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  56.7,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "multisection_control.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       },
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "multisection_margin_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       },
+                                       {
+                                           "left":  70.85,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "宋体",
+                                                    "宋体"
+                                                ]
+                  },
+                  {
+                      "file":  "style_override_control.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+                                                "黑体",
+                                                "黑体"
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "黑体",
+                                                    "黑体"
+                                                ]
+                  },
+                  {
+                      "file":  "style_override_wrong.docx",
+                      "opened":  true,
+                      "paragraphs":  [
+                                         {
+                                             "text":  "合成格式样本",
+                                             "cn":  "黑体",
+                                             "ascii":  "黑体",
+                                             "size":  16,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第一段。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "完全自建合成正文第二段。",
+                                             "cn":  "楷体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         },
+                                         {
+                                             "text":  "合成第三段 ABC 0123456789。",
+                                             "cn":  "宋体",
+                                             "ascii":  "Times New Roman",
+                                             "size":  12,
+                                             "spacingRule":  1,
+                                             "spacing":  18
+                                         }
+                                     ],
+                      "sections":  [
+                                       {
+                                           "left":  85.05,
+                                           "right":  70.85,
+                                           "top":  70.85,
+                                           "bottom":  70.85
+                                       }
+                                   ],
+                      "changed_normal_cn":  [
+                                                "黑体",
+                                                "楷体"
+                                            ],
+                      "fonts_after_normal_cn":  [
+                                                    "黑体",
+                                                    "楷体"
+                                                ]
+                  }
+              ]
+}

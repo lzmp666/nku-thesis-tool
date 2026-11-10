@@ -54,4 +54,4 @@ python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild
 
 在 Word 新建文档，按基线设置 Normal 中西文字体与字号，设置段落行距和四边页边距，输入 generate.py 的 TEXT 及标题。错误文件只改变表中一项；继承对照不添加 run 直接格式；覆盖错误只对第二正文段中文字体设楷体；多节文件插入下一页分节符后分别设置两节边距。另存 docx。
 
-Word 验证记录见 validation.md。目标环境为 Word 2016+ Windows，目标兼容性不等于实测结论。验证时记录具体版本/build、系统、字体是否安装及每个文件结果；打开无修复提示后检查字体/段落/页面设置和继承行为。未实测范围必须保留 pending。
+Word 验证记录见 validation.md，逐段完整读数见 [word-validation-2026-11-10.json](word-validation-2026-11-10.json)（2026-10-06 那份见 [word-validation.json](word-validation.json)）。目标环境为 Word 2016+ Windows，目标兼容性不等于实测结论。验证时记录具体版本/build、系统、字体是否安装及每个文件结果；打开无修复提示后检查字体/段落/页面设置和继承行为。未实测范围必须保留 pending。

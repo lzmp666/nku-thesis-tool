@@ -58,6 +58,19 @@ Word 16 实测（build `16.0.20527`，`Office16`，只读打开、不保存）�
 
 即继承对照与唯一覆盖在 Word 对象模型里读出的差异，与 README 表格「document.xml 的 p[3]/r[1] 中文字体不匹配」一致。
 
+完整读数另存为 [word-validation-2026-11-10.json](word-validation-2026-11-10.json)（Word 16.0，build `16.0.20527`，10 份样本逐段字体字号行距 + 全部节边距 + 内存改 Normal 后的跟随情况），与 2026-10-06 的 [word-validation.json](word-validation.json) 同体例。
+
+两份数据逐字段比对的结果：8/10 份完全一致；两份多节样本的 `paragraphs` 字段有一处差别——
+
+| | 2026-10-06 | 2026-11-10 |
+| --- | --- | --- |
+| `multisection_control.docx` 段数 | 7 | **8** |
+| `multisection_margin_wrong.docx` 段数 | 7 | **8** |
+
+查 `document.xml` 确认：多节样本的 `w:body` 里有 **8 个 `w:p`**，其中第 5 个是**承载首个 `sectPr`（分节符）的空段落**，文字为空。**旧记录漏记了这一段**（应为 7 段却只有 7 条——即把空段落整条丢掉），本轮记录补上了。其余字段（各段字体字号行距、两节边距、`changed_normal_cn`）两份完全一致，与「样本字节未变」相符。
+
+另外记一个实机坑：**中文版 Word 里 Normal 样式的本地名是「正文」**，按名字取会报「集合所要求的成员不存在」，必须用内置常量 `wdStyleNormal = -1`。
+
 CLI：10/10 样本只读加载成功，退出码 0，stderr 为空，输入 SHA-256 前后一致。加载器不检测格式，不把该结果当格式检测通过。
 
 ## 2026-11-10 重建路径实跑与 `--with-rebuild`
