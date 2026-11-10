@@ -36,7 +36,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```
 
 `Directory.Build.props` 开了 `TreatWarningsAsErrors`，冒出一个警告就是构建失败，别想着先放着。
-基线（2026-11-10，main）：build 0 警告 0 错误，test 430 条全过。这个数会随 main 涨，别写死进代码或断言总数。
+基线（2026-11-10，main）：build 0 警告 0 错误，test 435 条全过。这个数会随 main 涨，别写死进代码或断言总数。
 
 ## 4. 目录边界
 
@@ -58,8 +58,10 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 以下都在仓库根目录、且已经 build 过之后跑。写入型命令的输出目录要先建：`New-Item -ItemType Directory -Force artifacts | Out-Null`。
 
 ```powershell
-# 演示诊断：段落级正确样本 0 条、问题样本 3 条；默认 --scope all 还会附文档级报告（极简正确样本会报 8 处，属页面设置口径不同）
+# 演示诊断：极简正确样本 0 条（但已检查 0 个片段，属「压根没查」）、问题样本 3 条；默认 --scope all 还会附文档级报告（极简样本会报 8 处）
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx
+# 真正走完两级链路的干净样本：段落级已检查 3 个片段且 0 条，文档级完整判定 2/2 且均符合
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_checked_sample.docx
 # 只跑文档级：--scope all|paragraph|document，默认 all 把文档级报告附在段落级后面
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --scope document
 # 写一份带批注和黄色的标注副本（输出目录要先存在，已有文件不覆盖）
@@ -112,7 +114,7 @@ Issue → 分支 → PR，一步不能跳。直接推 `main` 视为没做。
 - [ ] 只改了 issue 允许的目录，没碰 `.github/`、工程配置、`sln`
 - [ ] `dotnet build` 0 警告 0 错误（警告也算失败）
 - [ ] `dotnet test` 全过，新增行为有对应测试
-- [ ] 新样本走 `generate.py` 生成，`manifest.json` 同步更新，没直接提交手改的 docx
+- [ ] 新样本由生成脚本产出（最好能 `--check` 逐字节复现），`manifest.json` 同步更新，没直接提交手改的 docx
 - [ ] 命令是我真跑过的，文档里的参数没有编的
 - [ ] 规则的期望值有出处（条、表、版本），draft 没冒充正式规则
 - [ ] 报告区分了「查了没问题」和「没查」，没查的项有名字
