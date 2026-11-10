@@ -21,11 +21,13 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 ## 运行演示
 
-正确的合成样例应输出 **0 条问题**：
+正确的合成样例在**段落级演示规则**下应输出 **0 条问题**：
 
 ```sh
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_sample.docx
 ```
+
+`analyze` 默认是 `--scope all`，段落级报告之后还会附一份「文档级版式检查报告」。`clean_sample.docx` 是极简合成包，页面设置沿用 Word 默认值（四边 2.54cm、无页眉页脚），所以文档级那段会报 8 处不符合规范。两份报告口径不同，这不是段落级诊断出错。只看段落级加 `--scope paragraph`，只看文档级加 `--scope document`。
 
 已知问题样例应输出 **恰好 3 条诊断**：
 
@@ -70,6 +72,8 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 ## 演示图片
 
 [查看中文 CLI 输出示例](demo-output-zh.svg)。这是根据端到端测试验证的演示结果制作的静态呈现，不是实时屏幕截图，部分中间字段有所省略。完整报告请运行上面的命令。图片只包含合成样例路径和演示结果。
+
+Word 16 VSTO 任务窗格的实机截图和读数见 [Word 16 任务窗格实机截图与读数](word-109-task-pane.md)：[定位联动](word-109-task-pane.png)、[全文总览](word-109-task-pane-overview.png)。这两张是真实屏幕截图、没有裁剪，拍的是插件侧栏与批注窗格，和上面的静态 CLI 输出图不是一回事。
 
 ## Word 打开验证记录（Issue #46）
 
