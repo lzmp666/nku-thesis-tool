@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 using Xunit;
 
@@ -7,6 +8,7 @@ namespace ThesisEngine.Tests;
 public sealed class DemoEndToEndTests
 {
     private const string CleanSample = "tests/fixtures/synthetic/demo/clean_sample.docx";
+    private const string CleanCheckedSample = "tests/fixtures/synthetic/demo/clean_checked_sample.docx";
     private const string KnownIssuesSample = "tests/fixtures/synthetic/demo/known_issues_sample.docx";
     private const string FullThesis = "tests/fixtures/synthetic/full-thesis/synthetic_complete_thesis.docx";
 
@@ -86,6 +88,90 @@ public sealed class DemoEndToEndTests
         Assert.Contains("tables (cell formatting rules are not configured)", result.Output);
         Assert.Contains("images", result.Output);
         Assert.Equal(before, File.ReadAllBytes(sample));
+    }
+
+    // clean_sample.docx 的「0 条」来自「已检查 0 个正文文本片段」，是反面教材；
+    // clean_checked_sample.docx 用来证明检查器确实查过，而且查下来没有问题。
+    // 下面几条把这个区别钉死，防止样本退化回「压根没查」却仍被称为正确样例。
+    [Fact]
+    public async Task CleanCheckedSampleReportsZeroFindingsWithRealParagraphCoverage()
+    {
+        var sample = Path.Combine(FindRepositoryRoot(), CleanCheckedSample);
+        var before = File.ReadAllBytes(sample);
+
+        var result = await RunCli("analyze", "--demo", CleanCheckedSample, "--scope", "paragraph");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Error);
+        Assert.Contains("诊断数量：0", result.Output);
+        Assert.Contains("发现问题：0", result.Output);
+        Assert.Contains("已检查 3 个正文文本片段，涉及 3 个确认正文段落", result.Output);
+        Assert.DoesNotContain("已检查 0 个正文文本片段", result.Output);
+        Assert.DoesNotContain("正文范围未确认", result.Output);
+        Assert.Equal(before, File.ReadAllBytes(sample));
+    }
+
+    [Fact]
+    public async Task CleanCheckedSamplePassesAllDocumentLevelChecks()
+    {
+        var result = await RunCli("analyze", "--demo", CleanCheckedSample, "--scope", "document");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.Error);
+        Assert.Contains("完整判定 2 / 2 个文字段落", result.Output);
+        Assert.Contains("已检查的文档级项目均符合。", result.Output);
+        Assert.DoesNotContain("⚠️ 不符合规范", result.Output);
+    }
+
+    [Fact]
+    public async Task CleanCheckedSampleDefaultScopeCoversBothLevels()
+    {
+        var result = await RunCli("analyze", "--demo", CleanCheckedSample);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("=== 论文格式检查报告 ===", result.Output);
+        Assert.Contains("=== 文档级版式检查报告 ===", result.Output);
+        Assert.Contains("已检查 3 个正文文本片段", result.Output);
+        Assert.Contains("已检查的文档级项目均符合。", result.Output);
+        Assert.DoesNotContain("⚠️ 不符合规范", result.Output);
+    }
+
+    [Fact]
+    public void CleanCheckedSamplePackageKeepsBothLevelPrerequisites()
+    {
+        var path = Path.Combine(FindRepositoryRoot(), CleanCheckedSample);
+        using var archive = ZipFile.OpenRead(path);
+        var names = archive.Entries.Select(entry => entry.FullName).ToArray();
+
+        Assert.Contains("word/styles.xml", names);
+        Assert.Contains("word/header1.xml", names);
+        Assert.Contains("word/footer1.xml", names);
+
+        var document = ReadPart(archive, "word/document.xml");
+        Assert.Contains("Heading1", document);
+        Assert.Contains("w:top=\"2155\"", document);
+        Assert.Contains("w:header=\"1701\"", document);
+        Assert.Contains("PAGE", ReadPart(archive, "word/footer1.xml"));
+        Assert.Contains("第一章 绪论", ReadPart(archive, "word/header1.xml"));
+    }
+
+    [Fact]
+    public async Task LegacyCleanSampleStillShowsZeroCheckedFragments()
+    {
+        var result = await RunCli("analyze", "--demo", CleanSample, "--scope", "paragraph");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("诊断数量：0", result.Output);
+        Assert.Contains("已检查 0 个正文文本片段", result.Output);
+        Assert.Contains("正文范围未确认", result.Output);
+    }
+
+    private static string ReadPart(ZipArchive archive, string partName)
+    {
+        var entry = archive.GetEntry(partName);
+        Assert.NotNull(entry);
+        using var reader = new StreamReader(entry!.Open(), Encoding.UTF8);
+        return reader.ReadToEnd();
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunCli(params string[] arguments)

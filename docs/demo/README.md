@@ -29,6 +29,14 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 `analyze` 默认是 `--scope all`，段落级报告之后还会附一份「文档级版式检查报告」。`clean_sample.docx` 是极简合成包，页面设置沿用 Word 默认值（四边 2.54cm、无页眉页脚），所以文档级那段会报 8 处不符合规范。两份报告口径不同，这不是段落级诊断出错。只看段落级加 `--scope paragraph`，只看文档级加 `--scope document`。
 
+还要留意：这份极简样例的 0 条同时写着「已检查 0 个正文文本片段」，没有可识别的章节边界，那段文本压根没进入检查范围。它是用来讲「0 条不等于干净」的反面教材。想验证检查器确实跑过两级链路、结果又都干净，用 `clean_checked_sample.docx`：
+
+```sh
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_checked_sample.docx
+```
+
+预期同时看到「已检查 3 个正文文本片段，涉及 3 个确认正文段落；诊断数量：0」和文档级「完整判定 2 / 2 个文字段落」「已检查的文档级项目均符合。」。Word 16 整页视图实机截图见 [word-109-clean-checked.png](word-109-clean-checked.png)，读数与生成方式见[合成样例说明](../../tests/fixtures/synthetic/demo/README.md)。
+
 已知问题样例应输出 **恰好 3 条诊断**：
 
 ```sh

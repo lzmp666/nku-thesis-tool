@@ -52,7 +52,15 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_sample.docx
 ```
 
-`analyze` 默认 `--scope all`，段落级报告后还会附一份文档级版式报告。该极简样例沿用 Word 默认页面设置，文档级会报 8 处；只想看段落级加 `--scope paragraph`。
+`analyze` 默认 `--scope all`，段落级报告后还会附一份文档级版式报告。该极简样例沿用 Word 默认页面设置，文档级会报 8 处；只想看段落级加 `--scope paragraph`。注意这份样例的 0 条是和「已检查 0 个正文文本片段」一起出现的，属于「压根没查」，不是合规结论。
+
+想看检查器**真正走完两级链路**且结果都干净，用这一份：
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_checked_sample.docx
+```
+
+它会同时给出「已检查 3 个正文文本片段，诊断 0」和文档级「完整判定 2 / 2、已检查的文档级项目均符合」。样本的生成方式、Word 16 实机读数见[合成样例说明](tests/fixtures/synthetic/demo/README.md)。
 
 含有已知格式差异的合成样例预期得到 **3 条诊断**：
 

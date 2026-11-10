@@ -31,7 +31,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 build 的预期是 `0 个警告 0 个错误`。仓库开了 `TreatWarningsAsErrors`，看到一个警告就是失败，别当成提示。
 
-test 的预期是全过，当前 main 是 **430 条**（2026-11-10）。这个数会随 main 涨；如果你看到明显更少，多半是分支太旧，`git pull` 一下。`AGENTS.md` 第 3 节记着同一条基线，改哪边都要一起改。
+test 的预期是全过，当前 main 是 **435 条**（2026-11-10）。这个数会随 main 涨；如果你看到明显更少，多半是分支太旧，`git pull` 一下。`AGENTS.md` 第 3 节记着同一条基线，改哪边都要一起改。
 
 然后跑两遍演示，这是第一次真正看到引擎在干活：
 
@@ -87,6 +87,14 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 所以 `0 条` 从来不等于「干净」。这条规矩贯穿整个仓库：**报告里必须能分开「查了，没发现问题」和「没查」**。你以后加检查项也一样，不能只报一个 0。
 
 再往下一层：现在这 `0 条` 只说的是段落级演示规则查到的东西。同一份输出后面还挂着文档级版式报告，那里查的是纸张、页边距、页眉页脚、页码、目录、空白页，和段落级不是一回事。「0 条」既可能是「没查」，也可能只是「这一层没查到」，得看报告写的是哪一层。
+
+正面对照也备了一份，跑一遍就知道「查过、而且没问题」长什么样：
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_checked_sample.docx
+```
+
+它的段落级写「已检查 3 个正文文本片段，涉及 3 个确认正文段落」且 `诊断数量：0`，文档级写「完整判定 2 / 2 个文字段落」「已检查的文档级项目均符合。」。两份样本摆在一起看，比只记一句「0 条不等于干净」直观。样本怎么生成、Word 16 实机读数是多少，写在 [tests/fixtures/synthetic/demo/README.md](../tests/fixtures/synthetic/demo/README.md)。
 
 ### 实际要多久
 
@@ -173,7 +181,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 `check_branch.ps1`、`push_branch.ps1`、`push_pr.ps1` 这些是早期直连 GitHub API 的临时脚本，思路可以看——先取 ref 拿 sha，再建分支、推内容。但里面写死了某台机器上的 git 路径和某个具体分支名，换台电脑直接跑会报找不到 `git.exe`。
 
-所以：**照思路，不照抄**。日常用上面的 `git` 命令就够了。哪天要把它改成通用脚本，单独开个 issue，别塞进别的 PR。
+所以：**照思路，不照抄**。日常用上面的 `git` 命令就够了。通用化已经单独开在 [#132](https://github.com/lzmp666/nku-thesis-tool/issues/132) 跟踪，别塞进别的 PR。
 
 ---
 
@@ -298,6 +306,6 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 5. 这份文档的维护
 
-实测环境：Windows 11 + .NET SDK 10.0.401，2026-11-09；2026-11-10 按 main 复核了命令、430 条基线和 `--scope all` 的实际输出，补了 Word 16 任务窗格实机截图。
+实测环境：Windows 11 + .NET SDK 10.0.401，2026-11-09；2026-11-10 按 main 复核了命令、435 条基线和 `--scope all` 的实际输出，补了 Word 16 任务窗格实机截图，以及一份两级链路都走完的干净样本。
 
 命令、测试数、报错原文都会过期。改 `AGENTS.md` 或这份文档时，命令必须当场跑一遍再写进去，别凭印象改参数。发现文档和实际输出对不上，直接开 issue——文档写错比没写更费时间。
