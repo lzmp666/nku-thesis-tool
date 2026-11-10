@@ -31,7 +31,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 build 的预期是 `0 个警告 0 个错误`。仓库开了 `TreatWarningsAsErrors`，看到一个警告就是失败，别当成提示。
 
-test 的预期是全过，当前 main 是 **362 条**（2026-11-09）。这个数会随 main 涨；如果你看到明显更少，多半是分支太旧，`git pull` 一下。
+test 的预期是全过，当前 main 是 **430 条**（2026-11-10）。这个数会随 main 涨；如果你看到明显更少，多半是分支太旧，`git pull` 一下。`AGENTS.md` 第 3 节记着同一条基线，改哪边都要一起改。
 
 然后跑两遍演示，这是第一次真正看到引擎在干活：
 
@@ -42,7 +42,9 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ### 第一个应该长这样
 
-下面两块**只是关键行摘录**。实际输出还会打印报告头（`模式`、`输入文件`、`状态`）、`未覆盖范围`、每条问题后面的 `修复级别` 和 `说明`，以及最后一行 `提示`。多出这几行是正常的，逐行比对时只看下面这些字段。
+下面两块**只是段落级报告的关键行摘录**。实际输出还会打印报告头（`模式`、`输入文件`、`状态`）、`未覆盖范围`、每条问题后面的 `修复级别` 和 `说明`，以及最后一行 `提示`。多出这几行是正常的，逐行比对时只看下面这些字段。
+
+还有一整段不在摘录里：`analyze` 默认 `--scope all`，段落级报告之后会另起一段「文档级版式检查报告」。正确样例是极简合成包，页面设置沿用 Word 默认值（四边 2.54cm、无页眉页脚），所以那段会报 8 处不符合规范。这 8 处和上面的 `诊断数量：0` 不是同一套检查，别当成跑挂了。只跑段落级用 `--scope paragraph`，只跑文档级用 `--scope document`。
 
 ```
 诊断数量：0
@@ -75,7 +77,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 对上了，就算跑通了。
 
-对不上分两种：**只是多出几行**，那是上面说的报告头，不用管；**关键的几个数字不对**（`诊断数量` 不是 0 或 3、`期望/实际` 对不上、`已检查范围` 全是 0 而诊断却是 3），先看第 4 节的环境问题，环境没问题再开 issue 把输出贴上去。
+对不上分三种：**只是多出几行**，那是报告头和后面附的文档级报告，不用管；**关键的几个数字不对**（`诊断数量` 不是 0 或 3、`期望/实际` 对不上、`已检查范围` 全是 0 而诊断却是 3），先看第 4 节的环境问题，环境没问题再开 issue 把输出贴上去；**段落级对上了、文档级却报了一串**，看上面那段说明，属于两个口径。
 
 
 ### 一个必须看懂的地方
@@ -83,6 +85,8 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 第一个样本出 `0 条`，同时写着 **「已检查 0 个正文文本片段」**。这两句话要一起读：那个文件里没有可识别的正文起始标题，唯一一段文本被保留为「未知」，压根没进入检查范围。
 
 所以 `0 条` 从来不等于「干净」。这条规矩贯穿整个仓库：**报告里必须能分开「查了，没发现问题」和「没查」**。你以后加检查项也一样，不能只报一个 0。
+
+再往下一层：现在这 `0 条` 只说的是段落级演示规则查到的东西。同一份输出后面还挂着文档级版式报告，那里查的是纸张、页边距、页眉页脚、页码、目录、空白页，和段落级不是一回事。「0 条」既可能是「没查」，也可能只是「这一层没查到」，得看报告写的是哪一层。
 
 ### 实际要多久
 
@@ -93,11 +97,11 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 | `git clone`（仓库 7 MB） | 27 秒 |
 | `dotnet restore` | 5 秒 |
 | `dotnet build` | 8 秒 |
-| `dotnet test`（362 条） | 20 秒 |
+| `dotnet test`（当时 362 条） | 20 秒 |
 | 两遍 `analyze --demo` | 3 秒 |
 | 合计 | **63 秒** |
 
-这些数字单机单次采样，上下浮动几秒很正常，别拿来当性能基准。
+这些数字单机单次采样，上下浮动几秒很正常，别拿来当性能基准。表里的测试条数是 2026-11-09 那次实测当时的 main，不是后来的基线，不跟着改。
 
 真正该看的是墙钟：2026-11-10 让一个完全不了解这个仓库的会话，只拿着这份文件从零走了一遍——从敲 `git clone` 到两个 demo 跑完 **95 秒**，算上读文档和踩 clone 证书坑，总共 **2 分 02 秒**。离十分钟还远。
 
@@ -265,7 +269,12 @@ $c = (Select-String -Path artifacts/known/word/comments.xml -Pattern '<comment '
 
 **验证 VSTO 插件**（任务窗格侧）
 
-按 [src/ThesisAddIn.VSTO/README.md](../src/ThesisAddIn.VSTO/README.md) 做本机签名和当前用户注册，重启 Word，打开一份合成 `.docx`，顶部会出现「论文格式检查」功能区。验收表在 [docs/demo/word-acceptance.md](demo/word-acceptance.md)。
+按 [src/ThesisAddIn.VSTO/README.md](../src/ThesisAddIn.VSTO/README.md) 做本机签名和当前用户注册，重启 Word，打开一份合成 `.docx`，顶部会出现「论文格式检查」功能区。验收表在 [docs/demo/word-acceptance.md](demo/word-acceptance.md)，任务窗格的实机截图和读数在 [docs/demo/word-109-task-pane.md](demo/word-109-task-pane.md)。
+
+两个本机踩过的坑：
+
+- `Word.Application` 这个 COM 名可能被 WPS 注册走。先看 `$w.Path`，如果指向 `wps.exe` 所在目录，那 `New-Object -ComObject Word.Application` 拿到的是 WPS 而不是 Word（`Version=14.0`、`Name` 仍显示 `Microsoft Word`）。这时候别拿 COM 的 `PageSetup`、`Field` 读数去写 Word 验收记录，直接启动 `Office16\WINWORD.EXE` 打开文档，按窗口标题区分。
+- 插件直接改**当前打开的那份文档**。要验就先把合成样本复制到临时目录再打开，别拿仓库夹具直接跑「分析当前文档」；关掉时选不保存，收尾核对原文件哈希。
 
 这是两套不同的写入边界：CLI 生成新文件，插件直接改当前打开的文档、改动可撤销、保存由作者自己决定。写验收记录时别把两边的结论混着写。
 
@@ -289,6 +298,6 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 5. 这份文档的维护
 
-实测环境：Windows 11 + .NET SDK 10.0.401，2026-11-09。
+实测环境：Windows 11 + .NET SDK 10.0.401，2026-11-09；2026-11-10 按 main 复核了命令、430 条基线和 `--scope all` 的实际输出，补了 Word 16 任务窗格实机截图。
 
 命令、测试数、报错原文都会过期。改 `AGENTS.md` 或这份文档时，命令必须当场跑一遍再写进去，别凭印象改参数。发现文档和实际输出对不上，直接开 issue——文档写错比没写更费时间。

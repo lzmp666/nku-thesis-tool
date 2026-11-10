@@ -46,11 +46,13 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 ## 运行演示
 
-合成的正确样例预期得到 **0 条诊断**：
+合成的正确样例在段落级演示规则下预期得到 **0 条诊断**：
 
 ```powershell
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/clean_sample.docx
 ```
+
+`analyze` 默认 `--scope all`，段落级报告后还会附一份文档级版式报告。该极简样例沿用 Word 默认页面设置，文档级会报 8 处；只想看段落级加 `--scope paragraph`。
 
 含有已知格式差异的合成样例预期得到 **3 条诊断**：
 

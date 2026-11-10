@@ -58,7 +58,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 以下都在仓库根目录、且已经 build 过之后跑。写入型命令的输出目录要先建：`New-Item -ItemType Directory -Force artifacts | Out-Null`。
 
 ```powershell
-# 演示诊断：正确样本 0 条，问题样本 3 条
+# 演示诊断：段落级正确样本 0 条、问题样本 3 条；默认 --scope all 还会附文档级报告（极简正确样本会报 8 处，属页面设置口径不同）
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx
 # 只跑文档级：--scope all|paragraph|document，默认 all 把文档级报告附在段落级后面
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --demo tests/fixtures/synthetic/demo/known_issues_sample.docx --scope document
