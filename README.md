@@ -44,6 +44,24 @@ dotnet build NkuThesisTool.sln --configuration Release --no-restore
 dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```
 
+## 聊天模型配置（chat 子命令）
+
+`chat` 子命令回答论文**格式**问题，支持离线规则与多个免费模型通道。格式范围由代码强制约束，API Key 只从环境变量读取（禁止硬编码）。
+
+```powershell
+# 离线模式，无需任何 Key
+dotnet run --project src/ThesisEngine.Cli -- chat --local 一级标题用几号字
+
+# 模型通道：先在环境变量配置至少一个免费 Key，例如
+$env:DEEPSEEK_API_KEY = "sk-xxxx"
+dotnet run --project src/ThesisEngine.Cli -- chat 一级标题用几号字
+
+# 查看帮助与配置示例
+dotnet run --project src/ThesisEngine.Cli -- chat --help
+```
+
+默认配置 `src/ThesisEngine.Cli/chat.models.json` 已列出 3 个免费通道（SiliconFlow / DeepSeek / Kimi）加 1 个 OpenAI 兼容接口模板；主通道失败会自动降级到另外 2 个免费通道。完整说明与排查见 [聊天模型配置](docs/chat-models.md)。
+
 ## 运行演示
 
 合成的正确样例预期得到 **0 条诊断**：

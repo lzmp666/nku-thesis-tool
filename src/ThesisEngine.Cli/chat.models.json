@@ -1,0 +1,41 @@
+{
+  "allowLocalFallback": false,
+  "providers": [
+    {
+      "name": "siliconflow",
+      "label": "硅基流动 SiliconFlow（免费额度）",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "model": "deepseek-ai/DeepSeek-V3",
+      "apiKeyEnvVar": "SILICONFLOW_API_KEY",
+      "enabled": true,
+      "priority": 1
+    },
+    {
+      "name": "deepseek",
+      "label": "DeepSeek（免费额度）",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKeyEnvVar": "DEEPSEEK_API_KEY",
+      "enabled": true,
+      "priority": 2
+    },
+    {
+      "name": "moonshot",
+      "label": "Kimi / Moonshot（免费额度）",
+      "baseUrl": "https://api.moonshot.cn/v1",
+      "model": "moonshot-v1-8k",
+      "apiKeyEnvVar": "MOONSHOT_API_KEY",
+      "enabled": true,
+      "priority": 3
+    },
+    {
+      "name": "openai-compatible",
+      "label": "OpenAI 兼容接口（自定义 base_url + model）",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "apiKeyEnvVar": "OPENAI_API_KEY",
+      "enabled": false,
+      "priority": 4
+    }
+  ]
+}
