@@ -1,65 +1,101 @@
-$git = "C:\Users\guo11\AppData\Local\GitHubDesktop\app-3.6.6\resources\app\git\cmd\git.exe"
-$cred = "protocol=https`nhost=github.com`n`n" | & $git credential fill 2>&1 | Out-String
-$pass = (($cred -split "`n" | Where-Object { $_ -like "password=*" }) -replace "password=","").Trim()
-$h = @{ Authorization = "Bearer $pass"; Accept = "application/vnd.github+json"; "User-Agent" = "Guoooooi" }
-
-$repo = "lzmp666/nku-thesis-tool"
-
-# 1. 获取 main 的 commit sha 和 tree sha
-$ref = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/ref/heads/main" -Headers $h
-$mainSha = $ref.object.sha
-Write-Host "main commit: $mainSha"
-
-$commit = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/commits/$mainSha" -Headers $h
-$treeSha = $commit.tree.sha
-Write-Host "base tree: $treeSha"
-
-# 2. 要上传的文件列表
-$files = @(
-    "src/ThesisEngine.Core/IChatService.cs",
-    "src/ThesisEngine.Core/LocalRuleChatService.cs",
-    "src/ThesisEngine.Cli/ChatCommand.cs",
-    "src/ThesisEngine.Cli/Program.cs",
-    "tests/ThesisEngine.Tests/ChatCommandTests.cs",
-    "tests/ThesisEngine.Tests/ThesisEngine.Tests.csproj"
+# Upload local files through the GitHub data API and open a PR from a new ref.
+# This is a fallback for machines where a normal git push is blocked; the daily
+# workflow is plain `git switch` / `git push`. -DryRun performs GETs only.
+#
+#   .\push_pr.ps1 -Branch feature/xxx -Files @('README.md') `
+#       -CommitMessage 'docs: update readme' -Title 'docs: update readme' `
+#       -Body 'Closes #123' -DryRun
+[CmdletBinding()]
+param(
+    [string]$Repo = $env:NKU_THESIS_REPO,
+    [string]$Branch = $env:NKU_THESIS_BRANCH,
+    [string]$Base = "main",
+    [string[]]$Files = @(),
+    [string]$CommitMessage = "",
+    [string]$Title = "",
+    [string]$Body = "",
+    [switch]$DryRun
 )
 
-# 3. 为每个文件创建 blob
-$treeEntries = @()
-foreach ($file in $files) {
-    $bytes = [IO.File]::ReadAllBytes($file)
-    $content = [Convert]::ToBase64String($bytes)
-    $blobBody = @{ content = $content; encoding = "base64" } | ConvertTo-Json
-    $blob = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/blobs" -Method Post -Headers $h -Body $blobBody -ContentType "application/json; charset=utf-8"
-    Write-Host "blob: $file -> $($blob.sha)"
-    $treeEntries += @{ path = $file; mode = "100644"; type = "blob"; sha = $blob.sha }
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "scripts\Invoke-GitHubApi.ps1")
+
+$git = Get-NkuGit
+$slug = Get-NkuRepoSlug -Repo $Repo -Git $git
+$name = Get-NkuBranch -Branch $Branch -Git $git -Base $Base -ForbidBase
+$headers = Get-NkuGitHubHeaders -Git $git
+
+$paths = @($Files | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($paths.Count -eq 0) { throw "Pass at least one existing file with -Files." }
+# The API needs repo-relative tree paths. Resolve each file and reject anything
+# outside the repository instead of sending an absolute Windows path to GitHub.
+$repoRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd("\")
+$treePaths = @()
+foreach ($path in $paths) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $path" }
+    $full = (Resolve-Path -LiteralPath $path).Path
+    if (-not $full.StartsWith($repoRoot + "\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "File is outside the repository: $path"
+    }
+    $treePaths += $full.Substring($repoRoot.Length + 1) -replace "\\", "/"
+}
+if (-not $DryRun) {
+    if ([string]::IsNullOrWhiteSpace($CommitMessage)) { throw "Pass -CommitMessage before a real run." }
+    if ([string]::IsNullOrWhiteSpace($Title)) { throw "Pass -Title before a real run." }
+    if ([string]::IsNullOrWhiteSpace($Body)) { throw "Pass -Body before a real run." }
 }
 
-# 4. 创建新 tree
-$treeBody = @{ base_tree = $treeSha; tree = $treeEntries } | ConvertTo-Json -Depth 5
-$newTree = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/trees" -Method Post -Headers $h -Body $treeBody -ContentType "application/json; charset=utf-8"
-Write-Host "new tree: $($newTree.sha)"
+$baseRef = Invoke-NkuGitHubApi -Path "repos/$slug/git/ref/heads/$Base" -Method Get -Headers $headers
+$baseSha = $baseRef.object.sha
+$commit = Invoke-NkuGitHubApi -Path "repos/$slug/git/commits/$baseSha" -Method Get -Headers $headers
+Write-Host "base:      $Base $baseSha (tree $($commit.tree.sha))"
 
-# 5. 创建 commit
+$treeEntries = @()
+for ($i = 0; $i -lt $paths.Count; $i++) {
+    $path = $paths[$i]
+    $bytes = [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $path).Path)
+    $blobBody = @{ content = [Convert]::ToBase64String($bytes); encoding = "base64" }
+    $blob = Invoke-NkuGitHubApi -Path "repos/$slug/git/blobs" -Method Post -Headers $headers -Body $blobBody -DryRun:$DryRun
+    $blobSha = if ($null -eq $blob) { "<pending-blob>" } else { $blob.sha }
+    $treeEntries += @{
+        path = $treePaths[$i]
+        mode = "100644"
+        type = "blob"
+        sha  = $blobSha
+    }
+    Write-Host "file:      $($treePaths[$i]) ($($bytes.Length) bytes) -> $blobSha"
+}
+
+$treeBody = @{ base_tree = $commit.tree.sha; tree = $treeEntries }
+$newTree = Invoke-NkuGitHubApi -Path "repos/$slug/git/trees" -Method Post -Headers $headers -Body $treeBody -DryRun:$DryRun
+$treeSha = if ($null -eq $newTree) { "<pending-tree>" } else { $newTree.sha }
+
 $commitBody = @{
-    message = "feat(chat): add AI chat command for format questions (#96)`n`n- Add IChatService interface and LocalRuleChatService implementation`n- Add chat CLI command that answers format-related questions`n- Add unit tests for ChatCommand and LocalRuleChatService`n- First phase: local rule matching, future: replace with LLM"
-    tree = $newTree.sha
-    parents = @($mainSha)
-} | ConvertTo-Json
-$newCommit = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/commits" -Method Post -Headers $h -Body $commitBody -ContentType "application/json; charset=utf-8"
-Write-Host "new commit: $($newCommit.sha)"
+    message = $CommitMessage
+    tree    = $treeSha
+    parents = @($baseSha)
+}
+$newCommit = Invoke-NkuGitHubApi -Path "repos/$slug/git/commits" -Method Post -Headers $headers -Body $commitBody -DryRun:$DryRun
+$commitSha = if ($null -eq $newCommit) { "<pending-commit>" } else { $newCommit.sha }
 
-# 6. 创建分支
-$branchBody = @{ ref = "refs/heads/feature/issue-96-chat"; sha = $newCommit.sha } | ConvertTo-Json
-$branch = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/refs" -Method Post -Headers $h -Body $branchBody -ContentType "application/json; charset=utf-8"
-Write-Host "branch: $($branch.ref)"
+$existing = $null
+try {
+    $existing = Invoke-NkuGitHubApi -Path "repos/$slug/git/ref/heads/$name" -Method Get -Headers $headers
+} catch {
+    # A missing ref is the expected case for a new branch.
+}
+if ($null -eq $existing -or -not $existing.object.sha) {
+    $refBody = @{ ref = "refs/heads/$name"; sha = $commitSha }
+    Invoke-NkuGitHubApi -Path "repos/$slug/git/refs" -Method Post -Headers $headers -Body $refBody -DryRun:$DryRun | Out-Null
+    Write-Host "ref:       refs/heads/$name"
+} else {
+    Write-Host "ref:       $name already exists at $($existing.object.sha); not overwritten"
+}
 
-# 7. 创建 PR
-$prBody = @{
-    title = "feat(chat): add AI chat command for format questions (#96)"
-    head = "feature/issue-96-chat"
-    base = "main"
-    body = "## 关联 Issue`nCloses #96`n`n## 改动内容`n- 新增 IChatService 接口和 LocalRuleChatService 本地规则实现`n- 新增 chat 命令，用户问格式问题，AI 回答`n- 新增单元测试`n`n## 验收标准`n- 问一级标题用几号字，能回答黑体三号`n- 问正文用什么字体，能回答宋体小四`n- 问非格式问题，礼貌拒绝`n- Release build 0 错误，测试通过`n`n## 后续`n- 第一阶段先做本地规则匹配，后续替换为外接免费大模型"
-} | ConvertTo-Json -Depth 3
-$pr = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/pulls" -Method Post -Headers $h -Body $prBody -ContentType "application/json; charset=utf-8"
+$prBody = @{ title = $Title; head = $name; base = $Base; body = $Body }
+$pr = Invoke-NkuGitHubApi -Path "repos/$slug/pulls" -Method Post -Headers $headers -Body $prBody -DryRun:$DryRun
+if ($DryRun) {
+    Write-Host "dry-run complete: no blob/tree/commit/ref/PR written"
+    return
+}
 Write-Host "PR #$($pr.number): $($pr.html_url)"

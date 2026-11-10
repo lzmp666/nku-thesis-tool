@@ -179,9 +179,24 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 
 ### 关于根目录那几个 .ps1
 
-`check_branch.ps1`、`push_branch.ps1`、`push_pr.ps1` 这些是早期直连 GitHub API 的临时脚本，思路可以看——先取 ref 拿 sha，再建分支、推内容。但里面写死了某台机器上的 git 路径和某个具体分支名，换台电脑直接跑会报找不到 `git.exe`。
+`check_branch.ps1`、`push_branch.ps1`、`push_pr.ps1` 是早期直连 GitHub API 的临时脚本，思路可以看——先取 ref 拿 sha，再建分支、推内容。日常用上面的 `git` 命令就够了，这三个只在 `git push` 被网络挡住时当备用。
 
-所以：**照思路，不照抄**。日常用上面的 `git` 命令就够了。通用化已经单独开在 [#132](https://github.com/lzmp666/nku-thesis-tool/issues/132) 跟踪，别塞进别的 PR。
+它们已经通用化过，不再写死某台机器的 `git.exe` 路径或某个分支名：
+
+- `git` 从 `PATH` 解析；仓库默认读 `origin`，也可用 `-Repo` 或 `NKU_THESIS_REPO` 覆盖；分支默认取当前分支，也可用 `-Branch` 或 `NKU_THESIS_BRANCH` 覆盖。
+- 凭据仍走 `git credential fill`，不落盘。公共部分在 `scripts/Invoke-GitHubApi.ps1`。
+- `check_branch.ps1` 只读。`push_branch.ps1`、`push_pr.ps1` 加 `-DryRun` 后只发 GET，会在屏幕上列出「本来要 POST 什么」，不建分支、不传 blob、不开 PR；`push_pr.ps1` 真正执行时必须显式给 `-Files`、`-CommitMessage`、`-Title`、`-Body`。
+- `push_branch.ps1` 会先查目标 ref，已存在就不再创建；`push_pr.ps1` 不会覆盖已有 ref。
+
+先在本机验一遍再考虑真跑：
+
+```powershell
+.\check_branch.ps1
+.\push_branch.ps1 -Branch feature/issue-96-chat -DryRun
+.\push_pr.ps1 -Branch feature/issue-96-chat -Files @('README.md') -DryRun
+```
+
+`-DryRun` 的输出里不应该出现「created」或 PR 链接；远端有没有变化，可以再跑一次 `.\check_branch.ps1 -Branch <名字>` 对照。[#132](https://github.com/lzmp666/nku-thesis-tool/issues/132) 第 1 项即这条，其余技术债仍在那条里跟踪。
 
 ---
 
@@ -273,7 +288,7 @@ $c = (Select-String -Path artifacts/known/word/comments.xml -Pattern '<comment '
 
 期望输出 `高亮 3 处，批注 3 条`。这只证明高亮和批注写进去了，证明不了 Word 里显示得对不对，最终还得用 Word 看一眼。
 
-> `artifacts/` 下的东西不进版本控制：`.gitignore` 里有 `*.docx`，`git status` 看不到刚生成的文件是正常的，`ls artifacts/` 能看到就是生成了。
+> `artifacts/` 不是整目录忽略：`.gitignore` 只忽略 `*.docx`。所以标注副本、`apply-*` 的输出在 `git status` 里看不到，但 `structure --report` 的 `.json`、上面解压出来的 `.xml` 仍会显示成未跟踪文件。跑完把临时产物删掉，别提交；`ls artifacts/` 能看到文件就是生成了。
 
 **验证 VSTO 插件**（任务窗格侧）
 
