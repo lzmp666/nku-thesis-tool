@@ -124,17 +124,27 @@ def build(config):
     return doc
 
 
-def generate(directory):
+def build_bytes(config):
+    """返回该样本的完整 .docx 字节。重建路径，需要 python-docx。
+
+    与其它生成器的 build_bytes() 同名同义，便于统一校验脚本按同一套方式调用。
+    """
     _require_docx()
+    stream = io.BytesIO()
+    build(config).save(stream)
+    buffer = io.BytesIO()
+    with ZipFile(stream) as source, ZipFile(buffer, "w") as target:
+        for part in sorted(source.namelist()):
+            item = ZipInfo(part, date_time=FIXED_TIME)
+            item.compress_type = ZIP_DEFLATED
+            target.writestr(item, source.read(part))
+    return buffer.getvalue()
+
+
+def generate(directory):
     directory.mkdir(parents=True, exist_ok=True)
     for name, config in SAMPLES.items():
-        stream = io.BytesIO()
-        build(config).save(stream)
-        with ZipFile(stream) as source, ZipFile(directory / (name + ".docx"), "w") as target:
-            for part in sorted(source.namelist()):
-                item = ZipInfo(part, date_time=FIXED_TIME)
-                item.compress_type = ZIP_DEFLATED
-                target.writestr(item, source.read(part))
+        (directory / (name + ".docx")).write_bytes(build_bytes(config))
 
 
 def _attr(element, name):
