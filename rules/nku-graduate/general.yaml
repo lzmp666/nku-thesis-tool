@@ -27,6 +27,10 @@ meta:
   verified_date: "2026-10-14"
   approver: null           # 审核通过后填写负责人 GitHub 用户名
   approved_date: null
+  analysis:                # #111 分析引擎开关；不改变规范值本身
+    report:
+      default: true        # true=逐条报告；false=只计数不逐条列出
+      suppress: []         # 需要静默的规则组，例如 [toc.entries]；仍会在覆盖表标「未检查/已实现」
 
 sources:
   - id: S2026
@@ -63,6 +67,7 @@ sources:
 
 rules:
   page_setup:                        # R1 | 4.1 表4.1
+    id: R1
     scope: 全文档所有节
     source: {src: S1, clause: "4.1 表4.1"}
     original: "纸张 A4（210×297，90g规格），幅面白色；页面设置 上、下3.8cm，左、右3.2cm，页眉、页脚3.0cm，装订线0cm"
@@ -73,6 +78,7 @@ rules:
     note: "页眉/页脚3.0cm 与 Word UI 对应关系待确认（T5）"
 
   header:                            # R2 | 4.1 表4.1 + 3.4
+    id: R2
     scope: 篇眉（从中文摘要开始的页眉）
     source: {src: S1, clause: "4.1 表4.1；3.4"}
     original: "篇眉 宋体10.5磅（或五号）居中；Abstract部分用Times New Roman字体10.5磅（或五号）"
@@ -84,6 +90,7 @@ rules:
     spacing_rule_original: "篇眉从中文摘要开始，内容与该部分的标题相同；论文页眉奇偶页相同，各部分首页也要有页眉"
 
   page_number:                       # R3 | 4.1 表4.1 + 3.4
+    id: R3
     scope: 页码
     source: {src: S1, clause: "4.1 表4.1；3.4"}
     original: "页码 宋体10.5磅（或五号）居中；页码从第一章（引言）开始按阿拉伯数字连续编排，之前的部分用大写罗马数字单独编排"
@@ -94,6 +101,7 @@ rules:
     numbering: {front_matter: upper_roman, body: arabic, body_starts_at: 第一章（引言）}
 
   abstract_cn:                       # R4 | 4.5 表4.4
+    id: R4
     scope: 中文摘要
     source: {src: S1, clause: "4.5 表4.4"}
     title:
@@ -115,6 +123,7 @@ rules:
       keyword_label_bold: true       # “关键词”三字加粗
 
   abstract_en:                       # R5 | 4.5 表4.4
+    id: R5
     scope: 英文摘要（Abstract）
     source: {src: S1, clause: "4.5 表4.4"}
     title:
@@ -136,6 +145,7 @@ rules:
       keyword_label_bold: true
 
   toc:                               # R6 | 4.6 表4.5
+    id: R6
     scope: 目录
     source: {src: S1, clause: "4.6 表4.5"}
     title:
@@ -181,6 +191,7 @@ rules:
     scope: 正文各级标题
     source: {src: S1, clause: "4.7 表4.6"}
     chapter:                         # R7 章标题
+      id: R7
       original: "黑体16磅（或三号）加粗居左，单倍行距，段前24磅，段后18磅，章序号与章题目间空一个汉字符。模式二加粗居中。"
       font_cn: 黑体
       size_pt: 16
@@ -190,6 +201,7 @@ rules:
       line_spacing: {rule: single}
       spacing: {before_pt: 24, after_pt: 18}
     level1:                          # R8 一级标题
+      id: R8
       original: "黑体14磅（或四号）加粗居左，单倍行距，段前24磅，段后6磅，序号与题名间空一个汉字符。模式二加粗居中。"
       font_cn: 黑体
       size_pt: 14
@@ -199,6 +211,7 @@ rules:
       line_spacing: {rule: single}
       spacing: {before_pt: 24, after_pt: 6}
     level2:                          # R9 二级标题（13磅无对应中文字号名）
+      id: R9
       original: "黑体13磅居左，单倍行距，段前12磅，段后6磅，序号与题名间空一个汉字符。模式二左缩进2个汉字"
       font_cn: 黑体
       size_pt: 13
@@ -209,6 +222,7 @@ rules:
       spacing: {before_pt: 12, after_pt: 6}
       indent_chars_mode2: 2
     level3:                          # R10 三级标题
+      id: R10
       original: "黑体12磅（或小四）居左，单倍行距，段前12磅，段后6磅，序号与题名间空一个汉字符。模式二左缩进2个汉字"
       font_cn: 黑体
       size_pt: 12
@@ -220,6 +234,7 @@ rules:
       indent_chars_mode2: 2
 
   body_text:                         # R11 | 4.7 表4.6 —— v1 核心（#43 已按2026版核对）
+    id: R11
     scope: 正文段落文字
     source: {src: S2026, clause: "4.7 表4.6"}
     demo_coverage: "Demo 仅检字体/字号；两端对齐/首行缩进/行距/段前段后列为未检查"
@@ -241,6 +256,7 @@ rules:
     scope: 图序图题、表序表题
     source: {src: S1, clause: "4.7 表4.6"}
     caption:
+      id: R12
       original_figure: "图序、图题 置于图的下方，宋体10.5磅（或五号）居中，单倍行距，段前6磅，段后12磅，图序与图题文字之间空一个汉字符宽度"
       original_table: "表序、表题 置于表的上方，宋体10.5磅（或五号）居中，单倍行距，段前6磅，段后6磅，表序与表题文字之间空一个汉字符宽度"
       font_cn: 宋体
@@ -250,6 +266,7 @@ rules:
       line_spacing: {rule: single}
       spacing: {figure: {before_pt: 6, after_pt: 12}, table: {before_pt: 6, after_pt: 6}}
     equation:                        # R13 表达式
+      id: R13
       original: "序号加圆括号，Times New Roman10.5磅（或五号），右对齐"
       font_western: Times New Roman
       size_pt: 10.5
@@ -258,6 +275,7 @@ rules:
     v1_check: false                  # 依赖图表识别，建议 v1 后再检
 
   references:                        # R14 | 4.8 表4.7
+    id: R14
     scope: 参考文献
     source: {src: S1, clause: "4.8 表4.7"}
     original: "标题要求同各章标题。文字部分：宋体10.5磅（或五号），英文用Times New Roman字体10.5磅（或五号），固定值行距16磅，段前段后0磅"
@@ -269,6 +287,7 @@ rules:
     heading: same_as_chapter         # 标题要求同各章标题（R7）
 
   appendix:                          # R15 | 4.8 表4.7
+    id: R15
     scope: 附录
     source: {src: S1, clause: "4.8 表4.7"}
     original: "文字部分：宋体12磅（或小四），英文用Times New Roman字体12磅（或小四），两端对齐书写，段落首行左缩进2个汉字符。固定值行距20磅（段落中有数学表达式时，可根据表达需要设置该段的行距），段前0磅，段后0磅"
@@ -282,6 +301,7 @@ rules:
     heading: same_as_chapter
 
   symbol_table_and_cv:               # R16 | 4.8 表4.7
+    id: R16
     scope: 符号/标志/缩略语注释表；个人简历、在学期间发表的学术论文与研究成果
     source: {src: S1, clause: "4.8 表4.7"}
     original: "文字部分：宋体10.5磅（或五号），英文用Times New Roman字体10.5磅（或五号），固定值行距16磅，段前段后0磅"
@@ -293,6 +313,7 @@ rules:
     heading: same_as_chapter
 
   acknowledgement:                   # R17 | 4.8 表4.7
+    id: R17
     scope: 勘误页、致谢
     source: {src: S1, clause: "4.8 表4.7"}
     original: "文字部分仿宋12磅（或小四），固定值行距16磅，段前段后0磅"
@@ -304,6 +325,7 @@ rules:
     heading: same_as_chapter
 
   cover:                             # R18 | 4.2/4.4 —— 仅记录，建议 v1 跳过
+    id: R18
     v1_check: false                  # 封面已有固定版式，只须提供有关内容（RFC-6）
     source: {src: S1, clause: "4.2 表4.2；4.4 表4.3"}
     chinese_cover:
