@@ -14,7 +14,7 @@
 ## 怎么重建
 
 ```bash
-python generate.py --check   # 重建两份并与磁盘逐部件比对，不写盘
+python generate.py --check   # 重建两份并与磁盘比整文件字节，不写盘
 python generate.py           # 重建并覆盖本目录的两份样本
 ```
 
@@ -23,7 +23,11 @@ python generate.py           # 重建并覆盖本目录的两份样本
 - `generate_full_thesis.py`：python-docx 造主样本，`build_bytes()` 返回字节，`main()` 写盘。
 - `generate_object_layout_errors.py`：从**内存里**的主样本字节派生，`build_bytes(source)` 不读盘；命令行版 `--output` 仍拒绝覆盖原始夹具和已有输出。
 
-依赖 `python-docx`、`Pillow`、`lxml`。`generate.py --check` 比的是**逐部件**解压后的字节，不是整文件哈希：python-docx 保存时 ZIP 条目时间戳取自当前时刻，整文件字节每次都不一样，逐部件比对才稳定。这一点与 `verify_fixtures.py --with-rebuild` 同一口径。
+依赖 `python-docx`、`Pillow`、`lxml`。`build_bytes()` 的产物会过一遍 `_normalize()`：ZIP 条目顺序原样保留，时间戳统一成 `(2000, 1, 1, 0, 0, 0)`（与 `format-samples/generate.py` 同一个常量），部件字节一字不改。python-docx 的 `save()` 原本取当前时刻当条目时间戳，同一生成器换分钟跑出的整文件字节就不同，哈希没法当判据；固定之后 `--check` 直接比整文件字节。字节不等时脚本会拆到部件级：报出具体哪个部件不同，若部件全同而整文件不同，则说明差异只在容器头部。
+
+整文件字节的可复现范围限于同一台机器：图内文字取自 `C:/Windows/Fonts/msyh.ttc`，换字体、换 Pillow 大版本都会改图片字节。跨机器核对仍按逐部件来（`verify_fixtures.py --with-rebuild` 就是这个口径），别把字体环境差异当样本被改坏。
+
+2026-11-11 实测的版本组合：Python 3.13.14 配 python-docx **1.2.0** 与 **1.1.2**（Pillow 13.0.0、lxml 6.1.3 相同）各自重建，两份样本的整文件字节与仓库里那份完全相同；再把 `format-samples/` 10 份一并比，12 份样本两版本互比也是逐字节一致。组合记在 `manifest.json` 的 `containerNormalization.verifiedByteIdenticalAcrossEnv`。没测过的组合不写「已验证」，只说明按逐部件判据通过。
 
 图内文字用 `C:/Windows/Fonts/msyh.ttc`。换平台或换字体后图片字节会变，重建结果不同属预期，不是样本被改坏。
 
@@ -43,4 +47,6 @@ python generate.py           # 重建并覆盖本目录的两份样本
 
 改动只有三处（详见 `manifest.json` 的 `regeneration` 字段）：`w:shd` 补 `w:val="clear"`、`w:tcPr` 按 schema 排序、附录那段说明文字更新为当前覆盖范围。段落 184、表格 4、图片 2、节 1、两份媒体字节、14 页页数与全部诊断数都没变。
 
-`docs/demo/` 下 2026-10-23 至 2026-10-26 的实机记录引用的是上一组字节（`035E0E13…` / `24A430AE…`），那些记录是当时的证据，不改；当前字节以 `manifest.json` 的 `sha256` 与 `word-readings-2026-11-11.json` 为准。
+`docs/demo/` 下 2026-10-23 至 2026-10-26 的实机记录引用的是更早一组字节（`035E0E13…` / `24A430AE…`），那些记录是当时的证据，不改。
+
+同一天还做了第二次重产，只动容器不动内容：`generate.py` 的 `build_bytes()` 加上 `_normalize()` 固定 ZIP 条目时间戳，两份样本的哈希因此从 `8CAE9DEC…` 变成 `90DA9BAA…`，解压后的 20 个部件一字未改（详见 `manifest.json` 的 `containerNormalization`）。当前字节以 `manifest.json` 的 `sha256` 与 `word-readings-2026-11-11.json` 为准。
