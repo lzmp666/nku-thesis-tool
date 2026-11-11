@@ -1,0 +1,5 @@
+# full-thesis/ 重建依赖：离线环境按这组版本装（本机实测过的组合）。
+# verify_fixtures.py 的默认路径不需要这些包，只有 --with-rebuild 与 generate.py 才要。
+python-docx==1.2.0
+Pillow==13.0.0
+lxml==6.1.3

@@ -2,8 +2,10 @@
   "file": "synthetic_complete_thesis.docx",
   "syntheticOnly": true,
   "observedWordPages": 14,
-  "observedWordCharacters": 6154,
-  "sha256": "035E0E13780A0269C793E45BB059C1764761AA22D7326E871539ABEF6A16E4F0",
+  "observedWordCharacters": 6172,
+  "sha256": "8CAE9DECE9ABC27B082B7CE184E358BEE887511892A149AE9067D9F9A33E0D2B",
+  "wordReadings": "word-readings-2026-11-11.json",
+  "generator": "generate.py",
   "plannedDiagnostics": [
     {
       "marker": "【中文格式测试点】",
@@ -58,12 +60,32 @@
   "samples": [
     {
       "file": "synthetic_complete_thesis.docx",
-      "description": "上面的 file / sha256 / plannedDiagnostics 描述的是这份主样本；14 页人工合成论文，含中英文摘要、目录、六章正文、图表、公式、参考文献、附录与致谢"
+      "description": "上面的 file / sha256 / plannedDiagnostics 描述的是这份主样本；14 页人工合成论文，含中英文摘要、目录、六章正文、图表、公式、参考文献、附录与致谢。由 generate.py 调 generate_full_thesis.build_bytes() 产出的主样本"
     },
     {
       "file": "synthetic_object_layout_errors.docx",
-      "description": "在主样本基础上把一幅图片与一张固定列宽表格设为 600 pt，故意超出所在分节 456.1 pt 可用宽度；由 generate_object_layout_errors.py --output 生成，预期 11 组合并问题。详见 README.md"
+      "description": "在主样本基础上把一幅图片与一张固定列宽表格设为 600 pt，故意超出所在分节 456.1 pt 可用宽度；由 generate.py 从内存主样本字节派生，预期 11 组合并问题。详见 README.md"
     }
   ],
-  "sampleListNote": "file / sha256 等单文件字段保留给主样本；samples 列出目录里全部已提交 docx，供 verify_fixtures.py 做清单一致性核对。生成器输出名由命令行参数决定，因此该目录不比对生成器清单。"
+  "regeneration": {
+    "when": "2026-11-11",
+    "why": "主样本落后于生成器：仓库里那份由更早版本的 generate_full_thesis.py 产出，单元格底纹 shd 缺 w:val、tcPr 子元素顺序不合 CT_TcPr 的 sequence，另有一段说明文字是旧稿。逐部件重建判据第一次跑就把它抓了出来，因此按当前生成器重新产出两份样本。",
+    "whatChanged": [
+      "w:shd 补上 w:val=\"clear\"（旧样本只有 w:fill，Word 按缺省处理，底色语义不明确）",
+      "w:tcPr 子元素按 CT_TcPr sequence 排列",
+      "附录说明段落改为当前正文（讲清图题规则已覆盖表 4.6 的六项，题名空格与图表位置仍人工）"
+    ],
+    "unchanged": [
+      "段落 184、表格 4、图片 2、节 1、文本节点 184 个",
+      "两份 Word 媒体字节一致",
+      "标题、正文与测试点文字只在那一处说明段落有更新",
+      "14 页，诊断数不变（三处正文 + 图题六项；派生样本 11 组）"
+    ],
+    "previousSha256": {
+      "synthetic_complete_thesis.docx": "035E0E13780A0269C793E45BB059C1764761AA22D7326E871539ABEF6A16E4F0",
+      "synthetic_object_layout_errors.docx": "24A430AE9866B5B5779C783E9A683147FF6B8294DC6FF8BAA915B6EDF1E00744"
+    },
+    "previousReadingsKeptIn": "docs/demo/ 下 2026-10-23 至 2026-10-26 的实机记录引用的是上一组字节，历史记录不改；当前字节以本文件的 sha256 与 word-readings-2026-11-11.json 为准。"
+  },
+  "sampleListNote": "file / sha256 等单文件字段保留给主样本；samples 列出目录里全部已提交 docx，供 verify_fixtures.py 做清单一致性核对。生成器的 SAMPLES 已覆盖这两份文件，因此清单核对同时比对生成器、manifest 与磁盘三方。"
 }

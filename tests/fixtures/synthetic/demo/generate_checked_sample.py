@@ -24,7 +24,8 @@ from io import BytesIO
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-OUTPUT = "clean_checked_sample.docx"
+# 与其它生成器同形：清单常量 + 接受样本名的 build_bytes()。
+SAMPLES = ("clean_checked_sample.docx",)
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -169,7 +170,10 @@ def document_rels():
     )
 
 
-def build_bytes():
+def build_bytes(name=SAMPLES[0]):
+    """返回本样本的 docx 字节。未知样本名直接报错，不静默回落到唯一那份。"""
+    if name != SAMPLES[0]:
+        raise KeyError("未知样本：%s（只有 %s）" % (name, SAMPLES[0]))
     entries = [
         ("[Content_Types].xml", content_types()),
         ("_rels/.rels", ROOT_RELS),
@@ -194,20 +198,24 @@ def main():
     parser.add_argument("--check", action="store_true", help="只比对，不写盘")
     args = parser.parse_args()
 
-    data = build_bytes()
-    target = HERE / OUTPUT
-    if args.check:
-        if not target.exists():
-            print(f"缺失：{OUTPUT}")
-            return 1
-        if target.read_bytes() != data:
-            print(f"与生成结果不一致：{OUTPUT}")
-            return 1
-        print(f"校验通过：{OUTPUT}（{len(data)} 字节）")
-        return 0
-    target.write_bytes(data)
-    print(f"已生成：{OUTPUT}（{len(data)} 字节）")
-    return 0
+    failed = 0
+    for name in SAMPLES:
+        data = build_bytes(name)
+        target = HERE / name
+        if args.check:
+            if not target.exists():
+                print(f"缺失：{name}")
+                failed += 1
+                continue
+            if target.read_bytes() != data:
+                print(f"与生成结果不一致：{name}")
+                failed += 1
+                continue
+            print(f"校验通过：{name}（{len(data)} 字节）")
+        else:
+            target.write_bytes(data)
+            print(f"已生成：{name}（{len(data)} 字节）")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

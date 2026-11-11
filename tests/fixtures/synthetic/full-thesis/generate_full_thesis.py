@@ -275,7 +275,13 @@ CHAPTERS = [
 ]
 
 
-def main() -> None:
+def build_bytes() -> bytes:
+    """在内存里造出完整样本，返回 docx 字节。
+
+    与其它目录的生成器同名同义，供 verify_fixtures.py 做逐部件重建。
+    python-docx 保存时 ZIP 条目时间戳取自当前时刻，所以整文件字节不稳定，
+    比对只能逐部件做（忽略时间戳与 deflate 流）。
+    """
     doc = Document()
     section = doc.sections[0]
     section.top_margin = Cm(2.5)
@@ -426,7 +432,13 @@ def main() -> None:
     doc.core_properties.author = "Synthetic test fixture"
     doc.core_properties.keywords = "synthetic, test-only, Word add-in"
     doc.core_properties.comments = "All research content and measurements are fictional."
-    doc.save(OUTPUT)
+    stream = BytesIO()
+    doc.save(stream)
+    return stream.getvalue()
+
+
+def main() -> None:
+    OUTPUT.write_bytes(build_bytes())
     print(OUTPUT)
 
 
