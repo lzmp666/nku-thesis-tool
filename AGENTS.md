@@ -106,7 +106,7 @@ python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild  # 加严档�
 
 `--with-rebuild` 把 `format-samples/` 的 10 份和 `full-thesis/` 的 2 份也做一遍逐部件重建，合计 12 份。它需要 `python-docx`（full-thesis 另需 `Pillow`、`lxml`），版本见两个目录各自的 `requirements.txt`。缺依赖时**整组**跳过并打印原因，退出码仍是 0——「跳过」不等于「通过」，别把跳过当验收。`full-thesis/` 的图片文字取自 Windows 字体 `msyh.ttc`，换平台或换字体后重建结果的图片字节会变，属预期。
 
-两份 `full-thesis` 样本由 `python3 tests/fixtures/synthetic/full-thesis/generate.py --check` 核对，比的是逐部件而不是整文件哈希：python-docx 保存时 ZIP 时间戳取当前时刻，整文件字节每次不同。
+两份 `full-thesis` 样本也可以单独核对：`python3 tests/fixtures/synthetic/full-thesis/generate.py --check`（这条会真的重建，三个依赖都要装）。它比的是逐部件而不是整文件哈希：python-docx 保存时 ZIP 时间戳取当前时刻，整文件字节每次不同。
 
 ## 6. 提交规范
 
@@ -150,7 +150,7 @@ Issue → 分支 → PR，一步不能跳。直接推 `main` 视为没做。
 | Pillow | 13.0.0 | MIT-CMU | 仅 `full-thesis/generate_full_thesis.py` 画合成图表；`--with-rebuild` 用它重建 |
 | lxml | 6.1.3 | BSD-3-Clause | 仅 `full-thesis/generate_object_layout_errors.py` 改派生样本的 XML |
 
-后三个都是可选依赖，不是引擎运行前提：`generate.py --check-only`、`full-thesis/generate.py --check` 与 `tests/fixtures/synthetic/verify_fixtures.py` 的默认档都只用 Python 标准库，干净检出后不必 `pip install` 就能核对已提交样本。`verify_fixtures.py --with-rebuild` 才需要它们，缺了就整组跳过并说明。
+后三个都是可选依赖，不是引擎运行前提：`tests/fixtures/synthetic/verify_fixtures.py` 的默认档与 `tests/fixtures/synthetic/format-samples/generate.py --check-only` 只用 Python 标准库，干净检出后不必 `pip install` 就能核对已提交样本。真正要重建才用得上它们——`format-samples/` 只要 `python-docx`，`full-thesis/generate.py --check` 三件套都要，`verify_fixtures.py --with-rebuild` 按目录分别判断，缺了就整组跳过并说明。
 
 `AGENTS.md` 的七段骨架参考 `AfishInLake/WordFormat`（Apache-2.0）的组织方式，只借结构，没有拷贝代码。**后续谁想重写一遍，先看这张表**：能直接用的别再自己造，抄了别人的要在这里补一行。
 
