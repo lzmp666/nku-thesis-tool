@@ -36,7 +36,7 @@ dotnet test NkuThesisTool.sln --configuration Release --no-build
 ```
 
 `Directory.Build.props` 开了 `TreatWarningsAsErrors`，冒出一个警告就是构建失败，别想着先放着。
-基线（2026-11-10，main）：build 0 警告 0 错误，test 435 条全过。这个数会随 main 涨，别写死进代码或断言总数。
+基线（2026-11-11，main）：build 0 警告 0 错误，test 459 条全过。这个数会随 main 涨，别写死进代码或断言总数。
 
 ## 4. 目录边界
 
@@ -94,14 +94,19 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 写入型命令（`apply-*`、`full-format`、`structure --format-output`、`analyze --annotated-output`）一律另存新文件，不改输入。`apply-document-format` 只写 `sectPr` 下的 `pgSz` / `pgMar`，目录、页码、空白页只报告不改。默认输出名带中文后缀，要精确控制就显式给第二个参数。
 
-改过 `tests/fixtures/synthetic/` 下的样本或生成器，再跑这两条（只用标准库，不需要 pip install）：
+改过 `tests/fixtures/synthetic/` 下的样本或生成器，按顺序跑这三条（前两条只用标准库，不需要 pip install）：
 
 ```bash
-python3 tests/fixtures/synthetic/verify_fixtures.py
-python3 tests/fixtures/synthetic/verify_fixtures.py --self-test
+python3 tests/fixtures/synthetic/verify_fixtures.py                 # 默认档：零依赖
+python3 tests/fixtures/synthetic/verify_fixtures.py --self-test     # 验证判据本身
+python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild  # 加严档：重建 12 份样本
 ```
 
-前者核对逐部件重建、结构断言与 manifest ↔ 生成器 ↔ 磁盘的清单一致性，后者验证这两条判据本身既不误报也不漏报。装了 python-docx 时可再加严一档：`python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild`，它把 `format-samples/` 的 10 份样本也做一遍逐部件重建校验；没装就跳过并打印原因，退出码仍是 0。
+第一条核对逐部件重建（4 个零依赖生成器 / 39 份样本）、结构断言（format-samples 10 份）与 manifest ↔ 生成器 ↔ 磁盘的清单一致性（5 个目录 / 51 份 docx）；第二条用 12 种情形验证这些判据既不误报也不漏报。
+
+`--with-rebuild` 把 `format-samples/` 的 10 份和 `full-thesis/` 的 2 份也做一遍逐部件重建，合计 12 份。它需要 `python-docx`（full-thesis 另需 `Pillow`、`lxml`），版本见两个目录各自的 `requirements.txt`。缺依赖时**整组**跳过并打印原因，退出码仍是 0——「跳过」不等于「通过」，别把跳过当验收。`full-thesis/` 的图片文字取自 Windows 字体 `msyh.ttc`，换平台或换字体后重建结果的图片字节会变，属预期。
+
+两份 `full-thesis` 样本由 `python3 tests/fixtures/synthetic/full-thesis/generate.py --check` 核对，比的是逐部件而不是整文件哈希：python-docx 保存时 ZIP 时间戳取当前时刻，整文件字节每次不同。
 
 ## 6. 提交规范
 
@@ -141,9 +146,11 @@ Issue → 分支 → PR，一步不能跳。直接推 `main` 视为没做。
 | xunit.runner.visualstudio | 3.1.1 | Apache-2.0 | 测试运行器 |
 | Microsoft.NET.Test.Sdk | 17.14.1 | MIT | 测试宿主 |
 | System.Text.Json | 8.0.5 | MIT | 仅 VSTO 协议工程（.NET Framework 没有内置） |
-| python-docx | 1.2.0 | MIT | 仅 `tests/fixtures/synthetic/format-samples/generate.py` 重建样本；只读校验路径不用它 |
+| python-docx | 1.2.0 | MIT | 仅 `tests/fixtures/synthetic/` 下 `format-samples/generate.py` 与 `full-thesis/` 的重建路径；只读校验不用它 |
+| Pillow | 13.0.0 | MIT-CMU | 仅 `full-thesis/generate_full_thesis.py` 画合成图表；`--with-rebuild` 用它重建 |
+| lxml | 6.1.3 | BSD-3-Clause | 仅 `full-thesis/generate_object_layout_errors.py` 改派生样本的 XML |
 
-python-docx 是可选的第三方依赖，不是引擎运行前提：`generate.py --check-only` 与 `tests/fixtures/synthetic/verify_fixtures.py` 都只用 Python 标准库，干净检出后不必 `pip install` 就能核对已提交样本。
+后三个都是可选依赖，不是引擎运行前提：`generate.py --check-only`、`full-thesis/generate.py --check` 与 `tests/fixtures/synthetic/verify_fixtures.py` 的默认档都只用 Python 标准库，干净检出后不必 `pip install` 就能核对已提交样本。`verify_fixtures.py --with-rebuild` 才需要它们，缺了就整组跳过并说明。
 
 `AGENTS.md` 的七段骨架参考 `AfishInLake/WordFormat`（Apache-2.0）的组织方式，只借结构，没有拷贝代码。**后续谁想重写一遍，先看这张表**：能直接用的别再自己造，抄了别人的要在这里补一行。
 
