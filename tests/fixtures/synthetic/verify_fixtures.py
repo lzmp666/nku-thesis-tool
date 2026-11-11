@@ -10,8 +10,9 @@
     复现，也不等于格式合规结论。
   * 清单一致性：manifest.samples / 生成器清单 / 磁盘上的 .docx 三方比对，
     抓「新增样本忘写 manifest」「孤儿 docx」「生成器没覆盖」这类漏项。
-  * 可选重建：--with-rebuild 时，若本机装有 python-docx，再把 format-samples
-    也做一遍逐部件重建校验；没装就跳过并说明，不算失败。默认不开，因为这条
+  * 可选重建：--with-rebuild 时，若本机装有 python-docx（full-thesis 另需
+    Pillow 与 lxml），再把 format-samples 与 full-thesis 的样本各做一遍逐部件
+    重建校验；缺依赖就**整组**跳过并说明原因，不算失败。默认不开，因为这条
     路径依赖第三方包。
 
 用法（从仓库根目录）：
@@ -29,12 +30,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-# (目录, 生成器文件, 样本清单来源, 构建函数, 构建函数是否接受样本名)
+# (目录, 生成器文件, 样本清单来源, 构建函数)
+# 四个生成器同形：清单是 SAMPLES，构建函数接受样本名并返回 docx 字节。
 GENERATORS = [
-    ("document", "generate.py", "SAMPLES", "build_bytes", True),
-    ("formula", "generate.py", "SAMPLES", "build", True),
-    ("demo", "generate_samples.py", "SAMPLES", "build_bytes", True),
-    ("demo", "generate_checked_sample.py", "OUTPUT", "build_bytes", False),
+    ("document", "generate.py", "SAMPLES", "build_bytes"),
+    ("formula", "generate.py", "SAMPLES", "build"),
+    ("demo", "generate_samples.py", "SAMPLES", "build_bytes"),
+    ("demo", "generate_checked_sample.py", "SAMPLES", "build_bytes"),
 ]
 
 # (目录, 生成器文件, 结构校验函数)；只做维度断言，不在内存重建 docx
@@ -42,21 +44,31 @@ STRUCTURE_VERIFIERS = [
     ("format-samples", "generate.py", "verify"),
 ]
 
-# (目录, 生成器文件, 样本清单属性, 构造函数, 依赖的顶层模块名)；
-# 重建需要第三方依赖，只在 --with-rebuild 且依赖可用时执行。
+# (目录, 生成器文件, 样本清单属性, 构造函数, 依赖的顶层模块名元组)；
+# 重建需要第三方依赖，只在 --with-rebuild 且依赖全部可用时执行。
 REBUILD_VERIFIERS = [
-    ("format-samples", "generate.py", "SAMPLES", "build_bytes", "docx"),
+    ("format-samples", "generate.py", "SAMPLES", "build_bytes", ("docx",)),
+    ("full-thesis", "generate.py", "SAMPLES", "build_bytes", ("docx", "PIL", "lxml")),
+]
+
+# (目录, 生成器文件, 样本清单属性)；只读清单常量、不构建样本，所以不需要第三方依赖。
+# format-samples 与 full-thesis 的样本名不带 .docx，靠 sample_file() 补后缀统一。
+LIST_SOURCES = [
+    ("document", "generate.py", "SAMPLES"),
+    ("formula", "generate.py", "SAMPLES"),
+    ("demo", "generate_samples.py", "SAMPLES"),
+    ("demo", "generate_checked_sample.py", "SAMPLES"),
+    ("format-samples", "generate.py", "SAMPLES"),
+    ("full-thesis", "generate.py", "SAMPLES"),
 ]
 
 # (目录, 是否比对生成器清单)
-# full-thesis 的两份 docx 由命令行 --output 指定，生成器没有固定清单常量，
-# 因此只比 manifest ↔ 磁盘；这一点在输出里明说，不假装也查了生成器。
 LIST_SPECS = [
     ("document", True),
     ("formula", True),
     ("demo", True),
     ("format-samples", True),
-    ("full-thesis", False),
+    ("full-thesis", True),
 ]
 
 
@@ -119,15 +131,37 @@ def diff_lists(declared, generated, disk, check_generated=True):
     return problems
 
 
+def sample_file(name):
+    """样本名到磁盘文件名：带 .docx 的直接用，不带的后缀补上。
+
+    各生成器的清单写法历史上不统一（document/formula/full-thesis 写全名，
+    format-samples 只写主题名），路径拼接统一走这里，避免一处带一处不带。
+    """
+    text = str(name)
+    return text if text.lower().endswith(".docx") else text + ".docx"
+
+
+def sample_names(source):
+    """把清单常量拆成样本名列表。
+
+    dict 型（format-samples/document/formula 用它登记配置或 XML）取 key，
+    序列型直接用元素，单值常量包成单元素列表。六份生成器的构建函数都吃
+    样本名，所以这里只需要名字，不需要把配置递下去。
+    """
+    if isinstance(source, dict):
+        return list(source)
+    if isinstance(source, (list, tuple)):
+        return list(source)
+    return [source]
+
+
 def generator_samples():
-    """返回 {目录: 生成器能产出的样本文件名集合}。"""
+    """返回 {目录: 生成器能产出的样本文件名集合}。只读清单常量，不构建样本。"""
     result = {}
-    for directory, filename, names_attr, _, _ in GENERATORS:
+    for directory, filename, names_attr in LIST_SOURCES:
         source = getattr(load_generator(directory, filename), names_attr)
-        names = list(source) if isinstance(source, (dict, list, tuple)) else [source]
-        result.setdefault(directory, set()).update(Path(str(n)).name for n in names)
-    fs = load_generator("format-samples", "generate.py")
-    result.setdefault("format-samples", set()).update(n + ".docx" for n in fs.SAMPLES)
+        for name in sample_names(source):
+            result.setdefault(directory, set()).add(sample_file(name))
     return result
 
 
@@ -165,25 +199,27 @@ def rebuild_problems():
     """对需要第三方依赖的生成器做逐部件重建校验。
 
     返回 (问题描述列表, 校验份数, 跳过原因)。依赖缺失时不算失败，
-    跳过原因如实说明，不把「没查」写成「查了没问题」。
+    跳过原因如实说明，不把「没查」写成「查了没问题」。一组里缺任何一个
+    模块就整组跳过：半套依赖下跑出来的结果不可信，不如明说没查。
     """
     problems = []
     checked = 0
     skipped = []
-    for directory, filename, names_attr, builder_name, dependency in REBUILD_VERIFIERS:
-        if importlib.util.find_spec(dependency) is None:
-            skipped.append("%s 需要 %s（pip install python-docx）" % (directory, dependency))
+    for directory, filename, names_attr, builder_name, dependencies in REBUILD_VERIFIERS:
+        missing = [name for name in dependencies if importlib.util.find_spec(name) is None]
+        if missing:
+            skipped.append("%s 需要 %s" % (directory, "、".join(missing)))
             continue
         module = load_generator(directory, filename)
         builder = getattr(module, builder_name)
         source = getattr(module, names_attr)
-        for name, config in source.items():
-            target = HERE / directory / (name + ".docx")
+        for name in sample_names(source):
+            target = HERE / directory / sample_file(name)
             if not target.exists():
                 problems.append("%s/%s 缺失" % (directory, name))
                 continue
             try:
-                rebuilt = builder(config)
+                rebuilt = builder(name)
             except Exception as exc:
                 problems.append("%s/%s 重建失败：%s" % (directory, name, exc))
                 continue
@@ -247,18 +283,30 @@ def self_test():
         diff_lists(one, set(), one, check_generated=False) == [],
     ))
     checks.append(("缺依赖时重建校验跳过而非失败", _self_test_rebuild_skips()))
+    checks.append((
+        "样本名不带 .docx 时补齐后缀",
+        sample_file("baseline_correct") == "baseline_correct.docx"
+        and sample_file("a.docx") == "a.docx",
+    ))
+    checks.append(("未知样本名会报错而不是回落", _self_test_unknown_sample()))
+    partial_ok, partial_note = _self_test_partial_dependency()
+    checks.append(("依赖缺一个时该组整组跳过", partial_ok, partial_note))
 
-    for label, ok in checks:
-        print(("PASS  " if ok else "FAIL  ") + label)
-    return 0 if all(ok for _, ok in checks) else 1
+    for check in checks:
+        label, ok = check[0], check[1]
+        note = check[2] if len(check) > 2 else None
+        status = "SKIP  " if ok is None else ("PASS  " if ok else "FAIL  ")
+        print(status + label + ("（%s）" % note if note else ""))
+    return 0 if all(check[1] is not False for check in checks) else 1
 
 
 def _self_test_rebuild_skips():
     """把依赖探测临时改成「找不到」，确认重建校验返回跳过原因而不是问题列表。"""
     real_find_spec = importlib.util.find_spec
+    dependency_names = {name for entry in REBUILD_VERIFIERS for name in entry[4]}
 
     def fake_find_spec(name, *args, **kwargs):
-        if name in {entry[4] for entry in REBUILD_VERIFIERS}:
+        if name in dependency_names:
             return None
         return real_find_spec(name, *args, **kwargs)
 
@@ -268,6 +316,42 @@ def _self_test_rebuild_skips():
     finally:
         importlib.util.find_spec = real_find_spec
     return problems == [] and checked == 0 and reason is not None
+
+
+def _self_test_unknown_sample():
+    """样本名写错必须报错。静默回落到唯一那份会让清单核对形同虚设。"""
+    module = load_generator("demo", "generate_checked_sample.py")
+    try:
+        module.build_bytes("not_a_sample.docx")
+    except KeyError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def _self_test_partial_dependency():
+    """只缺一个依赖时整组跳过，不拿半套依赖的结果冒充「查了没问题」。"""
+    if importlib.util.find_spec("docx") is None:
+        return None, "本机没有 python-docx，构造不出「部分依赖」场景"
+    real_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name, *args, **kwargs):
+        return None if name == "PIL" else real_find_spec(name, *args, **kwargs)
+
+    importlib.util.find_spec = fake_find_spec
+    try:
+        problems, checked, reason = rebuild_problems()
+    finally:
+        importlib.util.find_spec = real_find_spec
+    ok = (
+        problems == []
+        and checked > 0
+        and reason is not None
+        and "full-thesis" in reason
+        and "format-samples" not in reason
+    )
+    return ok, None
 
 
 def main():
@@ -287,19 +371,17 @@ def main():
     problems = []
     sample_count = 0
     part_count = 0
-    for directory, filename, names_attr, builder_name, takes_name in GENERATORS:
+    for directory, filename, names_attr, builder_name in GENERATORS:
         module = load_generator(directory, filename)
-        source = getattr(module, names_attr)
-        names = list(source) if isinstance(source, (dict, list, tuple)) else [source]
         builder = getattr(module, builder_name)
-        for name in names:
+        for name in sample_names(getattr(module, names_attr)):
             sample_count += 1
             try:
-                expected = builder(name) if takes_name else builder()
+                expected = builder(name)
             except Exception as exc:  # 生成器自身出错也要明确报出来
                 problems.append("%s/%s 生成失败：%s" % (directory, name, exc))
                 continue
-            target = HERE / directory / name
+            target = HERE / directory / sample_file(name)
             if not target.exists():
                 problems.append("%s/%s 缺失" % (directory, name))
                 continue

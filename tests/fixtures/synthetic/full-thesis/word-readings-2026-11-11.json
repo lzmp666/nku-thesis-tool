@@ -1,0 +1,33 @@
+{
+    "sampled_at":  "2026-11-11",
+    "word_version":  "16.0",
+    "word_build":  "16.0.20527",
+    "opened_readonly":  true,
+    "note":  "Word 桌面版只读打开，读 ComputeStatistics 与结构计数；不保存、不改动样本字节。页数随字体、分页与 Word 版本变化。",
+    "samples":  [
+                    {
+                        "file":  "synthetic_complete_thesis.docx",
+                        "pages":  14,
+                        "words":  6172,
+                        "characters":  7287,
+                        "paragraphs":  204,
+                        "sections":  1,
+                        "tables":  4,
+                        "inline_shapes":  2,
+                        "opened_readonly":  true,
+                        "first_page_text":  "海岚大学研究生学位论文（合成测试样稿） 高校图书馆学习空间需求的分时观察与管理方法研究 A Synthetic Study of Time-Segmented "
+                    },
+                    {
+                        "file":  "synthetic_object_layout_errors.docx",
+                        "pages":  14,
+                        "words":  6172,
+                        "characters":  7287,
+                        "paragraphs":  204,
+                        "sections":  1,
+                        "tables":  4,
+                        "inline_shapes":  2,
+                        "opened_readonly":  true,
+                        "first_page_text":  "海岚大学研究生学位论文（合成测试样稿） 高校图书馆学习空间需求的分时观察与管理方法研究 A Synthetic Study of Time-Segmented "
+                    }
+                ]
+}

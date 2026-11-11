@@ -2,6 +2,7 @@
 
 Only generated fixtures are accepted. No student or user document is read.
 """
+from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 import argparse
@@ -16,11 +17,13 @@ NS = {
 }
 
 
-def make_fixture(output: Path):
-    source = HERE / "synthetic_complete_thesis.docx"
-    if output.resolve() == source.resolve() or output.exists():
-        raise ValueError("Output must be a new synthetic fixture, never the source.")
-    with ZipFile(source) as package:
+def build_bytes(source: bytes) -> bytes:
+    """从主样本的 docx 字节派生本样本，返回新 docx 字节。
+
+    不读盘也不写盘：verify_fixtures.py 会把内存里的主样本直接喂进来。
+    ZIP 条目沿用一个 ZipInfo，顺序、时间戳与压缩标志都与主样本保持一致。
+    """
+    with ZipFile(BytesIO(source)) as package:
         root = ET.fromstring(package.read("word/document.xml"))
         body = root.find("w:body", NS)
         # The older fixture generator appended custom borders after vAlign and
@@ -71,11 +74,20 @@ def make_fixture(output: Path):
                 cell_width = cell.find("w:tcPr/w:tcW", NS)
                 cell_width.set(q("type"), "dxa")
                 cell_width.set(q("w"), str(width))
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with ZipFile(output, "w", ZIP_DEFLATED) as destination:
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", ZIP_DEFLATED) as destination:
             for part in package.infolist():
                 destination.writestr(part, ET.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
                                      if part.filename == "word/document.xml" else package.read(part.filename))
+    return buffer.getvalue()
+
+
+def make_fixture(output: Path) -> None:
+    source = HERE / "synthetic_complete_thesis.docx"
+    if output.resolve() == source.resolve() or output.exists():
+        raise ValueError("Output must be a new synthetic fixture, never the source.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(build_bytes(source.read_bytes()))
     print(output)
 
 

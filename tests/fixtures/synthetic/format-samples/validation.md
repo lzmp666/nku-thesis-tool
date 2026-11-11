@@ -85,3 +85,19 @@ CLI：10/10 样本只读加载成功，退出码 0，stderr 为空，输入 SHA-
 - 为此把 `generate.py` 的重建逻辑抽成 `build_bytes(config)`，与其它生成器同名同义；`generate()` 改为调用它。
 
 仍未覆盖：其他 Windows/Mac Word 版本、WPS、字体未安装或被替代、逐页视觉布局；以及**跨 Python / python-docx 版本的逐字节一致性**——上面 10/10 是在 Python 3.13.12 + python-docx 1.2.0 上得到的，换版本是否仍逐字节相同未验证（逐部件判据已为此做了时间戳与 deflate 解耦，但容器字节层面的结论只覆盖本机这一组版本）。
+
+## 2026-11-11 生成器同形与重建判据扩到 full-thesis
+
+上一节记的 `build_bytes(config)` 在本轮改成 `build_bytes(name)`：六个生成器现在同形，清单常量为 `SAMPLES`，构建函数吃样本名、返回字节。`sample_file()` 统一补 `.docx` 后缀，因为 `document/`、`formula/`、`full-thesis/` 的清单写全名而本目录只写主题名，路径拼接以前一处带后缀一处不带。
+
+`--with-rebuild` 从 1 组 10 份扩到 2 组 12 份，新增 `full-thesis/` 两份。它需要 `python-docx`、`Pillow`、`lxml`，缺任何一个就**整组**跳过，不再出现「半套依赖跑出半个结论」。`--self-test` 从 9 条扩到 12 条，新增「样本名不带 `.docx` 时补齐后缀」「未知样本名会报错而不是回落」「依赖缺一个时该组整组跳过」。
+
+本轮实跑：
+
+- 默认档：`逐部件重建 4 个生成器 / 39 份样本 / 287 个部件；结构校验 1 组 / 10 份样本；清单一致性 5 个目录 / 51 份 docx`，退出码 0。
+- 加严档：追加 `重建校验通过：2 组 / 12 份样本逐部件一致`，退出码 0。
+- 干净环境：`python -S`（不加载 site-packages，等价于没装任何第三方包）跑默认档仍全绿；跑 `--with-rebuild` 打印 `重建校验已跳过：format-samples 需要 docx；full-thesis 需要 docx、PIL、lxml` 并以 0 退出。
+- 负例 4 条全按预期：改主样本一个词 → 报 1 处；改派生样本一个尺寸 → 报 1 处；删派生样本 → 报 3 处（清单三方 + 重建缺失）；只改 ZIP 时间戳 → 不报。
+- `full-thesis/generate.py --check` 与另外五个生成器的 `--check` 全绿；本目录 10 份样本字节零改动（`git status` 无 `.docx` 变更）。
+
+`full-thesis/` 两份样本本轮重新产出过一次，原因与差异记在 `full-thesis/README.md` 和它的 `manifest.json` 的 `regeneration` 字段：旧样本落后于生成器（`w:shd` 缺 `w:val`、`w:tcPr` 顺序不合 schema、一段说明文字是旧稿），逐部件重建判据第一次跑就抓了出来。本目录的 10 份样本未受影响。
