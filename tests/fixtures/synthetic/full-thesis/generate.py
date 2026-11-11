@@ -20,9 +20,10 @@
     python generate_full_thesis.py
     python generate_object_layout_errors.py --output <新文件>
 
-依赖 python-docx、Pillow、lxml。重建结果的整文件字节不稳定：python-docx 保存时
-ZIP 条目时间戳取自当前时刻，所以 `--check` 比的是逐部件解压后的字节，与
-`verify_fixtures.py` 同一口径。
+依赖 python-docx、Pillow、lxml。python-docx 保存时 ZIP 条目时间戳取当前时刻，
+所以最终字节过一遍 `_normalize()`：条目顺序原样保留，时间戳统一成 `FIXED_TIME`。
+两份样本因此是整文件字节可复现的，`--check` 直接比整文件字节；字节不同时再逐部件
+定位到具体是哪个部件变了。`verify_fixtures.py` 仍按逐部件比对，不用重写 ZIP。
 """
 from __future__ import annotations
 
@@ -31,9 +32,12 @@ import importlib.util
 import sys
 from io import BytesIO
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 HERE = Path(__file__).resolve().parent
+
+# 与 format-samples/generate.py 用同一个时间常量：ZIP 可存的最早时间，避免取当前时刻。
+FIXED_TIME = (2000, 1, 1, 0, 0, 0)
 
 COMPLETE = "synthetic_complete_thesis.docx"
 OBJECT_ERRORS = "synthetic_object_layout_errors.docx"
@@ -57,11 +61,28 @@ def _load(filename):
 def build_bytes(name=COMPLETE):
     """返回指定样本的 docx 字节。未知样本名直接报错，不静默回落到主样本。"""
     if name == COMPLETE:
-        return _load("generate_full_thesis.py").build_bytes()
+        return _normalize(_load("generate_full_thesis.py").build_bytes())
     if name == OBJECT_ERRORS:
         source = build_bytes(COMPLETE)
-        return _load("generate_object_layout_errors.py").build_bytes(source)
+        return _normalize(_load("generate_object_layout_errors.py").build_bytes(source))
     raise KeyError("未知样本：%s（可选 %s）" % (name, "、".join(SAMPLES)))
+
+
+def _normalize(data):
+    """把 ZIP 条目的写入时间换成 FIXED_TIME，部件内容与顺序原样保留。
+
+    python-docx 保存时用当前时刻当条目时间戳，同一个生成器在不同分钟跑出的字节
+    就不同，哈希没法当判据。这里只重写容器的头部字段，解压后的部件一字不改。
+    不排序条目：磁盘样本按 python-docx 的写入顺序排列，排序会改顺序，反而对不上。
+    """
+    buffer = BytesIO()
+    with ZipFile(BytesIO(data)) as source, ZipFile(buffer, "w") as target:
+        for info in source.infolist():
+            item = ZipInfo(info.filename, date_time=FIXED_TIME)
+            item.compress_type = ZIP_DEFLATED
+            item.external_attr = info.external_attr
+            target.writestr(item, source.read(info.filename))
+    return buffer.getvalue()
 
 
 def read_parts(data):
@@ -83,19 +104,24 @@ def main():
                 print("缺失：%s" % name)
                 failed += 1
                 continue
-            expected, actual = read_parts(data), read_parts(target.read_bytes())
-            if [part for part, _ in expected] != [part for part, _ in actual]:
+            actual = target.read_bytes()
+            if data == actual:
+                print("校验通过：%s（整文件字节一致，%d 字节）" % (name, len(data)))
+                continue
+            # 整文件不等时定位到部件：时间戳已固定，剩下的差异只可能来自内容。
+            expected, onDisk = read_parts(data), read_parts(actual)
+            if [part for part, _ in expected] != [part for part, _ in onDisk]:
                 print("部件清单不同：%s" % name)
                 failed += 1
                 continue
             different = [
-                part for (part, want), (_, got) in zip(expected, actual) if want != got
+                part for (part, want), (_, got) in zip(expected, onDisk) if want != got
             ]
             if different:
                 print("与重建结果不一致：%s（%s）" % (name, "、".join(different)))
-                failed += 1
-                continue
-            print("校验通过：%s（%d 个部件逐部件一致）" % (name, len(expected)))
+            else:
+                print("与重建结果不一致：%s（部件相同，差异在 ZIP 容器头部）" % name)
+            failed += 1
         else:
             target.write_bytes(data)
             print("已生成：%s（%d 字节）" % (name, len(data)))
