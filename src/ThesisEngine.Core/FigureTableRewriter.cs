@@ -18,6 +18,8 @@ public sealed class FigureTableRewriter
     public void ApplyThreeLineTables(string inputPath, string outputPath)
     {
         var doc = ReadDocumentXml(inputPath);
+        var stylesDocument = TryReadStylesXml(inputPath);
+        if (stylesDocument != null) FigureTableStyleWriter.EnsureStyles(stylesDocument);
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
@@ -29,6 +31,39 @@ public sealed class FigureTableRewriter
             {
                 tblPr = new XElement(W + "tblPr");
                 table.AddFirst(tblPr);
+            }
+
+            // 正常情况下走“三线表样式”：只套样式、不写直接格式。
+            if (stylesDocument != null)
+            {
+                tblPr.Element(W + "tblBorders")?.Remove();
+
+                var tableStyle = tblPr.Element(W + "tblStyle");
+                if (tableStyle == null)
+                {
+                    tableStyle = new XElement(W + "tblStyle");
+                    InsertOrdered(tblPr, tableStyle, TablePropertySequence);
+                }
+
+                tableStyle.SetAttributeValue(W + "val", FigureTableStyleWriter.ThreeLineTableStyleId);
+
+                // 首行条件格式承载表头分隔线，需要打开 tblLook.firstRow。
+                var look = tblPr.Element(W + "tblLook");
+                if (look == null)
+                {
+                    look = new XElement(W + "tblLook");
+                    InsertOrdered(tblPr, look, TablePropertySequence);
+                }
+
+                look.SetAttributeValue(W + "firstRow", "1");
+
+                // 单元格级边框优先于表级，必须清除才能让样式生效。
+                foreach (var cell in table.Descendants(W + "tc"))
+                {
+                    cell.Element(W + "tcPr")?.Element(W + "tcBorders")?.Remove();
+                }
+
+                continue;
             }
 
             // 删除原有边框
@@ -46,7 +81,13 @@ public sealed class FigureTableRewriter
                 Border("insideV", "nil", null));
             InsertOrdered(tblPr, borders, TablePropertySequence);
 
-            // 表头下边框：逐单元格设置 tcBorders/bottom。
+            // 单元格级边框优先级高于表级：必须全部清除，否则 Word 打开仍是全框线。
+            foreach (var cell in table.Descendants(W + "tc"))
+            {
+                cell.Element(W + "tcPr")?.Element(W + "tcBorders")?.Remove();
+            }
+
+            // 表头下边框：0.5 磅细线（sz 以 1/8 磅为单位，0.5pt = 4）。
             var firstRow = table.Elements(W + "tr").FirstOrDefault();
             if (firstRow != null)
             {
@@ -67,12 +108,13 @@ public sealed class FigureTableRewriter
                     }
 
                     cellBorders.Element(W + "bottom")?.Remove();
-                    InsertOrdered(cellBorders, Border("bottom", "single", "6"), TableBorderSequence);
+                    InsertOrdered(cellBorders, Border("bottom", "single", "4"), TableBorderSequence);
                 }
             }
         }
 
         WriteDocumentXml(inputPath, outputPath, doc);
+        if (stylesDocument != null) WriteStylesXml(inputPath, outputPath, stylesDocument);
     }
 
     /// <summary>
@@ -81,6 +123,9 @@ public sealed class FigureTableRewriter
     public void CenterAlignImages(string inputPath, string outputPath)
     {
         var doc = ReadDocumentXml(inputPath);
+        var stylesDocument = TryReadStylesXml(inputPath);
+        if (stylesDocument != null) FigureTableStyleWriter.EnsureStyles(stylesDocument);
+
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
@@ -91,7 +136,6 @@ public sealed class FigureTableRewriter
             var hasImage = para.Descendants().Any(e => e.Name.LocalName == "blip");
             if (!hasImage) continue;
 
-            // 设置居中对齐
             var pPr = para.Element(W + "pPr");
             if (pPr == null)
             {
@@ -99,16 +143,32 @@ public sealed class FigureTableRewriter
                 para.AddFirst(pPr);
             }
 
+            if (stylesDocument != null)
+            {
+                // 套用图片段落样式（居中），不再写直接对齐格式。
+                pPr.Element(W + "jc")?.Remove();
+                var paragraphStyle = pPr.Element(W + "pStyle");
+                if (paragraphStyle == null)
+                {
+                    paragraphStyle = new XElement(W + "pStyle");
+                    InsertOrdered(pPr, paragraphStyle, ParagraphPropertySequence);
+                }
+
+                paragraphStyle.SetAttributeValue(W + "val", FigureTableStyleWriter.FigureParagraphStyleId);
+                continue;
+            }
+
             var jc = pPr.Element(W + "jc");
             if (jc == null)
             {
                 jc = new XElement(W + "jc");
-                pPr.Add(jc);
+                InsertOrdered(pPr, jc, ParagraphPropertySequence);
             }
             jc.SetAttributeValue(W + "val", "center");
         }
 
         WriteDocumentXml(inputPath, outputPath, doc);
+        if (stylesDocument != null) WriteStylesXml(inputPath, outputPath, stylesDocument);
     }
 
     /// <summary>
@@ -260,6 +320,27 @@ public sealed class FigureTableRewriter
 
         using var reader = new StreamReader(entry.Open());
         return XDocument.Load(reader);
+    }
+
+    private static XDocument? TryReadStylesXml(string docxPath)
+    {
+        using var stream = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        var entry = archive.GetEntry("word/styles.xml");
+        if (entry == null) return null;
+        using var reader = new StreamReader(entry.Open());
+        return XDocument.Load(reader);
+    }
+
+    /// <summary>写入 styles.xml；调用前 output 必须已存在（由 WriteDocumentXml 创建）。</summary>
+    private static void WriteStylesXml(string inputPath, string outputPath, XDocument doc)
+    {
+        using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.ReadWrite);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Update);
+        archive.GetEntry("word/styles.xml")?.Delete();
+        var entry = archive.CreateEntry("word/styles.xml");
+        using var writer = new StreamWriter(entry.Open());
+        doc.Save(writer);
     }
 
     private static void WriteDocumentXml(string inputPath, string outputPath, XDocument doc)

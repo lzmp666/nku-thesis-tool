@@ -70,6 +70,33 @@ public sealed class FigureTableAnalyzerTests
     }
 
     [Fact]
+    public void VisibleCellBordersAreReportedEvenWhenTableBordersLookThreeLine()
+    {
+        var path = CreateDocx("""
+            <w:tbl>
+              <w:tblPr>
+                <w:tblBorders>
+                  <w:top w:val="single" w:sz="12"/>
+                  <w:left w:val="nil"/>
+                  <w:bottom w:val="single" w:sz="12"/>
+                  <w:right w:val="nil"/>
+                  <w:insideH w:val="nil"/>
+                  <w:insideV w:val="nil"/>
+                </w:tblBorders>
+              </w:tblPr>
+              <w:tr><w:tc><w:tcPr><w:tcBorders><w:top w:val="single" w:sz="4"/><w:left w:val="single" w:sz="4"/></w:tcBorders></w:tcPr>
+                <w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            """);
+        try
+        {
+            var issue = Assert.Single(new FigureTableAnalyzer().Analyze(path).TableIssues);
+            Assert.Contains("单元格", issue);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void PageBreakBeforeAndTableCaptionWithoutKeepNextAreReported()
     {
         var path = CreateDocx("""
@@ -103,12 +130,54 @@ public sealed class FigureTableAnalyzerTests
             Assert.NotEmpty(before.TableIssues);
 
             new FigureTableRewriter().ApplyThreeLineTables(input, output);
+            new FigureTableRewriter().CenterAlignImages(output, output);
             new FigureTableRewriter().FixPageBreaks(output, output);
 
             var after = analyzer.Analyze(output);
             Assert.Equal(before.TablesCount, after.TablesCount);
             Assert.Empty(after.TableIssues);
             Assert.Empty(after.PageBreakIssues);
+
+            // 排版通过样式实现：表格套用 NKUThreeLine、图片段落套用 NKUFigure，
+            // 不写直接边框/直接对齐；表头线 0.5 磅写在样式的首行条件格式里。
+            using (var check = ZipFile.OpenRead(output))
+            {
+                XDocument xml;
+                using (var reader = new StreamReader(check.GetEntry("word/document.xml")!.Open()))
+                {
+                    xml = XDocument.Load(reader);
+                }
+
+                XNamespace w = W;
+                var tableProperties = xml.Descendants(w + "tbl").First().Element(w + "tblPr");
+                Assert.Equal("NKUThreeLine", (string?)tableProperties?.Element(w + "tblStyle")?.Attribute(w + "val"));
+                Assert.Null(tableProperties?.Element(w + "tblBorders"));
+                Assert.DoesNotContain(xml.Descendants(w + "tcPr"), cell => cell.Element(w + "tcBorders") != null);
+
+                var figureParagraphs = xml.Descendants(w + "p")
+                    .Where(paragraph => paragraph.Descendants().Any(e => e.Name.LocalName == "blip"))
+                    .ToList();
+                Assert.NotEmpty(figureParagraphs);
+                foreach (var paragraph in figureParagraphs)
+                {
+                    var properties = paragraph.Element(w + "pPr");
+                    Assert.Equal("NKUFigure", (string?)properties?.Element(w + "pStyle")?.Attribute(w + "val"));
+                    Assert.Null(properties?.Element(w + "jc"));
+                }
+
+                XDocument styles;
+                using (var reader = new StreamReader(check.GetEntry("word/styles.xml")!.Open()))
+                {
+                    styles = XDocument.Load(reader);
+                }
+
+                var tableStyle = styles.Descendants(w + "style")
+                    .First(style => (string?)style.Attribute(w + "styleId") == "NKUThreeLine");
+                var headerBottom = tableStyle.Descendants(w + "tblStylePr").Descendants(w + "bottom").First();
+                Assert.Equal("4", (string?)headerBottom.Attribute(w + "sz"));
+                Assert.NotNull(styles.Descendants(w + "style")
+                    .FirstOrDefault(style => (string?)style.Attribute(w + "styleId") == "NKUFigure"));
+            }
 
             // 在真实文档包上校验：新增的段落属性必须符合 OOXML 结构，否则 Word 会报文件损坏。
             using var package = WordprocessingDocument.Open(output, false);
