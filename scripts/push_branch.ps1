@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "scripts\Invoke-GitHubApi.ps1")
+. (Join-Path $PSScriptRoot "Invoke-GitHubApi.ps1")
 
 $git = Get-NkuGit
 $slug = Get-NkuRepoSlug -Repo $Repo -Git $git

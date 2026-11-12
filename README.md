@@ -10,11 +10,13 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 13 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure） |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
 | Word 插件前端（中文任务窗格、原文定位、锚点联动、单项/批量修复预览） | 已合入 main（#65、#69）；已有合成文档实测记录，完整阶段验收仍由 #51、#63、#52 跟踪 |
+| 已修复的误判 | 三线表修复后复检误报「有完整内边框」已修复（#106）；full-format 二次运行幂等、继承边框表格的识别均有回归用例守护 |
+| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 488 条全过 |
 | 独立网页前端 | 当前产品不提供；用户工作界面是 Word 内的任务窗格 |
 | 南开大学正式格式规则的完整覆盖 | 尚未完成；当前演示使用合成规则 |
 
@@ -42,6 +44,12 @@ CLI 标注演示会生成带批注和高亮的新 Word 文档；VSTO 任务窗�
 dotnet restore NkuThesisTool.sln
 dotnet build NkuThesisTool.sln --configuration Release --no-restore
 dotnet test NkuThesisTool.sln --configuration Release --no-build
+```
+
+改完格式化逻辑后，用一条命令跑回归基线（三条链路，输出留痕到 `artifacts/regression/`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\Invoke-RegressionBaseline.ps1
 ```
 
 ## 聊天模型配置（chat 子命令）

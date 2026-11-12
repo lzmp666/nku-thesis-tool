@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "scripts\Invoke-GitHubApi.ps1")
+. (Join-Path $PSScriptRoot "Invoke-GitHubApi.ps1")
 
 $git = Get-NkuGit
 $slug = Get-NkuRepoSlug -Repo $Repo -Git $git
@@ -29,7 +29,7 @@ $paths = @($Files | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 if ($paths.Count -eq 0) { throw "Pass at least one existing file with -Files." }
 # The API needs repo-relative tree paths. Resolve each file and reject anything
 # outside the repository instead of sending an absolute Windows path to GitHub.
-$repoRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path.TrimEnd("\")
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path.TrimEnd("\")
 $treePaths = @()
 foreach ($path in $paths) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $path" }
