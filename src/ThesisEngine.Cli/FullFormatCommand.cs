@@ -150,6 +150,7 @@ public sealed class FullFormatCommand
             _output.WriteLine("  - 所有图片居中对齐");
             _figureRewriter.ApplyThreeLineTables(outputPath, outputPath);
             _figureRewriter.CenterAlignImages(outputPath, outputPath);
+            _figureRewriter.ApplyCaptionStyles(outputPath, outputPath);
             _output.WriteLine();
 
             // 5. 修正跨页问题

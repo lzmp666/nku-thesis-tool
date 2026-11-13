@@ -145,7 +145,7 @@ public sealed class FigureTableAnalyzer
     private static List<string> FindPageBreakIssues(XElement body)
     {
         var issues = new List<string>();
-        foreach (var paragraph in body.Elements(W + "p"))
+        foreach (var paragraph in FigureTableParagraphs.Of(body))
         {
             var properties = paragraph.Element(W + "pPr");
             var text = string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value)).Trim();

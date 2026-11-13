@@ -118,6 +118,74 @@ public sealed class FigureTableRewriter
     }
 
     /// <summary>
+    /// 题注排版：图题套 <c>NKUFigureCaption</c>、表题套 <c>NKUTableCaption</c>。
+    /// 两个样式都定义段前 6 磅、单倍行距、宋体 10.5 磅居中，段后分别为 12/6 磅；
+    /// “续表”按表题处理。
+    /// </summary>
+    public void ApplyCaptionStyles(string inputPath, string outputPath)
+    {
+        var doc = ReadDocumentXml(inputPath);
+        var stylesDocument = TryReadStylesXml(inputPath);
+        if (stylesDocument != null) FigureTableStyleWriter.EnsureStyles(stylesDocument);
+
+        var body = doc.Root?.Element(W + "body");
+        if (body == null) return;
+
+        foreach (var paragraph in FigureTableParagraphs.Of(body))
+        {
+            var kind = FigureTableParagraphs.Classify(FigureTableParagraphs.Text(paragraph));
+            if (kind == null) continue;
+
+            var pPr = paragraph.Element(W + "pPr");
+            if (pPr == null)
+            {
+                pPr = new XElement(W + "pPr");
+                paragraph.AddFirst(pPr);
+            }
+
+            if (stylesDocument != null)
+            {
+                var paragraphStyle = pPr.Element(W + "pStyle");
+                if (paragraphStyle == null)
+                {
+                    paragraphStyle = new XElement(W + "pStyle");
+                    InsertOrdered(pPr, paragraphStyle, ParagraphPropertySequence);
+                }
+
+                paragraphStyle.SetAttributeValue(W + "val", kind == CaptionKind.Table
+                    ? FigureTableStyleWriter.TableCaptionStyleId
+                    : FigureTableStyleWriter.FigureCaptionStyleId);
+                continue;
+            }
+
+            // styles.xml 缺失时的降级路径：直接写段落属性。
+            var spacing = pPr.Element(W + "spacing");
+            if (spacing == null)
+            {
+                spacing = new XElement(W + "spacing");
+                InsertOrdered(pPr, spacing, ParagraphPropertySequence);
+            }
+
+            spacing.SetAttributeValue(W + "before", "120");
+            spacing.SetAttributeValue(W + "after", kind == CaptionKind.Table ? "120" : "240");
+            spacing.SetAttributeValue(W + "line", "240");
+            spacing.SetAttributeValue(W + "lineRule", "auto");
+
+            var jc = pPr.Element(W + "jc");
+            if (jc == null)
+            {
+                jc = new XElement(W + "jc");
+                InsertOrdered(pPr, jc, ParagraphPropertySequence);
+            }
+
+            jc.SetAttributeValue(W + "val", "center");
+        }
+
+        WriteDocumentXml(inputPath, outputPath, doc);
+        if (stylesDocument != null) WriteStylesXml(inputPath, outputPath, stylesDocument);
+    }
+
+    /// <summary>
     /// 将所有图片所在段落设置为居中对齐。
     /// </summary>
     public void CenterAlignImages(string inputPath, string outputPath)
@@ -129,7 +197,7 @@ public sealed class FigureTableRewriter
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
-        var paragraphs = body.Elements(W + "p").ToList();
+        var paragraphs = FigureTableParagraphs.Of(body).ToList();
         foreach (var para in paragraphs)
         {
             // 检查段落里有没有图片
@@ -181,7 +249,7 @@ public sealed class FigureTableRewriter
         var body = doc.Root?.Element(W + "body");
         if (body == null) return;
 
-        var paragraphs = body.Elements(W + "p").ToList();
+        var paragraphs = FigureTableParagraphs.Of(body).ToList();
         int widowCount = 0;
         int captionCount = 0;
 

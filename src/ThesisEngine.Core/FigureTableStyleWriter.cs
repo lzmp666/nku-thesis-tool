@@ -14,6 +14,8 @@ public static class FigureTableStyleWriter
 {
     public const string ThreeLineTableStyleId = "NKUThreeLine";
     public const string FigureParagraphStyleId = "NKUFigure";
+    public const string FigureCaptionStyleId = "NKUFigureCaption";
+    public const string TableCaptionStyleId = "NKUTableCaption";
 
     private const string MainNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     private static readonly XNamespace W = MainNamespace;
@@ -45,7 +47,40 @@ public static class FigureTableStyleWriter
                     new XAttribute(W + "type", "firstRow"),
                     new XElement(W + "tcPr", new XElement(W + "tcBorders", Border("bottom", "single", "4"))))));
         }
+
+        // 图题：段前 6 磅、段后 12 磅、单倍行距、宋体 10.5 磅居中。
+        if (!HasStyle(root, FigureCaptionStyleId))
+        {
+            root.Add(CaptionStyle(FigureCaptionStyleId, "NKU Figure Caption", "240"));
+        }
+
+        // 表题：段前 6 磅、段后 6 磅，其余同图题。
+        if (!HasStyle(root, TableCaptionStyleId))
+        {
+            root.Add(CaptionStyle(TableCaptionStyleId, "NKU Table Caption", "120"));
+        }
     }
+
+    private static XElement CaptionStyle(string styleId, string name, string afterTwips) => new(
+        W + "style",
+        new XAttribute(W + "type", "paragraph"),
+        new XAttribute(W + "styleId", styleId),
+        new XElement(W + "name", new XAttribute(W + "val", name)),
+        new XElement(W + "qFormat"),
+        new XElement(W + "pPr",
+            new XElement(W + "spacing",
+                new XAttribute(W + "before", "120"),
+                new XAttribute(W + "after", afterTwips),
+                new XAttribute(W + "line", "240"),
+                new XAttribute(W + "lineRule", "auto")),
+            new XElement(W + "jc", new XAttribute(W + "val", "center"))),
+        new XElement(W + "rPr",
+            new XElement(W + "rFonts",
+                new XAttribute(W + "ascii", "Times New Roman"),
+                new XAttribute(W + "hAnsi", "Times New Roman"),
+                new XAttribute(W + "eastAsia", "宋体")),
+            new XElement(W + "sz", new XAttribute(W + "val", "21")),
+            new XElement(W + "szCs", new XAttribute(W + "val", "21"))));
 
     /// <summary>三线表的表级边框定义，供样式与降级路径共用。</summary>
     public static XElement ThreeLineBorders() => new(W + "tblBorders",

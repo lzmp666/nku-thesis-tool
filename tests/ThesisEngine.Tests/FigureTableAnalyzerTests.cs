@@ -227,6 +227,76 @@ public sealed class FigureTableAnalyzerTests
         }
     }
 
+    [Fact]
+    public void TableCellParagraphsAndContinuedCaptionsAreRecognized()
+    {
+        var path = CreateDocx("""
+            <w:tbl><w:tblPr/><w:tr><w:tc><w:p><w:r><w:t>续表4.1 合成记录</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+            """);
+        try
+        {
+            using var archive = ZipFile.OpenRead(path);
+            using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+            var document = XDocument.Load(reader);
+            XNamespace w = W;
+            var body = document.Root!.Element(w + "body")!;
+
+            var paragraph = Assert.Single(FigureTableParagraphs.Of(body));
+            var text = FigureTableParagraphs.Text(paragraph);
+            Assert.Equal(CaptionKind.Table, FigureTableParagraphs.Classify(text));
+            Assert.True(FigureTableParagraphs.IsContinuedTable(text));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void CaptionStylesCarryR12SpacingAndAreAppliedToCaptions()
+    {
+        var root = FindRepositoryRoot();
+        var input = Path.Combine(root, "tests", "fixtures", "synthetic", "full-thesis", "synthetic_object_layout_errors.docx");
+        var output = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        try
+        {
+            new FigureTableRewriter().ApplyCaptionStyles(input, output);
+
+            using var archive = ZipFile.OpenRead(output);
+            XDocument document;
+            using (var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open()))
+            {
+                document = XDocument.Load(reader);
+            }
+
+            XDocument styles;
+            using (var reader = new StreamReader(archive.GetEntry("word/styles.xml")!.Open()))
+            {
+                styles = XDocument.Load(reader);
+            }
+
+            XNamespace w = W;
+            Assert.Contains(document.Descendants(w + "pStyle"),
+                style => (string?)style.Attribute(w + "val") == "NKUFigureCaption");
+            Assert.Contains(document.Descendants(w + "pStyle"),
+                style => (string?)style.Attribute(w + "val") == "NKUTableCaption");
+
+            var figureStyle = styles.Descendants(w + "style")
+                .First(style => (string?)style.Attribute(w + "styleId") == "NKUFigureCaption");
+            var spacing = figureStyle.Descendants(w + "spacing").First();
+            Assert.Equal("120", (string?)spacing.Attribute(w + "before"));
+            Assert.Equal("240", (string?)spacing.Attribute(w + "after"));
+            Assert.Equal("240", (string?)spacing.Attribute(w + "line"));
+            Assert.Equal("auto", (string?)spacing.Attribute(w + "lineRule"));
+            Assert.Equal("21", (string?)figureStyle.Descendants(w + "sz").First().Attribute(w + "val"));
+
+            var tableStyle = styles.Descendants(w + "style")
+                .First(style => (string?)style.Attribute(w + "styleId") == "NKUTableCaption");
+            Assert.Equal("120", (string?)tableStyle.Descendants(w + "spacing").First().Attribute(w + "after"));
+        }
+        finally
+        {
+            if (File.Exists(output)) File.Delete(output);
+        }
+    }
+
     private static string Table(string borderXml) =>
         $"<w:tbl><w:tblPr>{borderXml}</w:tblPr>"
         + "<w:tr><w:tc><w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc>"
