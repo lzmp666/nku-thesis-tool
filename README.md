@@ -10,13 +10,13 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 13 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure） |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 13 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
 | Word 插件前端（中文任务窗格、原文定位、锚点联动、单项/批量修复预览） | 已合入 main（#65、#69）；已有合成文档实测记录，完整阶段验收仍由 #51、#63、#52 跟踪 |
 | 已修复的误判 | 三线表修复后复检误报「有完整内边框」已修复（#106）；full-format 二次运行幂等、继承边框表格的识别均有回归用例守护 |
-| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 488 条全过 |
+| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 527 条全过 |
 | 独立网页前端 | 当前产品不提供；用户工作界面是 Word 内的任务窗格 |
 | 南开大学正式格式规则的完整覆盖 | 尚未完成；当前演示使用合成规则 |
 
@@ -102,6 +102,18 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 ```
 
 生成后用 Word 打开 <code>artifacts/known_issues.annotated.docx</code>，可查看三处黄色高亮及对应中文批注。输入样例不会被改写，已有的输出文件不会被覆盖。演示样例检查东亚字体、西文字体和字号三项；完整预期结果和复测说明见[Demo 文档](docs/demo/README.md)。
+
+## 参考文献一致性检查（只查不改）
+
+`analyze --citations` 单独检查正文引用与文末参考文献是否对得上，**只报问题、不改写文档**。当前口径是顺序编码制（`[1]`、上标 `[1]`），依据及检查项见 [#152](https://github.com/lzmp666/nku-thesis-tool/issues/152)。
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze --citations <论文.docx>
+```
+
+报告给出引用标注数、参考文献条目数、问题数及逐条定位（`word/document.xml#paragraph[n]`）。检查五类：正文引用编号连续（跳号/重号）、有引无条与有条无引、标注位置（标点之前）、条目字段完整性（编号/作者/年卷期页）、同一文献复用同一编号。上标引用按 `w:vertAlign="superscript"` 识别；正文里作参数说明或数组下标的 `[1]` 不误报。
+
+注意：只检查规则明确要求的项，规则未覆盖的不作判断；Zotero / EndNote 插入的域只统计不解析；页下注体例、著者-出版年制不在本模式范围。合规样本预期 0 条问题，输出会明确「问题数量：0」。
 
 ## 在 Word 中打开插件
 
