@@ -76,6 +76,9 @@ public sealed class AnalyzeCommand
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
+        if (arguments.Length > 1 && string.Equals(arguments[1], "--citations", StringComparison.Ordinal))
+            return new CitationAnalyzeCommand().Execute(arguments, output, error);
+
         if (!TryParse(arguments, out var options))
         {
             WriteUsage(error);
