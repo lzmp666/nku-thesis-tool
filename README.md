@@ -10,13 +10,13 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 17 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 18 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
 | Word 插件前端（中文任务窗格、原文定位、锚点联动、单项/批量修复预览） | 已合入 main（#65、#69）；已有合成文档实测记录，完整阶段验收仍由 #51、#63、#52 跟踪 |
 | 已修复的误判 | 三线表修复后复检误报「有完整内边框」已修复（#106）；full-format 二次运行幂等、继承边框表格的识别均有回归用例守护 |
-| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 564 条全过 |
+| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 571 条全过 |
 | 独立网页前端 | 当前产品不提供；用户工作界面是 Word 内的任务窗格 |
 | 南开大学正式格式规则的完整覆盖 | 尚未完成；当前演示使用合成规则 |
 
@@ -138,6 +138,17 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 问题码按部件连续编号：参考文献 B1–B4、附录 B5–B10、符号表与简历 B11–B14、致谢 B15–B17。报告同时列出识别到的部件与正文段落、期望值与实际值、未检查项。口径边界：各部件标题要求「同各章标题（R7）」由标题检查负责，本命令不判；附录中含数学表达式的段落按条文豁免行距，其余维度照查；同部件子标题（附录 A/B）不算正文。识别不到标题的部件列入「未识别」，不假装合规；样式链读不到的维度列入「未判定」。规则状态为 **draft**（来源 S1 2025 版条文），样本与问题码见 [尾注样本说明](tests/fixtures/synthetic/back-matter/README.md)。
 
 本命令与 `analyze --citations` 的参考文献**引用一致性**（#152）是两个不同维度：这里只管字体字号行距等排版值，不核对正文引用与文末条目是否一一对应。
+
+## 统一合规报告（只查不改）
+
+`report` 一次调用跑完全部「只查不改」分析器（页面与章节结构、样式使用、图表排版、公式排版、脚注与注释体例、参考文献引用一致性、中英文摘要格式、尾注部件格式），汇成一份报告，**只报问题、不改写文档**。适合交付前一次性总览，不必逐条命令分别运行。
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- report <论文.docx>
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- report <论文.docx> --json
+```
+
+报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出八个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。所有规则状态均为 **draft**，报告为静态 XML 检查，不替代 Word 实机渲染核验。
 
 ## 在 Word 中打开插件
 
