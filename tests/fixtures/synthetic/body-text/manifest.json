@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "R11 正文段落格式检查（补齐两端对齐/首行缩进/固定行距/段前后4个排版维度）合成样本，字体字号用合规值不制造差异。每文件只偏离一个维度。",
+  "generator": "generate.py",
+  "samples": [
+    { "file": "body_compliant.docx", "expect": "0 问题；章标题 1 → 参考文献 5 之间 3 段正文" },
+    { "file": "body_align_left.docx", "expect": "3×T1（两端对齐）" },
+    { "file": "body_indent_wrong.docx", "expect": "3×T2（首行缩进）" },
+    { "file": "body_line_spacing_wrong.docx", "expect": "3×T3（固定行距）" },
+    { "file": "body_before_wrong.docx", "expect": "3×T4（段距）" },
+    { "file": "body_after_wrong.docx", "expect": "3×T4（段距）" },
+    { "file": "body_math_line_exempt.docx", "expect": "0 问题；含公式段行距豁免，列未判定" },
+    { "file": "body_no_boundary.docx", "expect": "0 问题；未识别章标题，如实列未检查，checked=0" }
+  ]
+}
