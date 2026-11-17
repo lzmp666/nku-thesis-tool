@@ -98,7 +98,9 @@ public static class PartFormatReader
                 LineSpacingRule: ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "lineRule"),
                 LineSpacingValue: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "line"), out var lineValue) ? lineValue : null,
                 SpaceBeforeTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "before"), out var beforeValue) ? beforeValue : null,
-                SpaceAfterTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "after"), out var afterValue) ? afterValue : null));
+                SpaceAfterTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "after"), out var afterValue) ? afterValue : null,
+                FirstLineTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "firstLine"), out var firstLineValue) ? firstLineValue : null,
+                FirstLineChars: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "firstLineChars"), out var firstLineCharsValue) ? firstLineCharsValue : null));
         }
 
         return new PartFormatResult(readings, undetermined);
@@ -312,7 +314,9 @@ public sealed record PartFormatReading(
     string? LineSpacingRule = null,
     int? LineSpacingValue = null,
     int? SpaceBeforeTwips = null,
-    int? SpaceAfterTwips = null)
+    int? SpaceAfterTwips = null,
+    int? FirstLineTwips = null,
+    int? FirstLineChars = null)
 {
     /// <summary>三个维度都能读到值，才算这一段完整查过。</summary>
     public bool FullyResolved => FontResolved && SizeResolved && AlignmentResolved;
