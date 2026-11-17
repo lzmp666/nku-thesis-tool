@@ -346,6 +346,11 @@ public sealed class DocumentAnalyzer
                 SectionIndex: 0,
                 Current: "设置了奇偶页不同（w:evenAndOddHeaders）",
                 Expected: "关闭奇偶页不同，奇偶页使用同一页眉"));
+
+            // #151 第 3 项 A：开关之外再比对奇偶页眉文字。只有 default 与 even
+            // 两个部件都在、且文字确实不同时才报——没有 even 部件时不猜（现有样本
+            // 就是只开开关、不建 even 部件，仍只报 D5）。
+            CheckEvenOddHeaderText(sectionElements, archive, relationships, issues);
         }
 
         CheckTableOfContents(body, issues);
@@ -353,28 +358,138 @@ public sealed class DocumentAnalyzer
     }
 
     /// <summary>
+    /// 奇偶页眉内容比对（#151 第 3 项 A）。R2 要求奇偶页相同；D5 只查了开关，
+    /// 这里补上实际文字比对，回答「开了开关之后两页是不是真用了不同页眉」。
+    /// 判不出（缺部件、缺引用）就不报，不靠推测凑问题数。
+    /// </summary>
+    private static void CheckEvenOddHeaderText(
+        IReadOnlyList<XElement> sectionElements,
+        ZipArchive archive,
+        IReadOnlyDictionary<string, string> relationships,
+        List<DocumentIssue> issues)
+    {
+        var byType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reference in sectionElements.SelectMany(sectPr => sectPr.Elements(W + "headerReference")))
+        {
+            var type = (string?)reference.Attribute(W + "type");
+            var name = ResolvePartName(reference, relationships);
+            if (type is null || name is null || byType.ContainsKey(type)) continue;
+            var part = LoadXml(archive, name);
+            if (part is null) continue;
+            byType[type] = HeaderText(part);
+        }
+
+        if (!byType.TryGetValue("default", out var defaultText) ||
+            !byType.TryGetValue("even", out var evenText)) return;
+        if (string.IsNullOrWhiteSpace(defaultText) || string.IsNullOrWhiteSpace(evenText)) return;
+        if (string.Equals(defaultText, evenText, StringComparison.Ordinal)) return;
+
+        issues.Add(new DocumentIssue(
+            Code: "D13",
+            Title: "奇偶页眉内容不一致",
+            Basis: "R2（3.4）：论文页眉奇偶页相同",
+            SectionIndex: 0,
+            Current: $"奇数页页眉“{TrimForReport(defaultText)}”，偶数页页眉“{TrimForReport(evenText)}”",
+            Expected: "奇偶页使用同一页眉，或关闭奇偶页不同"));
+    }
+
+    private static string HeaderText(XDocument part) =>
+        string.Concat(part.Root?.Descendants(W + "t").Select(t => t.Value) ?? Enumerable.Empty<string>()).Trim();
+
+    /// <summary>
     /// 目录是不是自动生成的域。手打的目录在 Word 里页码对不上，改一次正文就全废。
     /// </summary>
     private static void CheckTableOfContents(XElement body, List<DocumentIssue> issues)
     {
-        if (HasField(body, TocFieldPattern)) return;
+        if (!HasField(body, TocFieldPattern))
+        {
+            // 没有 TOC 域：沿用原逻辑，有「目录」标题却手打才报 D9。
+            var hasTocHeading = body.Descendants(W + "p")
+                .Any(para =>
+                {
+                    var text = string.Concat(para.Descendants(W + "t").Select(t => t.Value)).Trim();
+                    return TocHeadings.Contains(text, StringComparer.Ordinal);
+                });
+            if (!hasTocHeading) return;
 
-        var hasTocHeading = body.Descendants(W + "p")
-            .Any(para =>
+            issues.Add(new DocumentIssue(
+                Code: "D9",
+                Title: "目录不是自动生成的域",
+                Basis: "R6（4.6 表4.5）：目录由 Word 自动生成并随正文更新",
+                SectionIndex: 0,
+                Current: "文档里有「目录」标题，但没有 TOC 域（多半是手打的）",
+                Expected: "用引用 → 目录插入自动目录，正文改动后右键更新域"));
+            return;
+        }
+
+        // #151 第 3 项 A：有 TOC 域时，比对正文标题是否都进了目录条目。
+        // 正文标题按 Heading1-9 / NKU 标题样式识别，目录条目取带 PAGEREF 域的段落文字。
+        // 只在「正文有标题、目录也有条目」两边都读到内容时才判，避免样本造得不全时误报。
+        CheckTocEntriesAgainstHeadings(body, issues);
+    }
+
+    /// <summary>
+    /// 目录条目与正文标题对应（#151 第 3 项 A）。只查 XML 层面确定的情形：
+    /// 正文里带 Heading1-9 / 标题样式的段落，其文字没出现在任何目录条目里，报一条 D14。
+    /// 目录条目用带 PAGEREF 域的段落文字（Word 自动目录的标准形态）。
+    /// 样式链判不出、目录条目为空等情形一律跳过，不靠推测凑数。
+    /// </summary>
+    private static readonly Regex HeadingStylePattern =
+        new(@"^(?:Heading[1-9]|Title|标题[1-9]|NKU.*Heading.*)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex PageRefFieldPattern =
+        new(@"(?<!\w)PAGEREF(?!\w)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static void CheckTocEntriesAgainstHeadings(XElement body, List<DocumentIssue> issues)
+    {
+        var paragraphs = body.Descendants(W + "p").ToList();
+        var paragraphsText = paragraphs
+            .Select(p => string.Concat(p.Descendants(W + "t").Select(t => t.Value)).Trim())
+            .ToList();
+
+        // 目录条目：段落里带 PAGEREF 域（自动目录的页码链接）。
+        var tocEntryTexts = paragraphs
+            .Where(p => HasField(p, PageRefFieldPattern))
+            .Select(p => StripPageNumber(string.Concat(p.Descendants(W + "t").Select(t => t.Value)).Trim()))
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToList();
+        if (tocEntryTexts.Count == 0) return;
+
+        // 正文标题：pStyle 命中 Heading/Title/NKU 标题样式，且不在目录条目段落内。
+        // 目录条目段落本身也可能带 TOC 样式，这里只认 Heading 系，规避自比。
+        var headingTexts = paragraphs
+            .Where(p =>
             {
-                var text = string.Concat(para.Descendants(W + "t").Select(t => t.Value)).Trim();
-                return TocHeadings.Contains(text, StringComparer.Ordinal);
-            });
+                var styleId = (string?)p.Element(W + "pPr")?.Element(W + "pStyle")?.Attribute(W + "val");
+                return styleId is not null && HeadingStylePattern.IsMatch(styleId);
+            })
+            .Select(p => string.Concat(p.Descendants(W + "t").Select(t => t.Value)).Trim())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToList();
+        if (headingTexts.Count == 0) return;
 
-        if (!hasTocHeading) return;
+        var missing = headingTexts
+            .Where(h => !tocEntryTexts.Any(entry => entry.Contains(h, StringComparison.Ordinal) ||
+                                                     h.Contains(entry, StringComparison.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .Take(3)
+            .ToList();
+        if (missing.Count == 0) return;
 
         issues.Add(new DocumentIssue(
-            Code: "D9",
-            Title: "目录不是自动生成的域",
+            Code: "D14",
+            Title: "正文标题未全部进入目录",
             Basis: "R6（4.6 表4.5）：目录由 Word 自动生成并随正文更新",
             SectionIndex: 0,
-            Current: "文档里有「目录」标题，但没有 TOC 域（多半是手打的）",
-            Expected: "用引用 → 目录插入自动目录，正文改动后右键更新域"));
+            Current: $"正文标题“{string.Join("”“", missing.Select(TrimForReport))}”未出现在目录条目中",
+            Expected: "更新目录域，使正文各级标题都进入目录；或检查标题是否套用了 Heading 样式"));
+    }
+
+    /// <summary>目录条目末尾的制表符与页码不属于标题文字，去掉再比。</summary>
+    private static string StripPageNumber(string entry)
+    {
+        var cut = entry.IndexOfAny(new[] { '\t' });
+        return (cut >= 0 ? entry[..cut] : entry).Trim();
     }
 
     /// <summary>
@@ -715,7 +830,6 @@ public sealed class DocumentAnalyzer
         "页眉是否为 Abstract 部分：XML 层面认不出章节归属，只能按文字是否全为西文近似，判错的可能要人工确认",
         "同一页眉/页脚段落里多个 run 格式不一致：取哪个值都不代表这一段，标未判定，需人工看",
         "正文从第一章起编阿拉伯数字：要判断哪一节是「第一章」，靠 XML 判不准，需人工确认",
-        "奇偶页是否真的「内容相同」：只查了是否开启奇偶页不同，未比对奇偶页眉文字",
         "空白页的完整判定：段后间距、表格跨页导致的空白要真实分页才算得准，只报两种确定性情形",
         "页面方向与装订线位置：规范未作规定，不查",
     };

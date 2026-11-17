@@ -502,6 +502,38 @@ public sealed class FigureTableAnalyzerTests
         }
     }
 
+    /// <summary>#92 第 10 条：形似题注但编号解析不出来，要报一条，不能静默放过。</summary>
+    [Fact]
+    public void UnrecognizedCaptionNumberIsReported()
+    {
+        var path = CreateDocx("""
+            <w:p><w:r><w:t>图一 系统架构</w:t></w:r></w:p>
+            """);
+        try
+        {
+            var result = new FigureTableAnalyzer().Analyze(path);
+            Assert.Contains(result.TableIssues, issue => issue.Contains("编号无法识别"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>反例：正常题注和普通正文都不该报无法识别，防止规则太宽误伤。</summary>
+    [Fact]
+    public void NormalCaptionsAndBodyTextAreNotFlaggedAsUnrecognized()
+    {
+        var path = CreateDocx("""
+            <w:p><w:r><w:t>图 1-1 系统架构</w:t></w:r></w:p>
+            <w:p><w:r><w:t>如表所示，结果已在前面说明。</w:t></w:r></w:p>
+            <w:p><w:r><w:t>续表 2-3 参数对照（编号形态正确）</w:t></w:r></w:p>
+            """);
+        try
+        {
+            var result = new FigureTableAnalyzer().Analyze(path);
+            Assert.DoesNotContain(result.TableIssues, issue => issue.Contains("编号无法识别"));
+        }
+        finally { File.Delete(path); }
+    }
+
     private static string Table(string borderXml) =>
         $"<w:tbl><w:tblPr>{borderXml}</w:tblPr>"
         + "<w:tr><w:tc><w:p><w:r><w:t>项目</w:t></w:r></w:p></w:tc>"

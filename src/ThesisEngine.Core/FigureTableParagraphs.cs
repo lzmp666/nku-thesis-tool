@@ -55,6 +55,28 @@ public static class FigureTableParagraphs
     public static bool IsContinuedTable(string? text) =>
         !string.IsNullOrWhiteSpace(text) && text.TrimStart().StartsWith("续表", StringComparison.Ordinal);
 
+    /// <summary>
+    /// 看起来像题注、但编号形态没通过 <see cref="Classify"/> 的段落（#92 第 10 条）。
+    /// 只认以题注引导词开头的短段落：正文里“如图所示”“见下表”这类不会被算进来，
+    /// 避免把普通句子当错题注。引导词后必须有内容，光一个“图”字也不报。
+    /// </summary>
+    public static bool LooksLikeUnrecognizedCaption(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var trimmed = text.Trim();
+        if (Classify(trimmed) is not null) return false;
+
+        var keyword = CaptionLeadPattern.Match(trimmed);
+        if (!keyword.Success) return false;
+
+        var rest = trimmed[keyword.Length..].TrimStart();
+        return rest.Length > 0 && rest.Length <= 40;
+    }
+
+    private static readonly Regex CaptionLeadPattern = new(
+        @"^(?:续表|表|图|Table|Figure|Fig\.)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     public static string Text(XElement paragraph) =>
         string.Concat(paragraph.Descendants(W + "t").Select(t => t.Value)).Trim();
 
