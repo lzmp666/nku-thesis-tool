@@ -131,6 +131,69 @@ public sealed class DocumentAnalyzerTests
         Assert.True(result.HasTocField);
     }
 
+    /// <summary>#151 第 3 项 A：开了奇偶页不同且两页眉文字不同，报 D13（在 D5 之外）。</summary>
+    [Fact]
+    public void DifferentEvenOddHeaderTextIsReported()
+    {
+        var path = CreateDocxWithEvenOddHeaders("第一章 引言", "摘要", enableEvenOdd: true);
+        try
+        {
+            var result = new DocumentAnalyzer().Analyze(path);
+            Assert.Contains(result.Issues, issue => issue.Code == "D13");
+            Assert.Contains(result.Issues, issue => issue.Code == "D5");
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>反例：开了开关但两页眉文字相同，不报 D13（D5 仍报）。</summary>
+    [Fact]
+    public void SameEvenOddHeaderTextIsNotReported()
+    {
+        var path = CreateDocxWithEvenOddHeaders("第一章 引言", "第一章 引言", enableEvenOdd: true);
+        try
+        {
+            var result = new DocumentAnalyzer().Analyze(path);
+            Assert.DoesNotContain(result.Issues, issue => issue.Code == "D13");
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>#151 第 3 项 A：正文 Heading 标题没进目录条目，报 D14。</summary>
+    [Fact]
+    public void HeadingMissingFromTocIsReported()
+    {
+        var body =
+            $"<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> TOC \\o \"1-3\" </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p>" +
+            "<w:p><w:r><w:t>第一章 引言</w:t></w:r><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> PAGEREF _Toc1 \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r><w:r><w:t>第一章 引言\t1</w:t></w:r></w:p>" +
+            $"<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第二章 方法</w:t></w:r></w:p>" +
+            SectionXml(headerReference: true, footerReference: true);
+        var path = CreateDocx(body);
+        try
+        {
+            var result = new DocumentAnalyzer().Analyze(path);
+            Assert.Contains(result.Issues, issue => issue.Code == "D14" && issue.Current.Contains("第二章 方法"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>反例：正文标题都在目录条目里，不报 D14。</summary>
+    [Fact]
+    public void AllHeadingsPresentInTocAreNotReported()
+    {
+        var body =
+            $"<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> TOC \\o \"1-3\" </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p>" +
+            "<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText> PAGEREF _Toc1 \\h </w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"end\"/></w:r><w:r><w:t>第一章 引言\t1</w:t></w:r></w:p>" +
+            $"<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>第一章 引言</w:t></w:r></w:p>" +
+            SectionXml(headerReference: true, footerReference: true);
+        var path = CreateDocx(body);
+        try
+        {
+            var result = new DocumentAnalyzer().Analyze(path);
+            Assert.DoesNotContain(result.Issues, issue => issue.Code == "D14");
+        }
+        finally { File.Delete(path); }
+    }
+
     /// <summary>空白页属惯例项，不能算成不符合规范。</summary>
     [Fact]
     public void BlankPageIsConventionOnly()
@@ -472,6 +535,39 @@ public sealed class DocumentAnalyzerTests
         }
         Add(archive, "word/footer1.xml", footerXml ?? PageFieldFooter());
 
+        return path;
+    }
+
+    /// <summary>带 default/even 两类页眉引用的 docx，用于 D13 奇偶页眉内容比对测试。</summary>
+    private static string CreateDocxWithEvenOddHeaders(string defaultText, string evenText, bool enableEvenOdd)
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".docx");
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        Add(archive, "[Content_Types].xml",
+            $$"""
+            <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+              <Default Extension="xml" ContentType="application/xml"/>
+              <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+              <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+              <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+              <Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+            </Types>
+            """);
+        Add(archive, "_rels/.rels",
+            """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>""");
+        Add(archive, "word/document.xml",
+            $"""<w:document xmlns:w="{W}" xmlns:r="{R}"><w:body><w:p><w:r><w:t>正文</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="rId10"/><w:headerReference w:type="even" r:id="rId12"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="2155" w:right="1814" w:bottom="2155" w:left="1814" w:header="1701" w:footer="1701" w:gutter="0"/></w:sectPr></w:body></w:document>""");
+        Add(archive, "word/_rels/document.xml.rels",
+            $"""
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rId10" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+              <Relationship Id="rId12" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/>
+            </Relationships>
+            """);
+        Add(archive, "word/header1.xml", $"""<w:hdr xmlns:w="{W}"><w:p><w:r><w:t>{defaultText}</w:t></w:r></w:p></w:hdr>""");
+        Add(archive, "word/header2.xml", $"""<w:hdr xmlns:w="{W}"><w:p><w:r><w:t>{evenText}</w:t></w:r></w:p></w:hdr>""");
+        if (enableEvenOdd)
+            Add(archive, "word/settings.xml", $"""<w:settings xmlns:w="{W}"><w:evenAndOddHeaders/></w:settings>""");
         return path;
     }
 

@@ -37,7 +37,25 @@ public sealed class FigureTableAnalyzer
             ImagesCount: images.Count,
             TablesCount: tables.Count,
             PageBreakIssues: FindPageBreakIssues(body),
-            TableIssues: FindTableIssues(tables, styles));
+            TableIssues: FindTableIssues(tables, styles)
+                .Concat(FindUnrecognizedCaptions(body))
+                .ToList());
+    }
+
+    /// <summary>
+    /// #92 第 10 条：题注编号识别不出来时要报一条，不能静默放过。
+    /// 只对“看起来是题注但编号没解析出来”的段落报；普通正文、正常题注都不报。
+    /// </summary>
+    private static IEnumerable<string> FindUnrecognizedCaptions(XElement body)
+    {
+        foreach (var paragraph in FigureTableParagraphs.Of(body))
+        {
+            var text = FigureTableParagraphs.Text(paragraph);
+            if (FigureTableParagraphs.LooksLikeUnrecognizedCaption(text))
+            {
+                yield return $"题注“{Shorten(text)}”的编号无法识别（应为“图 1-1 / 表 2-3”这类形态），请修正编号格式";
+            }
+        }
     }
 
     private static XDocument? TryReadStylesXml(ZipArchive archive)
