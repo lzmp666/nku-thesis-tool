@@ -71,6 +71,12 @@ if (args.Length > 0 && string.Equals(args[0], "analyze-back-matter", StringCompa
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "report", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new ComplianceReportCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "apply-figure-format", StringComparison.OrdinalIgnoreCase))
 {
     var command = new ApplyFigureFormatCommand();
