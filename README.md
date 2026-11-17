@@ -10,13 +10,13 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 13 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 16 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
 | Word 插件前端（中文任务窗格、原文定位、锚点联动、单项/批量修复预览） | 已合入 main（#65、#69）；已有合成文档实测记录，完整阶段验收仍由 #51、#63、#52 跟踪 |
 | 已修复的误判 | 三线表修复后复检误报「有完整内边框」已修复（#106）；full-format 二次运行幂等、继承边框表格的识别均有回归用例守护 |
-| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 527 条全过 |
+| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 549 条全过 |
 | 独立网页前端 | 当前产品不提供；用户工作界面是 Word 内的任务窗格 |
 | 南开大学正式格式规则的完整覆盖 | 尚未完成；当前演示使用合成规则 |
 
@@ -114,6 +114,17 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 报告给出引用标注数、参考文献条目数、问题数及逐条定位（`word/document.xml#paragraph[n]`）。检查五类：正文引用编号连续（跳号/重号）、有引无条与有条无引、标注位置（标点之前）、条目字段完整性（编号/作者/年卷期页）、同一文献复用同一编号。上标引用按 `w:vertAlign="superscript"` 识别；正文里作参数说明或数组下标的 `[1]` 不误报。
 
 注意：只检查规则明确要求的项，规则未覆盖的不作判断；Zotero / EndNote 插入的域只统计不解析；页下注体例、著者-出版年制不在本模式范围。合规样本预期 0 条问题，输出会明确「问题数量：0」。
+
+## 摘要格式检查（只查不改）
+
+`analyze-abstract` 检查中英文摘要标题与正文的字体、字号、加粗、对齐、行距、段前段后，以及关键词标签是否加粗，**只报问题、不改写文档**。依据 `rules/nku-graduate/general.yaml` 的 R4/R5（4.5 表4.4）：中文摘要标题黑体 18 磅加粗居中、单倍行距、段前 24 / 段后 18 磅，正文宋体 12 磅、固定值行距 20 磅、段前后 0 磅；英文摘要标题 Arial 18 磅，正文 Times New Roman 12 磅，其余同中文。
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-abstract <论文.docx>
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-abstract <论文.docx> --json
+```
+
+报告列出识别到的摘要段落、逐条定位（第 N 段）、期望值与实际值，以及「未检查 / 未判定」项。只按「摘要」「Abstract」标题文字定位摘要区，定位不到就写「未识别」，不假装合规；样式链读不到的维度列进「未判定」，不拿默认值凑问题数。该规则状态为 **draft**（来源 S1 2025 版条文，待 2026 版全文核验），报告会提示需人工确认。样本与问题码见 [摘要样本说明](tests/fixtures/synthetic/abstract/README.md)。
 
 ## 在 Word 中打开插件
 

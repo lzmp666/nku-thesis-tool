@@ -63,7 +63,7 @@ public static class PartFormatReader
             var alignment = ResolveAlignment(pPr, chain, defaultParagraphProperties, styles is not null);
 
             var resolved = runs
-                .Select(run => ResolveRun(run.Element(W + "rPr"), chain, defaultRunProperties))
+                .Select(run => ResolveRun(run.Element(W + "rPr"), chain, defaultRunProperties, styles is not null))
                 .ToList();
 
             // 同一段落里多个 run 格式不一致时，取谁都不代表这一段。宁可标未判定，
@@ -92,10 +92,39 @@ public static class PartFormatReader
                 Alignment: alignment.Value,
                 AlignmentResolved: alignment.Resolved,
                 FontResolved: first.FontResolved,
-                SizeResolved: first.SizeResolved));
+                SizeResolved: first.SizeResolved,
+                Bold: first.Bold,
+                BoldResolved: first.BoldResolved,
+                LineSpacingRule: ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "lineRule"),
+                LineSpacingValue: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "line"), out var lineValue) ? lineValue : null,
+                SpaceBeforeTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "before"), out var beforeValue) ? beforeValue : null,
+                SpaceAfterTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "after"), out var afterValue) ? afterValue : null));
         }
 
         return new PartFormatResult(readings, undetermined);
+    }
+
+    /// <summary>
+    /// 段属性同样走 run 之外的一条样式链：显式 pPr → 段落样式 basedOn → docDefaults。
+    /// 取不到就返回 null，由调用方标「未判定」，不拿默认值凑数。
+    /// </summary>
+    private static string? ResolveParagraphValue(
+        XElement? pPr,
+        IReadOnlyList<XElement> chain,
+        XElement? defaults,
+        string childName,
+        string attributeName)
+    {
+        var fromParagraph = pPr?.Element(W + childName)?.Attribute(W + attributeName)?.Value;
+        if (fromParagraph is not null) return fromParagraph;
+
+        foreach (var style in chain)
+        {
+            var fromStyle = style.Element(W + "pPr")?.Element(W + childName)?.Attribute(W + attributeName)?.Value;
+            if (fromStyle is not null) return fromStyle;
+        }
+
+        return defaults?.Element(W + childName)?.Attribute(W + attributeName)?.Value;
     }
 
     /// <summary>宋体 / SimSun 在中英文版 Word 里都可能存成不同写法。</summary>
@@ -103,6 +132,12 @@ public static class PartFormatReader
 
     /// <summary>Times New Roman 的空格在不同版本里时有时无。</summary>
     public static bool IsTimesNewRoman(string? font) => MatchesAny(font, "timesnewroman");
+
+    /// <summary>R4 摘要标题黑体（含 Heiti / SimHei 写法）。</summary>
+    public static bool IsSimHei(string? font) => MatchesAny(font, "黑体", "simhei", "heiti");
+
+    /// <summary>R5 英文摘要标题 Arial。</summary>
+    public static bool IsArial(string? font) => MatchesAny(font, "arial");
 
     private static bool MatchesAny(string? font, params string[] accepted)
     {
@@ -114,19 +149,51 @@ public static class PartFormatReader
     private static RunFormat ResolveRun(
         XElement? direct,
         IReadOnlyList<XElement> chain,
-        XElement? defaults)
+        XElement? defaults,
+        bool stylesAvailable)
     {
         var eastAsia = ResolveRunValue(direct, chain, defaults, "rFonts", "eastAsia");
         var western = ResolveRunValue(direct, chain, defaults, "rFonts", "ascii")
             ?? ResolveRunValue(direct, chain, defaults, "rFonts", "hAnsi");
         var size = ResolveRunValue(direct, chain, defaults, "sz", "val");
+        var bold = ResolveToggle(direct, chain, defaults, "b", stylesAvailable);
 
         return new RunFormat(
             EastAsiaFont: eastAsia,
             WesternFont: western,
             SizeHalfPoints: int.TryParse(size, out var halfPoints) ? halfPoints : null,
             FontResolved: eastAsia is not null || western is not null,
-            SizeResolved: size is not null);
+            SizeResolved: size is not null,
+            Bold: bold,
+            BoldResolved: bold is not null);
+    }
+
+    /// <summary>
+    /// 开关型属性（w:b 等）：元素出现且 val=0/false/off 为关，出现但无 val 或其他值为开。
+    /// 元素完全不出现时，样式链完整则可确定为「关」（Word 默认不加重），
+    /// 样式链不可用则标未判定——和 ResolveAlignment 的缺省口径一致。
+    /// </summary>
+    private static bool? ResolveToggle(
+        XElement? direct,
+        IReadOnlyList<XElement> chain,
+        XElement? defaults,
+        string childName,
+        bool stylesAvailable)
+    {
+        XElement? found = direct?.Element(W + childName);
+        if (found is null)
+        {
+            foreach (var style in chain)
+            {
+                found = style.Element(W + "rPr")?.Element(W + childName);
+                if (found is not null) break;
+            }
+        }
+        found ??= defaults?.Element(W + childName);
+        if (found is null) return stylesAvailable ? false : null;
+
+        var value = found.Attribute(W + "val")?.Value;
+        return value is not ("0" or "false" or "off");
     }
 
     private static string? ResolveRunValue(
@@ -217,7 +284,9 @@ public static class PartFormatReader
         string? WesternFont,
         int? SizeHalfPoints,
         bool FontResolved,
-        bool SizeResolved);
+        bool SizeResolved,
+        bool? Bold = null,
+        bool BoldResolved = false);
 }
 
 public sealed record PartFormatResult(
@@ -237,8 +306,18 @@ public sealed record PartFormatReading(
     string Alignment,
     bool AlignmentResolved,
     bool FontResolved,
-    bool SizeResolved)
+    bool SizeResolved,
+    bool? Bold = null,
+    bool BoldResolved = false,
+    string? LineSpacingRule = null,
+    int? LineSpacingValue = null,
+    int? SpaceBeforeTwips = null,
+    int? SpaceAfterTwips = null)
 {
     /// <summary>三个维度都能读到值，才算这一段完整查过。</summary>
     public bool FullyResolved => FontResolved && SizeResolved && AlignmentResolved;
+
+    /// <summary>摘要检查用到的段落级维度是否齐全（行距规则+值、段前段后）。</summary>
+    public bool SpacingResolved => LineSpacingRule is not null && LineSpacingValue is not null &&
+                                   SpaceBeforeTwips is not null && SpaceAfterTwips is not null;
 }
