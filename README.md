@@ -10,13 +10,13 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 20 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 21 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、analyze-toc、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
 | Word 插件前端（中文任务窗格、原文定位、锚点联动、单项/批量修复预览） | 已合入 main（#65、#69）；已有合成文档实测记录，完整阶段验收仍由 #51、#63、#52 跟踪 |
 | 已修复的误判 | 三线表修复后复检误报「有完整内边框」已修复（#106）；full-format 二次运行幂等、继承边框表格的识别均有回归用例守护 |
-| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 587 条全过 |
+| 回归基线 | `scripts/Invoke-RegressionBaseline.ps1` 一键跑三条链路（修复后复检 0 条、二次运行幂等、继承边框识别），留痕到 `artifacts/regression/`；`dotnet test` 当前实测 595 条全过 |
 | 独立网页前端 | 当前产品不提供；用户工作界面是 Word 内的任务窗格 |
 | 南开大学正式格式规则的完整覆盖 | 尚未完成；当前演示使用合成规则 |
 
@@ -161,16 +161,27 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 问题码 H1–H22 连续（每级 CodeStart + 维度偏移，避免拼出 H111）。对齐依编号模式、序号间空一汉字宽度语义未定义、二级/三级原文未写加粗——三类按条文冲突列**未判定**，不伪造硬规则。样本见 [标题样本说明](tests/fixtures/synthetic/headings/README.md)。
 
+## 目录格式检查（R6，只查不改）
+
+`analyze-toc` 检查目录标题与章/一级/二级目录条目的字体、字号、单倍行距、段前后、左缩进，**只报问题、不改写文档**。依据 `general.yaml` 4.6 表4.5（来源 S1 2025 版，规则状态 draft）：目录标题黑体 16 磅加粗居中、段前 24 / 段后 18 磅；章/一级/二级条目宋体 14/12/10.5 磅、段前 6 / 段后 0 磅、左缩进 0/1/2 汉字。
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-toc <论文.docx>
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-toc <论文.docx> --json
+```
+
+目录标题用文本「目录 / Contents」定位，条目按 `TOC1` / `TOC2` / `TOC3` 样式分级，不靠缩进硬猜。检测对象是**已展开的目录段落**：只有 TOC 域指令、域结果未展开时列**未判定**（检测对象 T6 / RFC-7 未决，需 Word 更新域后复核），不假装检查过。条目的页码右对齐走制表位、依赖渲染，列未判定。问题码 C1–C25 连续。样本见 [目录样本说明](tests/fixtures/synthetic/toc/README.md)。
+
 ## 统一合规报告（只查不改）
 
-`report` 一次调用跑完全部「只查不改」分析器（页面与章节结构、样式使用、图表排版、公式排版、脚注与注释体例、参考文献引用一致性、中英文摘要格式、尾注部件格式、正文段落格式、标题层级格式），汇成一份报告，**只报问题、不改写文档**。适合交付前一次性总览，不必逐条命令分别运行。
+`report` 一次调用跑完全部「只查不改」分析器（页面与章节结构、样式使用、图表排版、公式排版、脚注与注释体例、参考文献引用一致性、中英文摘要格式、尾注部件格式、正文段落格式、标题层级格式、目录格式），汇成一份报告，**只报问题、不改写文档**。适合交付前一次性总览，不必逐条命令分别运行。
 
 ```powershell
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- report <论文.docx>
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- report <论文.docx> --json
 ```
 
-报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出十个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。所有规则状态均为 **draft**，报告为静态 XML 检查，不替代 Word 实机渲染核验。
+报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出十一个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。所有规则状态均为 **draft**，报告为静态 XML 检查，不替代 Word 实机渲染核验。
 
 ## 在 Word 中打开插件
 

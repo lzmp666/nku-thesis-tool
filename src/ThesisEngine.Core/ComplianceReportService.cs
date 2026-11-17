@@ -27,7 +27,7 @@ public sealed record ComplianceSection(
 }
 
 /// <summary>
-/// 统一合规报告：把页面/结构、样式、图表、公式、脚注、引文、摘要、尾注、正文段落、标题层级十个分析器的结果
+/// 统一合规报告：把页面/结构、样式、图表、公式、脚注、引文、摘要、尾注、正文段落、标题层级、目录十一个分析器的结果
 /// 汇成一份。严格区分「规范问题」与「排版惯例」与「未判定」，并把单个分析器的失败
 /// 记录为 Error 而不是让整份报告崩掉。
 /// </summary>
@@ -200,6 +200,18 @@ public sealed class ComplianceReportService
                     false));
             notChecked.AddRange(result.NotChecked.Select(x => $"标题层级格式：{x}"));
             notChecked.AddRange(result.MissingParts.Select(x => $"标题层级格式：缺少部件 {x}"));
+        });
+
+        Run("TocFormatAnalyzer", "目录格式", () =>
+        {
+            var result = new TocFormatAnalyzer().Analyze(docxPath);
+            foreach (var issue in result.Issues)
+                issues.Add(new ComplianceIssue(
+                    "TocFormatAnalyzer", issue.Code, $"{issue.Part}{issue.Dimension}", issue.ParagraphIndex,
+                    $"第 {issue.ParagraphIndex} 段「{issue.Text}」{issue.Dimension}：期望「{issue.Expected}」，实际「{issue.Actual}」；{issue.Message}",
+                    false));
+            notChecked.AddRange(result.NotChecked.Select(x => $"目录格式：{x}"));
+            notChecked.AddRange(result.MissingParts.Select(x => $"目录格式：缺少部件 {x}"));
         });
 
         return new ComplianceReport(docxPath, sections, issues, conventions, notChecked);

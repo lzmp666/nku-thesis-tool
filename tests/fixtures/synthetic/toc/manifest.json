@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "R6 目录格式检查合成样本。目录标题用文本锚点，条目用 TOC1/2/3 样式分级；TOC 域未展开按 T6 列未判定。条目的页码右对齐依赖渲染，样本不制造该维度差异。",
+  "generator": "generate.py",
+  "samples": [
+    { "file": "toc_compliant.docx", "expect": "0 问题；目录标题+章/一级/二级3条目全部合规" },
+    { "file": "toc_title_wrong.docx", "expect": "目录标题6维偏离：C1字体/C2字号/C3加粗/C4对齐/C6段前/C7段后" },
+    { "file": "toc_entry_size_wrong.docx", "expect": "仅1×C15（一级条目字号应为12磅实为14磅）" },
+    { "file": "toc_entry_indent_wrong.docx", "expect": "仅1×C25（二级条目左缩进应为2汉字实为1）" },
+    { "file": "toc_field_unexpanded.docx", "expect": "0 问题；仅TOC域指令无展开结果，条目列未判定不假装检查过" },
+    { "file": "toc_no_toc.docx", "expect": "0 问题；无目录标题也无TOC条目，如实列未检查" }
+  ]
+}
