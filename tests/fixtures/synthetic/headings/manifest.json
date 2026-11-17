@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "description": "R7–R10 标题层级格式检查合成样本。标题按 Heading1–4 样式（带 outlineLvl）识别为章/一级/二级/三级；对齐与序号间距按条文冲突不制造差异。",
+  "generator": "generate.py",
+  "samples": [
+    { "file": "headings_compliant.docx", "expect": "0 问题；识别章+一级+二级+三级4个标题，章1→参考文献5" },
+    { "file": "headings_all_wrong.docx", "expect": "章标题6维全错：H1字体/H2字号/H3加粗/H4行距/H5段前/H6段后" },
+    { "file": "headings_size_wrong.docx", "expect": "仅1×H8（一级标题字号应为14磅实为16磅）" },
+    { "file": "headings_mode2.docx", "expect": "0 问题；模式二编号（第一章/第一节/一、/(一)）识别正确" },
+    { "file": "headings_no_boundary.docx", "expect": "0 问题；无章标题，如实列未检查，checked=0" }
+  ]
+}
