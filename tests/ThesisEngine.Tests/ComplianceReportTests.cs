@@ -4,7 +4,7 @@ using ThesisEngine.Core;
 using Xunit;
 
 /// <summary>
-/// 统一合规报告：验证八类检查聚合、三类结果分列、失败隔离、JSON 输出。
+/// 统一合规报告：验证九类检查聚合、三类结果分列、失败隔离、JSON 输出。
 /// 样本为 tests/fixtures/synthetic 下既有的零依赖合成 docx，不新增样本。
 /// </summary>
 public sealed class ComplianceReportTests
@@ -29,8 +29,8 @@ public sealed class ComplianceReportTests
     {
         var report = Report("abstract/abstract_compliant.docx");
 
-        Assert.Equal(8, report.Sections.Count);
-        Assert.True(report.AllSucceeded, "合规样本下八个分析器都应成功执行");
+        Assert.Equal(9, report.Sections.Count);
+        Assert.True(report.AllSucceeded, "合规样本下九个分析器都应成功执行");
         Assert.Empty(report.Conventions);
         Assert.True(report.TotalNotChecked > 0, "未判定项必须单列，不能靠空列表假装查全了");
         Assert.True(report.TotalIssues >= 0);
@@ -92,7 +92,7 @@ public sealed class ComplianceReportTests
         {
             var report = new ComplianceReportService().Analyze(broken);
 
-            Assert.Equal(8, report.Sections.Count);
+            Assert.Equal(9, report.Sections.Count);
             Assert.True(report.FailedSections > 0, "损坏文件至少要让部分检查器失败");
         }
         finally

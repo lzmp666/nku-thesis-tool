@@ -77,6 +77,12 @@ if (args.Length > 0 && string.Equals(args[0], "report", StringComparison.Ordinal
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "analyze-body-text", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new BodyTextFormatCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "apply-figure-format", StringComparison.OrdinalIgnoreCase))
 {
     var command = new ApplyFigureFormatCommand();

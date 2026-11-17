@@ -132,7 +132,7 @@ public sealed class ComplianceReportCommand
     {
         var usage = new StringBuilder();
         usage.AppendLine("用法：ThesisEngine.Cli report <file.docx> [--json]");
-        usage.AppendLine("一次运行全部只查不改的分析器（页面/结构、样式、图表、公式、脚注、引文、摘要、尾注），");
+        usage.AppendLine("一次运行全部只查不改的分析器（页面/结构、样式、图表、公式、脚注、引文、摘要、尾注、正文段落），");
         usage.AppendLine("汇成一份统一报告。规范问题、排版惯例、未判定三者分列；单个检查器失败会写进报告，");
         usage.AppendLine("其余照常产出，失败的维度不据此判定合规。");
         _output.WriteLine(usage.ToString().TrimEnd());
