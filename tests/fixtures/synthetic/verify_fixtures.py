@@ -41,6 +41,7 @@ GENERATORS = [
     ("abstract", "generate.py", "SAMPLES", "build_bytes"),
     ("back-matter", "generate.py", "SAMPLES", "build_bytes"),
     ("body-text", "generate.py", "SAMPLES", "build_bytes"),
+    ("headings", "generate.py", "SAMPLES", "build_bytes"),
 ]
 
 # (目录, 生成器文件, 结构校验函数)；只做维度断言，不在内存重建 docx
@@ -70,6 +71,7 @@ LIST_SOURCES = [
     ("abstract", "generate.py", "SAMPLES"),
     ("back-matter", "generate.py", "SAMPLES"),
     ("body-text", "generate.py", "SAMPLES"),
+    ("headings", "generate.py", "SAMPLES"),
 ]
 
 # (目录, 是否比对生成器清单)
@@ -84,6 +86,7 @@ LIST_SPECS = [
     ("abstract", True),
     ("back-matter", True),
     ("body-text", True),
+    ("headings", True),
 ]
 
 

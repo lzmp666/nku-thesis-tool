@@ -25,12 +25,12 @@ public sealed class ComplianceReportTests
         new ComplianceReportService().Analyze(Fixture(relativePath.Split('/')));
 
     [Fact]
-    public void AllEightAnalyzersRunAndReportSeparatesThreeBuckets()
+    public void AllTenAnalyzersRunAndReportSeparatesThreeBuckets()
     {
         var report = Report("abstract/abstract_compliant.docx");
 
-        Assert.Equal(9, report.Sections.Count);
-        Assert.True(report.AllSucceeded, "合规样本下九个分析器都应成功执行");
+        Assert.Equal(10, report.Sections.Count);
+        Assert.True(report.AllSucceeded, "合规样本下十个分析器都应成功执行");
         Assert.Empty(report.Conventions);
         Assert.True(report.TotalNotChecked > 0, "未判定项必须单列，不能靠空列表假装查全了");
         Assert.True(report.TotalIssues >= 0);
@@ -92,7 +92,7 @@ public sealed class ComplianceReportTests
         {
             var report = new ComplianceReportService().Analyze(broken);
 
-            Assert.Equal(9, report.Sections.Count);
+            Assert.Equal(10, report.Sections.Count);
             Assert.True(report.FailedSections > 0, "损坏文件至少要让部分检查器失败");
         }
         finally
