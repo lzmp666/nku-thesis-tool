@@ -38,6 +38,7 @@ GENERATORS = [
     ("demo", "generate_samples.py", "SAMPLES", "build_bytes"),
     ("demo", "generate_checked_sample.py", "SAMPLES", "build_bytes"),
     ("citation-footnotes", "generate.py", "SAMPLES", "build_bytes"),
+    ("abstract", "generate.py", "SAMPLES", "build_bytes"),
 ]
 
 # (目录, 生成器文件, 结构校验函数)；只做维度断言，不在内存重建 docx
@@ -64,6 +65,7 @@ LIST_SOURCES = [
     ("format-samples", "generate.py", "SAMPLES"),
     ("full-thesis", "generate.py", "SAMPLES"),
     ("citation-footnotes", "generate.py", "SAMPLES"),
+    ("abstract", "generate.py", "SAMPLES"),
 ]
 
 # (目录, 是否比对生成器清单)
@@ -75,6 +77,7 @@ LIST_SPECS = [
     ("format-samples", True),
     ("full-thesis", True),
     ("citation-footnotes", True),
+    ("abstract", True),
 ]
 
 

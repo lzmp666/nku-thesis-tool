@@ -1,0 +1,28 @@
+{
+  "sample_set": "abstract/r4r5",
+  "purpose": "Issue R4/R5 中英文摘要格式检查：标题/正文的字体、字号、加粗、对齐、行距、段前段后、关键词加粗。每个文件只偏离一个维度。",
+  "formal_compliance": false,
+  "status": "synthetic",
+  "generator": "generate.py",
+  "generation_command": "python3 generate.py",
+  "check_command": "python3 generate.py --check",
+  "source_note": "全部内容为人工构造，不含真实论文、个人信息或他人成果。",
+  "disclaimer": "样本只验证检查逻辑是否按预期定位问题，不代表真实论文的版式质量；规则状态 draft（S1 2025 版条文），不能据此宣称合规。",
+  "spec_source_note": "规范值取自 rules/nku-graduate/general.yaml R4/R5（4.5 表4.4）：中文摘要标题黑体18磅加粗居中、单倍行距、段前24磅段后18磅，正文宋体12磅、固定值行距20磅、段前段后0磅、关键词加粗；英文摘要标题 Arial18磅（注意不是 Times New Roman），正文 Times New Roman12磅，其余同中文。",
+  "samples": [
+    { "file": "abstract_compliant.docx", "description": "中英文摘要标题/正文/关键词全部合规", "expected_issue_codes": [], "expected_not_checked": 0 },
+    { "file": "abstract_cn_title_font_wrong.docx", "description": "中文摘要标题用宋体（应黑体）", "expected_issue_codes": ["A1"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_title_size_wrong.docx", "description": "中文摘要标题 16 磅（应 18 磅）", "expected_issue_codes": ["A2"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_title_not_bold.docx", "description": "中文摘要标题未加粗", "expected_issue_codes": ["A3"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_title_left.docx", "description": "中文摘要标题左对齐（应居中）", "expected_issue_codes": ["A4"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_title_spacing_wrong.docx", "description": "中文摘要标题行距 18 磅（应单倍），段距不变", "expected_issue_codes": ["A5"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_body_font_wrong.docx", "description": "中文摘要正文用仿宋（应宋体）", "expected_issue_codes": ["A6"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_body_size_wrong.docx", "description": "中文摘要正文 14 磅（应 12 磅）", "expected_issue_codes": ["A7"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_body_spacing_wrong.docx", "description": "中文摘要正文单倍行距（应固定值 20 磅）", "expected_issue_codes": ["A8"], "expected_not_checked": 0 },
+    { "file": "abstract_cn_keyword_not_bold.docx", "description": "中文摘要关键词未加粗", "expected_issue_codes": ["A9"], "expected_not_checked": 0 },
+    { "file": "abstract_en_title_font_wrong.docx", "description": "英文摘要标题用 Times New Roman（应 Arial）", "expected_issue_codes": ["A10"], "expected_not_checked": 0 },
+    { "file": "abstract_en_body_font_wrong.docx", "description": "英文摘要正文用宋体（应 Times New Roman）", "expected_issue_codes": ["A15"], "expected_not_checked": 0 },
+    { "file": "abstract_en_keyword_not_bold.docx", "description": "英文摘要 Key Words 未加粗", "expected_issue_codes": ["A18"], "expected_not_checked": 0 },
+    { "file": "abstract_no_sections.docx", "description": "无任何摘要段落，报告须写未识别，不得假装合规", "expected_issue_codes": [], "expected_not_checked": 2 }
+  ]
+}
