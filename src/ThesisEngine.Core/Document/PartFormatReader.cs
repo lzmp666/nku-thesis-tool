@@ -100,7 +100,9 @@ public static class PartFormatReader
                 SpaceBeforeTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "before"), out var beforeValue) ? beforeValue : null,
                 SpaceAfterTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "spacing", "after"), out var afterValue) ? afterValue : null,
                 FirstLineTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "firstLine"), out var firstLineValue) ? firstLineValue : null,
-                FirstLineChars: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "firstLineChars"), out var firstLineCharsValue) ? firstLineCharsValue : null));
+                FirstLineChars: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "firstLineChars"), out var firstLineCharsValue) ? firstLineCharsValue : null,
+                LeftTwips: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "left"), out var leftValue) ? leftValue : null,
+                LeftChars: int.TryParse(ResolveParagraphValue(pPr, chain, defaultParagraphProperties, "ind", "leftChars"), out var leftCharsValue) ? leftCharsValue : null));
         }
 
         return new PartFormatResult(readings, undetermined);
@@ -316,7 +318,9 @@ public sealed record PartFormatReading(
     int? SpaceBeforeTwips = null,
     int? SpaceAfterTwips = null,
     int? FirstLineTwips = null,
-    int? FirstLineChars = null)
+    int? FirstLineChars = null,
+    int? LeftTwips = null,
+    int? LeftChars = null)
 {
     /// <summary>三个维度都能读到值，才算这一段完整查过。</summary>
     public bool FullyResolved => FontResolved && SizeResolved && AlignmentResolved;
