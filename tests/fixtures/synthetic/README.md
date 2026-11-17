@@ -18,9 +18,9 @@ python3 tests/fixtures/synthetic/verify_fixtures.py --with-rebuild
 
 | 判据 | 覆盖 | 做什么 |
 | --- | --- | --- |
-| 逐部件重建 | 6 个零依赖生成器 / 55 份样本 / 385 个部件 | 导入生成器在内存里重建样本，比较 ZIP 条目名/顺序与每个部件解压后的字节，不比较 deflate 流、时间戳和外部属性，因此在 Python / zlib 版本不同的机器上不会因压缩流差异误报 |
+| 逐部件重建 | 7 个零依赖生成器 / 68 份样本 / 450 个部件 | 导入生成器在内存里重建样本，比较 ZIP 条目名/顺序与每个部件解压后的字节，不比较 deflate 流、时间戳和外部属性，因此在 Python / zlib 版本不同的机器上不会因压缩流差异误报 |
 | 结构断言 | `format-samples/` 10 份样本 | 该目录的重建依赖 python-docx，干净检出无法重建，所以只调用它零依赖的 `verify()` 逐项核对 OOXML 维度。这是**结构断言**，不是逐字节复现 |
-| 清单一致性 | 8 个目录 / 69 份 docx | 比对 `manifest.json` 声明、生成器清单、磁盘上的 `.docx` 三个集合，抓「新增样本忘写 manifest」「孤儿 docx」「生成器漏覆盖」 |
+| 清单一致性 | 9 个目录 / 82 份 docx | 比对 `manifest.json` 声明、生成器清单、磁盘上的 `.docx` 三个集合，抓「新增样本忘写 manifest」「孤儿 docx」「生成器漏覆盖」 |
 | 可选重建 | `analysis/` 2 份 + `format-samples/` 10 份 + `full-thesis/` 2 份 | `--with-rebuild` 额外做一遍逐部件重建校验，三组都要 python-docx，`full-thesis/` 另需 Pillow 与 lxml；**默认不开**，缺依赖就整组跳过并说明 |
 
 `--self-test` 用 12 种情形验证判据既不误报也不漏报，包括「换 deflate 级别和时间戳仍一致」「改一个部件的文字会被发现」「少一个部件会被发现」「manifest 漏声明会被发现」「关闭生成器比对时不误报」「缺依赖时重建校验跳过而非失败」「样本名不带 `.docx` 时补齐后缀」「未知样本名会报错而不是回落」「依赖缺一个时该组整组跳过」。
@@ -38,3 +38,5 @@ Issue #153 的注释体例样本见 [citation-footnotes/](citation-footnotes/REA
 Issue #111 的规则分析回归样本位于 [analysis/](analysis/README.md)：`analysis_compliant.docx` 预期 0 条不符合且未检查非空，`analysis_noncompliant.docx` 第一段故意偏离字体、字号、对齐、缩进、行距和段前后，预期 8 条不符合。由该目录的 `generate.py` 生成，与其它生成器同形（`SAMPLES` + `build_bytes(name)`），并带 `manifest.json` 供清单一致性核对。样本均为合成数据。
 
 R4/R5 中英文摘要格式检查样本见 [abstract/](abstract/README.md)：14 份最小 docx，覆盖标题/正文的字体、字号、加粗、对齐、行距、段距与关键词加粗，每个文件只偏离一个维度。零依赖生成器 + manifest，已纳入上面的逐部件重建与清单一致性核对。同属合成数据，规则状态 draft，不代表 Word 实机渲染正确。
+
+R14–R17 尾注部件格式检查样本见 [back-matter/](back-matter/README.md)：13 份最小 docx，覆盖参考文献、附录、符号表与个人简历、致谢正文的字体、字号、对齐、首行缩进、行距与段距，含公式段行距豁免与附录 A/B 子标题两个边界用例。零依赖生成器 + manifest，同样纳入逐部件重建与清单一致性核对。

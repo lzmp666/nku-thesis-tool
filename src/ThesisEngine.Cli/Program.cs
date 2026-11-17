@@ -65,6 +65,12 @@ if (args.Length > 0 && string.Equals(args[0], "analyze-abstract", StringComparis
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "analyze-back-matter", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new BackMatterAnalyzeCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "apply-figure-format", StringComparison.OrdinalIgnoreCase))
 {
     var command = new ApplyFigureFormatCommand();

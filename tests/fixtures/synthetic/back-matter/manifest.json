@@ -1,0 +1,27 @@
+{
+  "sample_set": "back-matter/r14r17",
+  "purpose": "Issue R14-R17 尾注部件格式检查：参考文献、附录、符号表与个人简历、致谢正文的字体、字号、对齐、首行缩进、行距与段距。每个文件只偏离一个维度。",
+  "formal_compliance": false,
+  "status": "synthetic",
+  "generator": "generate.py",
+  "generation_command": "python3 generate.py",
+  "check_command": "python3 generate.py --check",
+  "source_note": "全部内容为人工构造，不含真实论文、个人信息或他人成果。",
+  "disclaimer": "样本只验证检查逻辑是否按预期定位问题，不代表真实论文的版式质量；规则状态 draft（S1 2025 版条文），不能据此宣称合规。",
+  "spec_source_note": "规范值取自 rules/nku-graduate/general.yaml R14-R17（4.8 表4.7）：参考文献宋体/TNR 10.5磅、固定16磅、段前后0；附录宋体/TNR 12磅、两端对齐、首行缩进2汉字符、固定20磅、段前后0（含数学表达式段落行距可调整）；符号表与简历宋体/TNR 10.5磅、固定16磅；致谢仿宋12磅、固定16磅。",
+  "samples": [
+    { "file": "back_matter_compliant.docx", "description": "四个部件正文全部合规", "expected_issue_codes": [], "expected_not_checked": 1 },
+    { "file": "back_matter_reference_cn_font_wrong.docx", "description": "参考文献正文用仿宋（应宋体）", "expected_issue_codes": ["B1"], "expected_not_checked": 1 },
+    { "file": "back_matter_reference_size_wrong.docx", "description": "参考文献正文 12 磅（应 10.5 磅）", "expected_issue_codes": ["B3"], "expected_not_checked": 1 },
+    { "file": "back_matter_reference_spacing_wrong.docx", "description": "参考文献正文单倍行距（应固定值 16 磅）", "expected_issue_codes": ["B4"], "expected_not_checked": 1 },
+    { "file": "back_matter_appendix_alignment_left.docx", "description": "附录正文左对齐（应两端对齐）", "expected_issue_codes": ["B8"], "expected_not_checked": 1 },
+    { "file": "back_matter_appendix_indent_wrong.docx", "description": "附录正文首行缩进 1 汉字符（应 2 字）", "expected_issue_codes": ["B9"], "expected_not_checked": 1 },
+    { "file": "back_matter_appendix_size_wrong.docx", "description": "附录正文 10.5 磅（应 12 磅）", "expected_issue_codes": ["B7"], "expected_not_checked": 1 },
+    { "file": "back_matter_appendix_math_line_exempt.docx", "description": "附录含 OMML 公式且行距为单倍；公式段行距应豁免，其余维度照查", "expected_issue_codes": [], "expected_not_checked": 2 },
+    { "file": "back_matter_symbol_western_font_wrong.docx", "description": "符号表正文西文用 Arial（应 Times New Roman）", "expected_issue_codes": ["B12"], "expected_not_checked": 1 },
+    { "file": "back_matter_ack_cn_font_wrong.docx", "description": "致谢正文用宋体（应仿宋）", "expected_issue_codes": ["B15"], "expected_not_checked": 1 },
+    { "file": "back_matter_ack_spacing_wrong.docx", "description": "致谢正文段后 12 磅（应 0 磅）", "expected_issue_codes": ["B17"], "expected_not_checked": 1 },
+    { "file": "back_matter_two_appendices.docx", "description": "附录 A/B 两个子标题，标题不得当正文误报；五个正文段全部合规", "expected_issue_codes": [], "expected_not_checked": 1 },
+    { "file": "back_matter_no_sections.docx", "description": "无任何尾注部件标题，报告须写未识别，不得假装合规", "expected_issue_codes": [], "expected_not_checked": 5 }
+  ]
+}
