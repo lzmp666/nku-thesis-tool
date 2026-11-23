@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "description": "R12 图题/表题格式检查合成样本。题注用文本锚点（图/表+编号）识别，不依赖对象。对象位置/序题间距/R13 表达式编号样本不制造差异。",
+  "generator": "generate.py",
+  "samples": [
+    { "file": "captions_compliant.docx", "expect": "0 问题；识别图题1+表题1，宋体10.5磅居中单倍段前6、图后12/表后6全合规" },
+    { "file": "captions_figure_wrong.docx", "expect": "图题6维全错：K1字体/K2字号/K3对齐/K4行距/K5段前/K6段后" },
+    { "file": "captions_table_after_wrong.docx", "expect": "仅1×K12（表题段后应为6磅实为12磅）" },
+    { "file": "captions_unrecognized.docx", "expect": "0 问题；题注编号无法识别（无编号），未识别到题注列未检查" },
+    { "file": "captions_none.docx", "expect": "0 问题；无题注，如实列未检查" }
+  ]
+}

@@ -18,6 +18,7 @@ TestResults/
 !tests/fixtures/synthetic/body-text/*.docx
 !tests/fixtures/synthetic/headings/*.docx
 !tests/fixtures/synthetic/toc/*.docx
+!tests/fixtures/synthetic/captions/*.docx
 
 # 本地运行输出（回归基线留痕、标注副本等）
 artifacts/
