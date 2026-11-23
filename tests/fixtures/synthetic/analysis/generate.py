@@ -165,6 +165,10 @@ def base_document():
     section.bottom_margin = Cm(3.8)
     section.left_margin = Cm(3.2)
     section.right_margin = Cm(3.2)
+    # R1（4.1 表4.1，S2026 原文）：页眉、页脚距边界 3.0cm，装订线 0cm。
+    # python-docx 不写这两项时 Word 默认 1.27cm，会让"合规样本"在页眉页脚规则上误报。
+    section.header_distance = Cm(3.0)
+    section.footer_distance = Cm(3.0)
 
     style = document.styles["Normal"]
     style.font.name = "Times New Roman"

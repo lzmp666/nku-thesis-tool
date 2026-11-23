@@ -30,6 +30,9 @@ public sealed class RuleAnalysisService : IRuleAnalysisService
         var snapshot = _reader.Read(path);
         var layout = _layoutProbe.Read(path);
         var result = _analyzer.Analyze(snapshot, layout, ruleSet);
+        // R16（符号注释表/个人简历）的识别在 BackMatterFormatAnalyzer 已实现，
+        // 这里把它接回 analyze 的规则覆盖表，避免"分析器查了、覆盖表却写未检查"。
+        result = SymbolTableCoverageAdapter.Merge(result, path, ruleSet);
         return result with { InputPath = Path.GetFullPath(path) };
     }
 }

@@ -475,6 +475,8 @@ public sealed class ThesisRuleAnalyzer
         {
             RuleProperties.PagePaper => CheckPaper(rule, section),
             RuleProperties.PageMargins => CheckMargins(rule, section),
+            RuleProperties.PageGutter => CheckGutter(rule, section),
+            RuleProperties.PageHeaderFooter => CheckHeaderFooter(rule, section),
             _ => null
         };
     }
@@ -510,6 +512,42 @@ public sealed class ThesisRuleAnalyzer
                       Math.Abs(section.BottomCm.Value - bottom) <= 0.05 &&
                       Math.Abs(section.LeftCm.Value - left) <= 0.05 &&
                       Math.Abs(section.RightCm.Value - right) <= 0.05;
+        return matches
+            ? new CheckOutcome(RuleOutcomeStatus.Pass, rule.ExpectedDisplay, actual, null, null)
+            : new CheckOutcome(RuleOutcomeStatus.Fail, rule.ExpectedDisplay, actual, null, null);
+    }
+
+    /// <summary>装订线（R1 4.1 表4.1）：S2026 官方原文为 0cm。数据来自 DocxLayoutProbe 读取的 w:pgMar/@gutter。</summary>
+    private static CheckOutcome? CheckGutter(AnalysisRule rule, SectionLayout section)
+    {
+        if (!double.TryParse(rule.ExpectedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var expected))
+            return new CheckOutcome(RuleOutcomeStatus.Unchecked, rule.ExpectedDisplay, "规则格式无法解析", null,
+                "规则缺少装订线数值");
+        if (section.GutterCm is null)
+            return new CheckOutcome(RuleOutcomeStatus.Unchecked, rule.ExpectedDisplay, "未解析装订线", null,
+                "节装订线未解析");
+        var actual = section.GutterCm.Value;
+        var display = $"{FormatNumber(actual)}cm";
+        return Math.Abs(actual - expected) <= 0.05
+            ? new CheckOutcome(RuleOutcomeStatus.Pass, rule.ExpectedDisplay, display, null, null)
+            : new CheckOutcome(RuleOutcomeStatus.Fail, rule.ExpectedDisplay, display, null, null);
+    }
+
+    /// <summary>页眉/页脚距边界（R1 4.1 表4.1）：S2026 官方原文为 3.0cm；规则值形如 "3.0,3.0"。</summary>
+    private static CheckOutcome? CheckHeaderFooter(AnalysisRule rule, SectionLayout section)
+    {
+        var expected = rule.ExpectedValue.Split(',', StringSplitOptions.TrimEntries);
+        if (expected.Length != 2 ||
+            !double.TryParse(expected[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var header) ||
+            !double.TryParse(expected[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var footer))
+            return new CheckOutcome(RuleOutcomeStatus.Unchecked, rule.ExpectedDisplay, "规则格式无法解析", null,
+                "规则缺少页眉/页脚距边界两值");
+        if (section.HeaderCm is null || section.FooterCm is null)
+            return new CheckOutcome(RuleOutcomeStatus.Unchecked, rule.ExpectedDisplay, "存在未解析值", null,
+                "节页眉/页脚距边界未全部解析");
+        var actual = $"页眉{FormatNumber(section.HeaderCm.Value)}cm / 页脚{FormatNumber(section.FooterCm.Value)}cm";
+        var matches = Math.Abs(section.HeaderCm.Value - header) <= 0.05 &&
+                      Math.Abs(section.FooterCm.Value - footer) <= 0.05;
         return matches
             ? new CheckOutcome(RuleOutcomeStatus.Pass, rule.ExpectedDisplay, actual, null, null)
             : new CheckOutcome(RuleOutcomeStatus.Fail, rule.ExpectedDisplay, actual, null, null);
@@ -560,6 +598,8 @@ public sealed class ThesisRuleAnalyzer
         RuleProperties.KeywordBold => "关键词标签",
         RuleProperties.PagePaper => "纸张",
         RuleProperties.PageMargins => "页边距",
+        RuleProperties.PageGutter => "装订线",
+        RuleProperties.PageHeaderFooter => "页眉/页脚距边界",
         _ => property
     };
 

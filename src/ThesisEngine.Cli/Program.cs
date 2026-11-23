@@ -125,6 +125,12 @@ if (args.Length > 0 && string.Equals(args[0], "apply-draft-format", StringCompar
     return command.Execute(args[1..]);
 }
 
+if (args.Length > 0 && string.Equals(args[0], "page-map", StringComparison.OrdinalIgnoreCase))
+{
+    var command = new PageMapCommand();
+    return command.Execute(args[1..]);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "full-format", StringComparison.OrdinalIgnoreCase))
 {
     var command = new FullFormatCommand();

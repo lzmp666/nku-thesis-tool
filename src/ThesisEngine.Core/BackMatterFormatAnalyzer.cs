@@ -43,7 +43,7 @@ public sealed record BackMatterFormatResult(
 /// - 勘误页 / 致谢：仿宋 12 磅，固定值行距 16 磅，段前后 0 磅。
 /// - 各部件标题「同各章标题（R7）」由标题检查负责；本分析器只判正文段落，标题格式列入未检查，不冒充合规。
 /// - 只认样式链能展开到的显式值；判不出列未判定，不拿默认值凑问题数。
-/// - 规则状态 draft（S1 条文），提示需人工确认。
+/// - 规则状态 approved（S2026 2026 版全文已核验）。
 /// </summary>
 public sealed class BackMatterFormatAnalyzer
 {
@@ -51,7 +51,7 @@ public sealed class BackMatterFormatAnalyzer
     private static readonly XNamespace M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.8 表4.7（general.yaml R14/R15/R16/R17，来源 S1 2025 版，规则状态 draft，需人工确认）";
+        "南开大学研究生学位论文写作规范 4.8 表4.7（general.yaml R14/R15/R16/R17，来源 S2026 2026 版全文，规则状态 approved，符号表/简历对象识别已桥接实际检查）";
     private const string RuleVersion = "nku-graduate-general-r14r17-draft";
 
     // w:sz 是半磅：10.5pt=21、12pt=24。行距是 twips：16pt=320、20pt=400。

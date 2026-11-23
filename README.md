@@ -10,7 +10,7 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 23 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、analyze-toc、analyze-captions、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、apply-draft-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 24 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、analyze-toc、analyze-captions、report、page-map、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、apply-draft-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
@@ -124,7 +124,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-abstract <论文.docx> --json
 ```
 
-报告列出识别到的摘要段落、逐条定位（第 N 段）、期望值与实际值，以及「未检查 / 未判定」项。只按「摘要」「Abstract」标题文字定位摘要区，定位不到就写「未识别」，不假装合规；样式链读不到的维度列进「未判定」，不拿默认值凑问题数。该规则状态为 **draft**（来源 S1 2025 版条文，待 2026 版全文核验），报告会提示需人工确认。样本与问题码见 [摘要样本说明](tests/fixtures/synthetic/abstract/README.md)。
+报告列出识别到的摘要段落、逐条定位（第 N 段）、期望值与实际值，以及「未检查 / 未判定」项。只按「摘要」「Abstract」标题文字定位摘要区，定位不到就写「未识别」，不假装合规；样式链读不到的维度列进「未判定」，不拿默认值凑问题数。该规则状态为 **approved**（已按 S2026 2026 版全文逐条核验，见 [全文核验记录](docs/rule-notes/nku-2026-full-verification.md)）。样本与问题码见 [摘要样本说明](tests/fixtures/synthetic/abstract/README.md)。
 
 ## 尾注部件格式检查（只查不改）
 
@@ -135,7 +135,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-back-matter <论文.docx> --json
 ```
 
-问题码按部件连续编号：参考文献 B1–B4、附录 B5–B10、符号表与简历 B11–B14、致谢 B15–B17。报告同时列出识别到的部件与正文段落、期望值与实际值、未检查项。口径边界：各部件标题要求「同各章标题（R7）」由标题检查负责，本命令不判；附录中含数学表达式的段落按条文豁免行距，其余维度照查；同部件子标题（附录 A/B）不算正文。识别不到标题的部件列入「未识别」，不假装合规；样式链读不到的维度列入「未判定」。规则状态为 **draft**（来源 S1 2025 版条文），样本与问题码见 [尾注样本说明](tests/fixtures/synthetic/back-matter/README.md)。
+问题码按部件连续编号：参考文献 B1–B4、附录 B5–B10、符号表与简历 B11–B14、致谢 B15–B17。报告同时列出识别到的部件与正文段落、期望值与实际值、未检查项。口径边界：各部件标题要求「同各章标题（R7）」由标题检查负责，本命令不判；附录中含数学表达式的段落按条文豁免行距，其余维度照查；同部件子标题（附录 A/B）不算正文。识别不到标题的部件列入「未识别」，不假装合规；样式链读不到的维度列入「未判定」。规则状态为 **approved**（来源 S2026 2026 版全文），样本与问题码见 [尾注样本说明](tests/fixtures/synthetic/back-matter/README.md)。
 
 本命令与 `analyze --citations` 的参考文献**引用一致性**（#152）是两个不同维度：这里只管字体字号行距等排版值，不核对正文引用与文末条目是否一一对应。
 
@@ -148,11 +148,11 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-body-text <论文.docx> --json
 ```
 
-正文区间取第一个章标题之后、参考文献/附录/致谢等结束标题之前；边界识别不到就如实列未检查，不拿封面/摘要冒充正文。标题、图表题注、表格内段落不是正文，跳过。问题码 T1–T4（对齐/缩进/行距/段距）。含数学表达式的段落按条文豁免行距，其余维度照查。规则状态 **draft**，样本见 [正文样本说明](tests/fixtures/synthetic/body-text/README.md)。
+正文区间取第一个章标题之后、参考文献/附录/致谢等结束标题之前；边界识别不到就如实列未检查，不拿封面/摘要冒充正文。标题、图表题注、表格内段落不是正文，跳过。问题码 T1–T4（对齐/缩进/行距/段距）。含数学表达式的段落按条文豁免行距，其余维度照查。规则状态 **approved**（S2026 全文已核验），样本见 [正文样本说明](tests/fixtures/synthetic/body-text/README.md)。
 
 ## 标题层级格式检查（R7–R10，只查不改）
 
-`analyze-headings` 检查章/一级/二级/三级标题的字体、字号、加粗、单倍行距、段前段后，**只报问题、不改写文档**。依据 `general.yaml` 4.7 表4.6（来源 S4 2025 版 / S1 2026 版，规则状态 draft）：章黑体 16 磅加粗、段前 24 / 段后 18 磅；一级 14 磅加粗、段前 24 / 段后 6；二级 13 磅、段前 12 / 段后 6；三级 12 磅、段前 12 / 段后 6。标题级别只按 `w:outlineLvl` 或 `HeadingN` /「标题 N」样式识别，不靠字体猜测；识别不到就如实列未检查。
+`analyze-headings` 检查章/一级/二级/三级标题的字体、字号、加粗、单倍行距、段前段后，**只报问题、不改写文档**。依据 `general.yaml` 4.7 表4.6（来源 S2026 2026 版全文，规则状态 approved）：章黑体 16 磅加粗、段前 24 / 段后 18 磅；一级 14 磅加粗、段前 24 / 段后 6；二级 13 磅、段前 12 / 段后 6；三级 12 磅、段前 12 / 段后 6。标题级别只按 `w:outlineLvl` 或 `HeadingN` /「标题 N」样式识别，不靠字体猜测；识别不到就如实列未检查。
 
 ```powershell
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-headings <论文.docx>
@@ -163,7 +163,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 目录格式检查（R6，只查不改）
 
-`analyze-toc` 检查目录标题与章/一级/二级目录条目的字体、字号、单倍行距、段前后、左缩进，**只报问题、不改写文档**。依据 `general.yaml` 4.6 表4.5（来源 S1 2025 版，规则状态 draft）：目录标题黑体 16 磅加粗居中、段前 24 / 段后 18 磅；章/一级/二级条目宋体 14/12/10.5 磅、段前 6 / 段后 0 磅、左缩进 0/1/2 汉字。
+`analyze-toc` 检查目录标题与章/一级/二级目录条目的字体、字号、单倍行距、段前后、左缩进，**只报问题、不改写文档**。依据 `general.yaml` 4.6 表4.5（来源 S2026 2026 版全文，规则状态 approved）：目录标题黑体 16 磅加粗居中、段前 24 / 段后 18 磅；章/一级/二级条目宋体 14/12/10.5 磅、段前 6 / 段后 0 磅、左缩进 0/1/2 汉字。
 
 ```powershell
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-toc <论文.docx>
@@ -174,7 +174,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 图题/表题格式检查（R12，只查不改）
 
-`analyze-captions` 检查图题与表题的字体、字号、居中、单倍行距、段前后，**只报问题、不改写文档**。依据 `general.yaml` 4.7 表4.6（来源 S1 2025 版，规则状态 draft）：图题/表题宋体 10.5 磅居中、单倍行距、段前 6 磅；图题段后 12 磅、表题段后 6 磅。
+`analyze-captions` 检查图题与表题的字体、字号、居中、单倍行距、段前后，**只报问题、不改写文档**。依据 `general.yaml` 4.7 表4.6（来源 S2026 2026 版全文，规则状态 approved）：图题/表题宋体 10.5 磅居中、单倍行距、段前 6 磅；图题段后 12 磅、表题段后 6 磅。
 
 ```powershell
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- analyze-captions <论文.docx>
@@ -192,7 +192,13 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- report <论文.docx> --json
 ```
 
-报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出十二个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。所有规则状态均为 **draft**，报告为静态 XML 检查，不替代 Word 实机渲染核验。
+报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出十二个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。规则库状态为 **approved**（已按 S2026 2026 版全文逐条核验，见 [全文核验记录](docs/rule-notes/nku-2026-full-verification.md)）；报告为静态 XML 检查，不替代 Word 实机渲染核验。
+
+## 页码估算（page-map）
+
+`page-map <docx>` 输出每个段落的**估算页码**（`--json` 机器可读、`--issues` 只看未判定与强制分页项）。依据节页面高度、上下边距、段落行距/字号/段距和显式分页符（`w:pageBreakBefore`、段落内 `w:br type=page`）确定性推算；分节从新页起算。页面尺寸或段落格式读不到时标「未判定」，不猜页码。
+
+**这是静态估算，不是 Word 实机分页**：与真实页码可能有偏差，不能作为页码合规判据。实测 `full-thesis/synthetic_complete_thesis.docx`：184 段全部给出估算页、4 处强制分页、总 15 页，页码单调不回退。验收替代与实现边界决策见 [全文核验记录](docs/rule-notes/nku-2026-full-verification.md)。
 
 ## draft 规则保守修正（apply-draft-format）
 
@@ -202,7 +208,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-draft-format <论文.docx> [输出.docx]
 ```
 
-默认输出 `<原名>_draft修正.docx`，并先建撤销快照（可用 `undo` 回滚）。修正后请用 `report` 复核，并在 Word 中实机确认。**规则状态为 draft，本命令的输出不构成规范合规结论**——字体/字号/对齐/行距/段距/缩进等只做「把实际值对齐到 draft 期望值」的机械修正，对齐冲突、序号间距等未决口径保持原样。已用 27 个非合规合成样本验证：修正后对应分析器问题归零、幂等、未判定维度不受影响。
+默认输出 `<原名>_draft修正.docx`，并先建撤销快照（可用 `undo` 回滚）。修正后请用 `report` 复核，并在 Word 中实机确认。**规则状态为 approved，但本命令只做机械对齐、不构成 Word 实机渲染层面的合规结论**——字体/字号/对齐/行距/段距/缩进等只做「把实际值对齐到规则期望值」的修正；依赖渲染的维度与已列「未判定」的口径保持原样。已用 27 个非合规合成样本验证：修正后对应分析器问题归零、幂等、未判定维度不受影响。
 
 ## 在 Word 中打开插件
 
@@ -213,7 +219,7 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 当前范围与限制
 
-- 检查位置是 OOXML 部件及段落索引（部分分析器到文本片段），**不是页码**；页码映射依赖 Word 实机分页，当前无法由静态 XML 精确给出。
+- 检查位置是 OOXML 部件及段落索引（部分分析器到文本片段）。需要页码时可用 `page-map <docx>`（`--json` / `--issues`）获得**估算页码**：由页面尺寸、行距、字号、段距与显式分页符推算，未经 Word 实机渲染，与真实分页可能有偏差，不作为页码合规判据。
 - `report` 已聚合十二个检查器：页面与章节结构、样式使用、图表排版、公式排版、脚注与注释体例、参考文献引用一致性、中英文摘要、尾注部件、正文段落、标题层级、目录、图题表题。每个检查器都严格区分「问题 / 排版惯例 / 未判定」。
 - 仍是静态 XML 层面检查，**依赖渲染的对象位置、题注相对图表的位置、TOC 域展开结果、奇偶页眉内容的实际分页**等维度列为「未判定」，不据以判定合规；超链接、修订内容、内容控件和无法解析的主题字体不在覆盖范围。
 - 自动修正分两类：`full-format` 等既有命令覆盖样式、图表、公式、页面设置；`apply-draft-format` 保守覆盖六个 draft 分析器已明确判定的维度（字体/字号/对齐/行距/段距/缩进），未判定与跨分析器冲突维度一律不改。

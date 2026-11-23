@@ -76,10 +76,8 @@ internal static class LegacyRuleCatalog
             // R1 page setup.
             new("page_setup", "paper_size", AnalysisObjectKinds.Page, RuleProperties.PagePaper),
             new("page_setup", "margins_cm", AnalysisObjectKinds.Page, RuleProperties.PageMargins),
-            new("page_setup", "header_footer_cm", AnalysisObjectKinds.Page, RuleProperties.PageHeaderFooter,
-                false, "页眉/页脚距边界的 UI 对应关系待确认（T5）"),
-            new("page_setup", "gutter_cm", AnalysisObjectKinds.Page, RuleProperties.PageGutter,
-                false, "装订线检测未实现（T5）"),
+            new("page_setup", "header_footer_cm", AnalysisObjectKinds.Page, RuleProperties.PageHeaderFooter),
+            new("page_setup", "gutter_cm", AnalysisObjectKinds.Page, RuleProperties.PageGutter),
 
             // R2 header and R3 page number are not present in the main story reader.
             new("header", "font_cn", AnalysisObjectKinds.Header, RuleProperties.FontEastAsia,

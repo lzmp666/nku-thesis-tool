@@ -101,6 +101,6 @@ public sealed class BackMatterFormatAnalyzerTests
     {
         var result = Analyze("back_matter_compliant.docx");
         Assert.Contains("4.8 表4.7", result.SourceNote);
-        Assert.Contains("draft", result.SourceNote);
+        Assert.Contains("approved", result.SourceNote);
     }
 }

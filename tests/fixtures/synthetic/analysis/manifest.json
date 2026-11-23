@@ -5,13 +5,13 @@
   "samples": [
     {
       "file": "analysis_compliant.docx",
-      "sha256": "4C04EADC02E8DFB063B9BDD6C1B3C9199D065A8F3E910D7F416F9F81F1702FB9",
-      "description": "A4、上下 3.8 cm / 左右 3.2 cm 页边距、宋体 + Times New Roman 12 pt、两端对齐、首行缩进 2 字符、固定值 20 pt。第一章三句正文 + 参考文献一条。",
+      "sha256": "4E5213347369FF664329EF4A1DB1F1FE78B30ED8209D817A31D34468E21E12C1",
+      "description": "A4、上下 3.8 cm / 左右 3.2 cm 页边距、页眉/页脚距边界 3.0 cm、装订线 0 cm、宋体 + Times New Roman 12 pt、两端对齐、首行缩进 2 字符、固定值 20 pt。第一章三句正文 + 参考文献一条。",
       "expected": "analyze 输出 0 条不符合，且「未检查」清单非空（未检查不等于通过）"
     },
     {
       "file": "analysis_noncompliant.docx",
-      "sha256": "3AC84DD5A9628F61828035ABD03E87771BCB6BBE1E5D40DF05EF711CEA40D670",
+      "sha256": "279C38163F36664608C7F42F9630845FB23120E6F00DA56C658D631E3D7A17B1",
       "description": "与合规样本同一个基础文档，只把第一段正文改成黑体 / Arial 10.5 pt、左对齐、0 缩进、单倍行距、段前段后各 6 pt。",
       "expected": "analyze 输出 8 条不符合（字体 2、字号 1、对齐 1、缩进 1、行距 1、段前 1、段后 1）"
     }

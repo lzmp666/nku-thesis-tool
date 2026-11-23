@@ -43,7 +43,7 @@ public sealed record AbstractFormatResult(
 ///   12磅、固定值行距20磅、段前段后0磅，「Key Words」两词加粗（此处按规则原文用 Arial，
 ///   与页眉 Abstract 用 TNR 不是一回事）。
 /// - 只认样式链能展开到的显式值；判不出就列未判定，不拿默认值凑问题数。
-/// - 规则状态为 draft（S1 2025 版条文，待 2026 版全文核验），提示需人工确认。
+/// - 规则状态 approved（S2026 2026 版全文已核验，见 docs/rule-notes/nku-2026-full-verification.md）。
 /// - 不识别「哪一节是摘要」的语义，只按标题文字定位；定位不到就列未检查，不假装合规。
 /// </summary>
 public sealed class AbstractFormatAnalyzer
@@ -51,7 +51,7 @@ public sealed class AbstractFormatAnalyzer
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.5 表4.4（general.yaml R4/R5，来源 S1 2025 版，规则状态 draft，需人工确认）";
+        "南开大学研究生学位论文写作规范 4.5 表4.4（general.yaml R4/R5，来源 S2026 2026 版全文，规则状态 approved，RFC-1/3/4 已按 docs/rule-notes/nku-2026-full-verification.md 定案）";
     private const string RuleVersion = "nku-graduate-general-r4r5-draft";
 
     // 字号：w:sz 是半磅。18pt=36，12pt=24。
