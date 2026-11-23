@@ -10,7 +10,7 @@
 
 | 能力 | 状态 |
 | --- | --- |
-| .NET 10 核心引擎与 CLI | 可运行；CLI 共 22 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、analyze-toc、analyze-captions、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
+| .NET 10 核心引擎与 CLI | 可运行；CLI 共 23 个子命令（analyze、analyze-styles、analyze-figures、analyze-formula、analyze-document、analyze-footnotes、analyze-template、analyze-abstract、analyze-back-matter、analyze-body-text、analyze-headings、analyze-toc、analyze-captions、report、apply-nku-format、apply-figure-format、apply-formula-format、apply-document-format、apply-draft-format、full-format、undo、chat、structure）；`analyze --citations` 另提供参考文献一致性检查模式 |
 | 无样式论文结构与角色排版 | Word 1.5.4 预览：大纲确认、明确勾选范围、原位整篇排版、写后回读与整篇撤销；核心/CLI 保留可选 Ollama 接口 |
 | 中文诊断报告 | 可运行 |
 | 将诊断写入新的 Word 文档副本（批注和黄色高亮） | 可运行；已在 Microsoft Word 桌面版打开验证 |
@@ -194,6 +194,16 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 报告分三部分：**规范问题**、**排版惯例**（不计入规范符合性）、**未检查 / 未判定**——三者严格分列，判不出的不冒充合规。开头列出十二个检查器各自的执行情况；如果某个分析器因文档缺部件而失败，会明确写出错误信息，其余检查照常产出，失败的维度不据此判定合规。所有规则状态均为 **draft**，报告为静态 XML 检查，不替代 Word 实机渲染核验。
 
+## draft 规则保守修正（apply-draft-format）
+
+`apply-draft-format` 是六个 draft 分析器（摘要、标题层级、正文段落、目录、图题表题、尾注部件）的**保守自动修正**后端：只把分析器**已明确判定**问题的维度，机械地对齐到规则期望值。判不出的维度进的是 `NotChecked`、不进 `Issues`，因此绝不会被自动改动；同一段落被多个分析器给出冲突口径时整槽跳过，不猜、不硬判。
+
+```powershell
+dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuration Release --no-build -- apply-draft-format <论文.docx> [输出.docx]
+```
+
+默认输出 `<原名>_draft修正.docx`，并先建撤销快照（可用 `undo` 回滚）。修正后请用 `report` 复核，并在 Word 中实机确认。**规则状态为 draft，本命令的输出不构成规范合规结论**——字体/字号/对齐/行距/段距/缩进等只做「把实际值对齐到 draft 期望值」的机械修正，对齐冲突、序号间距等未决口径保持原样。已用 27 个非合规合成样本验证：修正后对应分析器问题归零、幂等、未判定维度不受影响。
+
 ## 在 Word 中打开插件
 
 完成本机签名和当前用户注册后，重新启动 Microsoft Word，打开一份合成 `.docx`。
@@ -203,12 +213,13 @@ dotnet run --project src/ThesisEngine.Cli/ThesisEngine.Cli.csproj --configuratio
 
 ## 当前范围与限制
 
-- 只检查演示规则覆盖到的 Word 正文普通段落和文本片段；位置是 OOXML 部件及段落/文本片段索引，不是页码。
-- 当前合成规则包括东亚字体、西文字体和字号。即使报告为零问题，也只表示样例中这三项规则没有发现差异。
-- 表格、页眉页脚、脚注尾注、超链接、修订内容、内容控件和无法解析的主题字体等尚未纳入演示覆盖范围。
+- 检查位置是 OOXML 部件及段落索引（部分分析器到文本片段），**不是页码**；页码映射依赖 Word 实机分页，当前无法由静态 XML 精确给出。
+- `report` 已聚合十二个检查器：页面与章节结构、样式使用、图表排版、公式排版、脚注与注释体例、参考文献引用一致性、中英文摘要、尾注部件、正文段落、标题层级、目录、图题表题。每个检查器都严格区分「问题 / 排版惯例 / 未判定」。
+- 仍是静态 XML 层面检查，**依赖渲染的对象位置、题注相对图表的位置、TOC 域展开结果、奇偶页眉内容的实际分页**等维度列为「未判定」，不据以判定合规；超链接、修订内容、内容控件和无法解析的主题字体不在覆盖范围。
+- 自动修正分两类：`full-format` 等既有命令覆盖样式、图表、公式、页面设置；`apply-draft-format` 保守覆盖六个 draft 分析器已明确判定的维度（字体/字号/对齐/行距/段距/缩进），未判定与跨分析器冲突维度一律不改。
 - 同一目标格式的问题及批注合并为一个诊断项，并保留每处位置。确认修复后直接修改当前打开的文档，不会逐项另建或重开结果文档。东亚字体、已解析的 ASCII/HAnsi 西文字体和字号都由修复引擎支持；插件先展示修改预览并要求作者确认。未知格式、无法安全定位的范围仍停止修复。
-- 当前插件仍按本地开发方式注册，尚未提供面向成员的正式安装包或部署流程。
-- 当前规则仅为合成演示规则，不承诺正式规范合规。正式规则需先对照学校发布的规范核验。
+- 当前插件仍按本地开发方式注册；Word 演示包标记为 PREVIEW（人工实机验收未全部记录），不是已验收的正式分发版。
+- 所有规则状态为 **draft**，不承诺正式规范合规。正式规则需先对照学校发布的规范、并由负责人核定；未决口径（标题对齐冲突、序号间距的宽度语义、学院差异等）继续列「未判定」，见 `docs/rule-notes/` 的 RFC 候选。
 
 ## 隐私与样例
 
