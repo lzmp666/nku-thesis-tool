@@ -45,7 +45,7 @@ public sealed record CaptionFormatResult(
 ///   （图题段前 6 / 段后 12 磅，表题段前 6 / 段后 6 磅）。
 /// - 序题间空一个汉字（RFC-3 宽度语义未定义）、题注相对图表对象的位置（图下/表上，渲染依赖）、
 ///   R13 表达式编号（依赖公式对象/渲染）一律列未判定，不据此判合规。
-/// - 判不出的维度列未判定，不拿默认值凑问题数。规则状态 draft，需人工确认。
+/// - 判不出的维度列未判定，不拿默认值凑问题数。规则状态 approved（全文已核验）。
 /// - 问题码用每类 CodeStart + 维度偏移映射，K1–K12 连续。
 /// </summary>
 public sealed class CaptionFormatAnalyzer
@@ -53,7 +53,7 @@ public sealed class CaptionFormatAnalyzer
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.7 表4.6 图题/表题 R12（general.yaml，来源 S1 2025 版，规则状态 draft；对象识别 v1_check:false、RFC-3 待负责人确认）";
+        "南开大学研究生学位论文写作规范 4.7 表4.6 图题/表题 R12（general.yaml，来源 S2026 2026 版全文，规则状态 approved；题注相对对象位置依赖渲染仍列未判定，见 RFC-3 决策）";
     private const string RuleVersion = "nku-graduate-caption-r12-draft";
 
     private const string AutoLineRule = "auto";

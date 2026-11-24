@@ -19,7 +19,7 @@ public sealed class CliRuleAnalysisTests
         Assert.Equal(0, exitCode);
         Assert.Contains("=== 论文格式检查报告（规则分析）===", output.ToString());
         Assert.Contains("R11/font.cn", output.ToString());
-        Assert.Contains("draft", output.ToString());
+        Assert.Contains("approved", output.ToString());
         Assert.DoesNotContain("占位模式", output.ToString(), StringComparison.Ordinal);
         Assert.Equal(string.Empty, error.ToString());
     }

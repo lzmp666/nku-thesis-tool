@@ -11,9 +11,9 @@ public sealed class RuleSetLoaderTests
         var ruleSet = RuleSetLoader.Load("nku-graduate");
 
         Assert.Equal("nku-graduate", ruleSet.ProfileId);
-        Assert.Equal("general-draft", ruleSet.RuleVersion);
-        Assert.Equal("draft", ruleSet.Status);
-        Assert.True(ruleSet.IsDraft);
+        Assert.Equal("general", ruleSet.RuleVersion);
+        Assert.Equal("approved", ruleSet.Status);
+        Assert.False(ruleSet.IsDraft);
         Assert.Empty(ruleSet.Warnings);
         Assert.True(ruleSet.Rules.Count >= 100);
         Assert.Equal(ruleSet.Rules.Count, ruleSet.Rules.Select(rule => rule.RuleId).Distinct(StringComparer.Ordinal).Count());

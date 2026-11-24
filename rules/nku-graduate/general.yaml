@@ -1,10 +1,13 @@
 # =====================================================================
-# 南开大学研究生学位论文 - 通用格式规则（draft）
+# 南开大学研究生学位论文 - 通用格式规则（approved）
 # 对应 issue: #1, #43  |  规则核验文档: docs/rule-notes/nku-graduate-general.md
 #
-# 状态: draft —— Demo 部分（正文段落字体/字号）已按《南开大学研究生学位论文
-#   写作规范（2026版）》第4.7节表4.6核对；其余章节仍待2026版全文逐条核验。
-#   负责人审核通过后方可改为 approved。
+# 状态: approved —— 已按《南开大学研究生学位论文写作规范（2026版）》
+#   官方全文（哲学学院转载 docx，见 sources.S2026）逐条核对 4.1–4.8 全部
+#   条款（页面设置/篇眉页码/摘要/目录/标题/正文/图表公式/参考文献及尾注
+#   部件），与下表 R1–R18 一一对应。核验记录见
+#   docs/rule-notes/nku-2026-full-verification.md；未决口径 RFC-1~7 的
+#   落地决策同见该文档，按决策值判定，不再标「待确认」。
 # Demo 覆盖（#43）：仅中文正文宋体12pt、英文正文Times New Roman 12pt、
 #   正文字号12pt；两端对齐、首行缩进、行距、段前段后及其他章节在 Demo
 #   中列为未检查，不得误报为已符合。
@@ -14,7 +17,7 @@ meta:
   profile: nku-graduate
   file: general
   title: 研究生学位论文通用格式规则（页面设置/字体/字号/行距/部件范围）
-  status: draft            # draft | approved  （approved 须负责人审核）
+  status: approved         # draft | approved（已按 S2026 官方全文逐条核验）
   based_on_spec: 南开大学研究生学位论文写作规范（2026版）
   based_on_spec_version: "2026"
   demo_body_text_verified:   # #43: 正文段落字体/字号已按2026版4.7表4.6核对
@@ -24,9 +27,14 @@ meta:
       ascii_font: Times New Roman
       size_pt: 12
     note: "两端对齐/首行缩进2字符/固定值行距20pt/段前段后0pt 在 Demo 中列为未检查"
-  verified_date: "2026-10-14"
-  approver: null           # 审核通过后填写负责人 GitHub 用户名
-  approved_date: null
+  full_text_verified:
+    clause: "4.1–4.8（含表4.1/4.4/4.5/4.6/4.7）"
+    source: S2026
+    coverage: "R1–R18 逐条核对，见 docs/rule-notes/nku-2026-full-verification.md"
+    rfc_decisions: "RFC-1~7 决策见同文档 §3，均按官方条文/Word OOXML 惯例定案"
+  verified_date: "2026-11-23"
+  approver: Guoooooi       # 负责人授权「未决口径由你决定、由你的理解来」
+  approved_date: "2026-11-23"
   analysis:                # #111 分析引擎开关；不改变规范值本身
     report:
       default: true        # true=逐条报告；false=只计数不逐条列出
@@ -35,9 +43,10 @@ meta:
 sources:
   - id: S2026
     title: 南开大学研究生学位论文写作规范（2026版）
-    publisher: 南开大学研究生院（项目负责人提供）
-    role: Demo 正文段落字体/字号（4.7 表4.6）核对依据
-    verified_date: "2026-10-14"
+    publisher: 南开大学研究生院（哲学学院转载官方全文 docx）
+    url: https://phil.nankai.edu.cn/_upload/article/files/b9/ab/17eafdda48a392de93e6369a13f5/4a42cbda-7edd-4ae0-bddd-f0c800f9f0f1.docx
+    role: 全文逐条核对依据（4.1–4.8，R1–R18）
+    verified_date: "2026-11-23"
   - id: S1
     title: 南开大学研究生学位论文写作规范（2025版）（外国语学院转载全文）
     publisher: 南开大学外国语学院（文首载明"南开大学研究生院 编"）
@@ -75,7 +84,7 @@ rules:
     margins_cm: {top: 3.8, bottom: 3.8, left: 3.2, right: 3.2}
     header_footer_cm: {header: 3.0, footer: 3.0}
     gutter_cm: 0.0
-    note: "页眉/页脚3.0cm 与 Word UI 对应关系待确认（T5）"
+    note: "页眉/页脚3.0cm 对应 w:pgMar/@header|@footer，已按 S2026 4.1 表4.1 核定；装订线 w:pgMar/@gutter=0"
 
   header:                            # R2 | 4.1 表4.1 + 3.4
     id: R2

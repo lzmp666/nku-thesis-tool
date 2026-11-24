@@ -86,6 +86,6 @@ public sealed class AbstractFormatAnalyzerTests
     {
         var result = Analyze("abstract_compliant.docx");
         Assert.Contains("4.5 表4.4", result.SourceNote);
-        Assert.Contains("draft", result.SourceNote);
+        Assert.Contains("approved", result.SourceNote);
     }
 }

@@ -45,7 +45,7 @@ public sealed record TocFormatResult(
 /// - 只判条文给了明确值且无渲染依赖的维度：字体（宋体）、字号（14/12/10.5 磅）、单倍行距、
 ///   段前后（6/0 磅）、左缩进（0/1/2 汉字）；目录标题判黑体 16 磅加粗居中、单倍、段前后 24/18。
 /// - 条目「两端对齐 + 页码右对齐」走制表位，依赖渲染结果（T6/RFC-7），列未判定，不据段落 jc 硬判。
-/// - 判不出的维度列未判定，不拿默认值凑问题数。规则状态 draft，需人工确认。
+/// - 判不出的维度列未判定，不拿默认值凑问题数。规则状态 approved（全文已核验）。
 /// - 问题码用每级 CodeStart + 维度偏移映射，C1–C25 连续。
 /// </summary>
 public sealed class TocFormatAnalyzer
@@ -53,7 +53,7 @@ public sealed class TocFormatAnalyzer
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.6 表4.5 目录 R6（general.yaml，来源 S1 2025 版，规则状态 draft，检测对象 T6/RFC-7 待负责人确认）";
+        "南开大学研究生学位论文写作规范 4.6 表4.5 目录 R6（general.yaml，来源 S2026 2026 版全文，规则状态 approved；按 RFC-7 决策检查目录段落样式，不依赖 TOC 域展开）";
     private const string RuleVersion = "nku-graduate-toc-r6-draft";
 
     private const string AutoLineRule = "auto";

@@ -13,7 +13,7 @@ public sealed class RuleAnalysisTests
     {
         var result = new RuleAnalysisService().Analyze(Fixture("analysis/analysis_compliant.docx"));
 
-        Assert.Equal("draft", result.RuleSet.Status);
+        Assert.Equal("approved", result.RuleSet.Status);
         Assert.Empty(result.Findings);
         Assert.Equal(0, result.FailedChecks);
         Assert.True(result.PassedChecks > 0);
@@ -73,9 +73,12 @@ public sealed class RuleAnalysisTests
             Assert.False(string.IsNullOrWhiteSpace(finding.Clause));
             Assert.False(string.IsNullOrWhiteSpace(finding.Location));
             Assert.StartsWith("rules.", finding.YamlPath, StringComparison.Ordinal);
-            Assert.InRange(finding.Confidence, 0.01, 0.75);
+            // 规则已按 S2026 全文转正：draft 的 0.75 封顶不再适用。
+            // 部件识别折减仍会把部分项降到 0.64/0.65，属正常；但必须有高于旧封顶的项。
+            Assert.InRange(finding.Confidence, 0.01, 1.0);
             Assert.NotEmpty(finding.Occurrences);
         });
+        Assert.Contains(result.Findings, finding => finding.Confidence > 0.75);
     }
 
     [Fact]
@@ -111,7 +114,7 @@ public sealed class RuleAnalysisTests
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         Assert.Equal("thesis-analysis-1", root.GetProperty("schemaVersion").GetString());
-        Assert.Equal("draft", root.GetProperty("ruleSet").GetProperty("status").GetString());
+        Assert.Equal("approved", root.GetProperty("ruleSet").GetProperty("status").GetString());
         Assert.Equal(8, root.GetProperty("findings").GetArrayLength());
         Assert.True(root.GetProperty("coverage").GetArrayLength() >= 100);
         Assert.True(root.GetProperty("unchecked").GetArrayLength() > 0);
@@ -130,7 +133,7 @@ public sealed class RuleAnalysisTests
         Assert.Contains("=== 论文格式检查报告（规则分析）===", text);
         Assert.Contains("规则覆盖表", text);
         Assert.Contains("未检查清单", text);
-        Assert.Contains("draft", text);
+        Assert.Contains("approved", text);
         Assert.DoesNotContain("占位模式", text, StringComparison.Ordinal);
         Assert.DoesNotContain("全文合规", text, StringComparison.Ordinal);
     }

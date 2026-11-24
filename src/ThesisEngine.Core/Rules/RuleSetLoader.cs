@@ -209,10 +209,23 @@ public static class RuleSetLoader
 
     private static string? ResolveFlatObject(string property, IReadOnlyList<string> scope)
     {
-        if (string.Equals(property, "page_margins", StringComparison.Ordinal)) return AnalysisObjectKinds.Page;
-        if (scope.Contains("body", StringComparer.Ordinal)) return AnalysisObjectKinds.BodyText;
-        if (scope.Contains("heading", StringComparer.Ordinal)) return AnalysisObjectKinds.HeadingChapter;
+        if (string.Equals(property, "page_margins", StringComparison.Ordinal) ||
+            string.Equals(property, "page_gutter", StringComparison.Ordinal) ||
+            string.Equals(property, "page_header_footer", StringComparison.Ordinal) ||
+            string.Equals(property, "page_paper", StringComparison.Ordinal))
+            return AnalysisObjectKinds.Page;
         if (scope.Contains("section", StringComparer.Ordinal)) return AnalysisObjectKinds.Page;
+        if (scope.Contains("abstract_cn", StringComparer.Ordinal)) return AnalysisObjectKinds.AbstractCnBody;
+        if (scope.Contains("abstract_en", StringComparer.Ordinal)) return AnalysisObjectKinds.AbstractEnBody;
+        if (scope.Contains("toc", StringComparer.Ordinal)) return AnalysisObjectKinds.TocTitle;
+        if (scope.Contains("reference", StringComparer.Ordinal)) return AnalysisObjectKinds.ReferencesBody;
+        if (scope.Contains("appendix", StringComparer.Ordinal)) return AnalysisObjectKinds.AppendixBody;
+        if (scope.Contains("acknowledgement", StringComparer.Ordinal)) return AnalysisObjectKinds.AcknowledgementBody;
+        if (scope.Contains("symbol_table", StringComparer.Ordinal)) return AnalysisObjectKinds.SymbolTable;
+        if (scope.Contains("caption", StringComparer.Ordinal)) return AnalysisObjectKinds.Caption;
+        if (scope.Contains("cover", StringComparer.Ordinal)) return AnalysisObjectKinds.Cover;
+        if (scope.Contains("heading", StringComparer.Ordinal)) return AnalysisObjectKinds.HeadingChapter;
+        if (scope.Contains("body", StringComparer.Ordinal)) return AnalysisObjectKinds.BodyText;
         return null;
     }
 
@@ -228,6 +241,23 @@ public static class RuleSetLoader
             "font_size" => (RuleProperties.FontSize, true),
             "line_spacing" => (RuleProperties.LineSpacing, true),
             "page_margins" => (RuleProperties.PageMargins, true),
+            "alignment" => (RuleProperties.Alignment, true),
+            "space_before" => (RuleProperties.SpaceBefore, true),
+            "space_after" => (RuleProperties.SpaceAfter, true),
+            "first_line_indent" => (RuleProperties.FirstLineIndent, true),
+            "bold" => (RuleProperties.Bold, true),
+            "keyword_bold" => (RuleProperties.KeywordBold, true),
+            "page_paper" => (RuleProperties.PagePaper, true),
+            "page_header_footer" => (RuleProperties.PageHeaderFooter, true),
+            "page_gutter" => (RuleProperties.PageGutter, true),
+            // 以下属性有 schema 定义且值可规范化，但 ThesisRuleAnalyzer 尚无对应判据：
+            // 保持 scriptSupported=false，让报告如实写"未实现"，不冒充合规。
+            "numbering" => (RuleProperties.Numbering, false),
+            "toc_entries" => (RuleProperties.TocEntries, false),
+            "heading_reuse" => (RuleProperties.HeadingReuse, false),
+            "caption" => (RuleProperties.Caption, false),
+            "equation" => (RuleProperties.Equation, false),
+            "cover" => (RuleProperties.Cover, false),
             _ => (RuleProperties.Unknown, false)
         };
     }
@@ -242,6 +272,12 @@ public static class RuleSetLoader
             RuleProperties.LineSpacing when unit == "multiple" => "多倍行距 " + value,
             RuleProperties.LineSpacing when unit == "pt" => "固定值 " + value + "pt",
             RuleProperties.PageMargins => "页边距 " + value + "cm",
+            RuleProperties.PageGutter => value + "cm",
+            RuleProperties.PageHeaderFooter => value + "cm",
+            RuleProperties.SpaceBefore => value + "pt",
+            RuleProperties.SpaceAfter => value + "pt",
+            RuleProperties.FirstLineIndent => value + " 字符",
+            RuleProperties.Bold when valueNode is YamlScalar b => b.Value is true ? "加粗" : "不加粗",
             _ => value
         };
     }
@@ -316,6 +352,9 @@ public static class RuleSetLoader
             }
             if (property == RuleProperties.PageMargins)
                 return string.Join(",", new[] { "top", "bottom", "left", "right" }
+                    .Select(key => map.GetString(key) ?? "0"));
+            if (property == RuleProperties.PageHeaderFooter)
+                return string.Join(",", new[] { "header", "footer" }
                     .Select(key => map.GetString(key) ?? "0"));
             return JoinMap(map);
         }

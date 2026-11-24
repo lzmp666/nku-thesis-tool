@@ -38,7 +38,7 @@ public sealed record BodyTextFormatResult(
 /// - 标题段落、图表题注、表格内段落不是正文，跳过；这些各有专属规则。
 /// - 含数学表达式的段落按条文豁免行距（「可根据表达需要设置该段的行距」），但对齐/缩进/段距照查。
 /// - 只认样式链能展开到的显式值；判不出列未判定，不拿默认值凑问题数。
-/// - 规则状态 draft（#43 已按 2026 版核对），提示需人工确认。
+/// - 规则状态 approved（#43 已按 2026 版核对，全文已核验）。
 /// </summary>
 public sealed class BodyTextFormatAnalyzer
 {
@@ -46,7 +46,7 @@ public sealed class BodyTextFormatAnalyzer
     private static readonly XNamespace M = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.7 表4.6（general.yaml R11，来源 S2026 2026 版，#43 已核对，规则状态 draft，需人工确认）";
+        "南开大学研究生学位论文写作规范 4.7 表4.6（general.yaml R11，来源 S2026 2026 版全文，#43 已核对，规则状态 approved，RFC-1/4 已定案）";
     private const string RuleVersion = "nku-graduate-body-r11-layout-draft";
 
     // 行距/段距单位 twips：固定值 20 磅 = 400；1 磅 = 20 twips。

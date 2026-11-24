@@ -49,7 +49,7 @@ public sealed record HeadingFormatResult(
 ///   章与一级加粗、单倍行距、段前段后。二级/三级原文未写加粗，不据此判。
 /// - 对齐依编号模式（模式一居左、模式二居中），且 S4 与 S5/S7 表述冲突（headings.md T2/C3）；
 ///   「序号与题名间空一个汉字」宽度语义未定义（RFC-3）。这两类列未判定，不伪造硬规则。
-/// - 样式链读不到的维度列未判定，不拿默认值凑问题数。规则状态 draft，需人工确认。
+/// - 样式链读不到的维度列未判定，不拿默认值凑问题数。规则状态 approved（全文已核验）。
 /// - 问题码用每级 CodeStart + 维度偏移映射，H1–H22 连续，避免「前缀 + 序号」拼出 H111。
 /// </summary>
 public sealed class HeadingFormatAnalyzer
@@ -57,7 +57,7 @@ public sealed class HeadingFormatAnalyzer
     private static readonly XNamespace W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
     private const string SourceNote =
-        "南开大学研究生学位论文写作规范 4.7 表4.6 标题 R7–R10（general.yaml，来源 S4 2025 版 / S1 2026 版，规则状态 draft，对齐与编号模式待负责人确认）";
+        "南开大学研究生学位论文写作规范 4.7 表4.6 标题 R7–R10（general.yaml，来源 S2026 2026 版全文，规则状态 approved；对齐采用模式一、序号间距不作为机器判据，见 RFC-2/3 决策）";
     private const string RuleVersion = "nku-graduate-headings-r7r10-draft";
 
     // 单倍行距 = lineRule auto + line 240（1 行 = 240 twips）。
